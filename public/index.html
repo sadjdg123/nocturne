@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#06080D" />
     <title>夜曲起始页</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="site.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="夜曲" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="stylesheet" href="fonts/fonts.css" />
     <!--nocturne:boot-->
     <style>
@@ -27,9 +34,23 @@
         if (N.stale) de.classList.add("nc-loading");
       })();
     </script>
-    <link rel="stylesheet" href="hark.css" />
-    <link rel="stylesheet" href="hark-hero.css" />
     <style>
+      /* Base reset — the only rules the page used from the retired hark.css, inlined verbatim (values resolved) */
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-behavior: smooth; }
+      @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+      body { margin: 0; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+      img { max-width: 100%; display: block; }
+      a { color: inherit; }
+      b, strong { font-weight: 600; }
+      p { margin: 0; text-wrap: pretty; }
+      h1, h2, h3 { margin: 0; text-wrap: balance; }
+      small { font-size: max(12px, .85em); }
+      :focus-visible { outline: 2px solid light-dark(#1d1d1f, #f5f5f7); outline-offset: 3px; border-radius: 6px; }
+      .page { max-width: 1120px; margin: 0 auto; padding-inline: clamp(16px, 3vw, 32px); padding-block: 12px 40px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+      .dot { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font: 500 12px/1.3 "GT Standard", "GT Standard L", "Geist", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; color: light-dark(#1d1d1f, #f5f5f7); }
+      .dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #00a665; }
       [hidden] { display: none !important; }
       html { overflow-x: clip; background: #06080D; }
       body.x-body {
@@ -37,7 +58,7 @@
         --x-glass: rgba(14, 18, 28, .55); --x-line: rgba(255, 240, 220, .10);
         --x-blur: blur(18px) saturate(140%);
         --x-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-        --x-serif: "Noto Serif SC", "Songti SC", serif;
+        --x-serif: "Noto Serif SC", "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif;
         --x-dock: 64px;
         background: transparent; color: var(--x-text); font: 400 15px/1.5 var(--x-ui);
         min-height: 100dvh; overflow-x: clip;
@@ -124,7 +145,7 @@
 
       .x-toast { position: fixed; z-index: 30; left: 50%; bottom: calc(10px + var(--x-dock) + 12px + env(safe-area-inset-bottom));
         transform: translate(-50%, 8px); opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease;
-        max-width: calc(100% - 32px); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; min-height: 44px; border-radius: 22px; font-size: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+        width: max-content; max-width: calc(100% - 32px); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; min-height: 44px; border-radius: 22px; font-size: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
       .x-toast.is-on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
       .x-toast button { height: 32px; padding: 0 12px; border-radius: 16px; border: 0; background: rgba(233, 178, 106, .16); color: var(--x-amber); font: 600 13px var(--x-ui); cursor: pointer; flex: none; }
 
@@ -133,7 +154,8 @@
         .x-bg--m { display: none; } .x-bg--d { display: block; }
         .x-wrap { padding-top: 12px; gap: 30px; }
         .x-hero { padding-top: 28px; }
-        .x-clock { font-size: 120px; }
+        /* fluid: 72px on tablets → 104px on wide screens, no jump at the two-column breakpoint */
+        .x-clock { font-size: clamp(72px, 8vw, 104px); line-height: 1.08; }
         .x-date { font-size: 15px; }
         .x-greet { font-size: 21px; }
         .x-search { width: min(100%, 640px); margin: 0 auto; }
@@ -312,6 +334,8 @@
       .x-tile > .dot.on { background: #7CC9A6; box-shadow: 0 0 0 3px rgba(124, 201, 166, .16), 0 0 8px rgba(124, 201, 166, .65); }
       .x-tile > .dot.off { background: #D66A5A; }
       .x-tile > .dot.checking { background: #8A90A0; }
+      .x-tile > .dot.auth { background: var(--x-amber); box-shadow: 0 0 0 3px rgba(233, 178, 106, .16), 0 0 8px rgba(233, 178, 106, .55); }
+      .x-sline.is-alloff { color: var(--x-mist); }
       @keyframes x-pulse { 50% { opacity: .3; } }
       .x-side { display: grid; gap: 14px; align-content: start; min-width: 0; }
       .x-card { border-radius: 20px; padding: 16px 18px; min-width: 0; }
@@ -335,11 +359,6 @@
       /* visually hidden: clipped to zero area at its natural size, so nothing overflows and the text keeps a readable size */
       .x-sr { position: absolute; top: 0; left: 0; width: max-content; max-width: 90vw; height: auto; padding: 0; margin: 0; overflow: visible;
         clip: rect(0 0 0 0); clip-path: inset(50%); border: 0; font-size: 12px; line-height: 1.4; pointer-events: none; z-index: -1; }
-      @media (min-width: 1024px) {
-        .x-wrap { grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; }
-        .x-wrap > .x-head, .x-wrap > .x-hero, .x-wrap > .x-search { grid-column: 1 / -1; }
-        .x-side { position: sticky; top: 16px; align-self: start; }
-      }
       @media (prefers-reduced-motion: no-preference) { .x-tile > .dot.checking { animation: x-pulse 1.2s ease-in-out infinite; } }
       @media (prefers-reduced-motion: reduce) { .x-ring .fg, .x-rt { transition: none; } }
     </style>
@@ -383,7 +402,6 @@
 
     <div class="x-toast x-glass" id="x-toast" role="status" aria-live="polite"><span id="x-toast-msg"></span><button type="button" id="x-toast-act" hidden></button></div>
 
-    <script src="hark.js"></script>
     <script src="Sortable.min.js"></script>
     <script>
       (function () {
@@ -1251,13 +1269,13 @@
           nw.querySelector("span").textContent = NAMES[n];
         }
         function apply() {
-          var m = all(), ids = [], on = 0, pend = 0, off = [];
+          var m = all(), ids = [], on = 0, pend = 0, off = [], auth = 0;
           groupsEl.querySelectorAll(".x-tile[data-id], .x-chip[data-id]").forEach(function (el) {
             var e = m[el.getAttribute("data-id")]; if (!e) return;
             el.setAttribute("href", A.url(e.item));
             var d = el.querySelector(":scope > .dot"); if (!d) return;
             var r = stat.get(e.item.id) || { s: "checking" };
-            var t = r.s === "on" ? "在线" + (r.ms != null ? " · " + r.ms + "ms" : "") : r.s === "off" ? "离线" : "检测中";
+            var t = r.s === "on" ? "在线" + (r.ms != null ? " · " + r.ms + "ms" : "") : r.s === "auth" ? "在线 · 需登录" : r.s === "off" ? (r.blocked ? "未检测 · 服务器不探测这个地址" : "离线") : "检测中";
             d.className = "dot " + r.s; d.title = t;
             el.title = (e.item.desc ? e.item.desc + " · " : "") + t;
           });
@@ -1265,14 +1283,15 @@
             if (!m[id].icon) return;
             ids.push(id);
             var r = stat.get(id);
-            if (!r || r.s === "checking") pend++; else if (r.s === "on") on++; else off.push(m[id].item.title);
+            if (!r || r.s === "checking") pend++; else if (r.s === "on") on++; else if (r.s === "auth") { on++; auth++; } else off.push(m[id].item.title);
           });
           var total = ids.length, sl = side.querySelector(".x-sline");
           side.querySelector(".x-cnt").innerHTML = total ? on + " / " + total + "<small>在线</small>" : "0<small>个服务</small>";
           fg.style.strokeDashoffset = C * (1 - (total ? on / total : 0));
           if (pend) { sl.className = "x-sline"; sl.textContent = "检测中…"; }
+          else if (off.length && off.length === total) { sl.className = "x-sline is-alloff"; sl.textContent = "全部离线——可能是地址还没填，或当前网络到不了这些服务"; }
           else if (off.length) { sl.className = "x-sline is-off"; sl.textContent = "离线：" + off.join("、"); }
-          else { sl.className = "x-sline is-ok"; sl.textContent = total ? "全部正常" : "还没有图标服务"; }
+          else { sl.className = "x-sline is-ok"; sl.textContent = total ? (auth ? "全部在线 · " + auth + " 个需登录" : "全部正常") : "还没有图标服务"; }
         }
         function renderRecent() {
           var m = all(), rc = (A.state.recent || []).filter(function (id) { return m[id]; }).slice(0, 4);
@@ -1314,7 +1333,8 @@
             (A.statusFor ? A.statusFor(it, local) : local()).then(function (r) {
               if (g !== gen) return;
               var ok = r && typeof r === "object" ? !!r.ok : !!r, ms = r && typeof r === "object" && r.ms != null ? r.ms : Math.round(performance.now() - t0);
-              stat.set(it.id, ok ? { s: "on", ms: ms } : { s: "off" });
+              var needLogin = r && typeof r === "object" && (r.auth || r.code === 401 || r.code === 403);
+              stat.set(it.id, ok ? { s: needLogin ? "auth" : "on", ms: ms } : { s: "off", blocked: !!(r && r.blocked) });
               active--; left--; apply();
               if (left) next(); else finish();
             });
@@ -1324,7 +1344,7 @@
         }
         function finish() {
           var m = all(), on = 0, off = 0;
-          Object.keys(m).forEach(function (id) { if (!m[id].icon) return; var r = stat.get(id); if (r && r.s === "on") on++; else off++; });
+          Object.keys(m).forEach(function (id) { if (!m[id].icon) return; var r = stat.get(id); if (r && (r.s === "on" || r.s === "auth")) on++; else off++; });
           live.textContent = "";
           setTimeout(function () { live.textContent = on + " 个服务在线，" + off + " 个离线"; }, 50);
         }
@@ -1432,7 +1452,9 @@
         var imgs = [].slice.call(document.querySelectorAll(".x-bg")), shade = document.querySelector(".x-shade");
         var layer = document.createElement("div"); layer.className = "x-wp"; layer.hidden = true; shade.before(layer);
         function applyWp(w) {
-          var bg = w.id === "custom" && w.url ? 'url("' + String(w.url).replace(/["\\\n]/g, encodeURIComponent) + '") center / cover no-repeat' : w.id === "custom" ? "" : (WP[w.id] || WP.star)[1];
+          // file:true → 存在 NAS 上的自定义壁纸（/api/wallpaper）；纯静态页没有后端时退回默认壁纸
+          var src = w.id !== "custom" ? "" : w.file ? (A.wallpaperUrl ? A.wallpaperUrl(w) : "") : w.url;
+          var bg = src ? 'url("' + String(src).replace(/["\\\n]/g, encodeURIComponent) + '") center / cover no-repeat' : w.id === "custom" ? "" : (WP[w.id] || WP.star)[1];
           layer.style.background = bg; layer.hidden = !bg;
           var f = w.blur > 0 ? "blur(" + w.blur + "px)" : "";
           imgs.concat(layer).forEach(function (e) { e.style.filter = f; e.style.transform = f ? "scale(1.08)" : ""; });
@@ -1558,7 +1580,7 @@
           else if (t.hasAttribute("data-wpurl")) {
             var u = t.value.trim();
             if (u && !/^https?:\/\//i.test(u)) { A.toast("请输入 http(s) 开头的图片网址"); return; }
-            set(function (s) { s.wallpaper = Object.assign(wp(), u ? { id: "custom", url: u } : { id: "star", url: "" }); }, "wallpaper");
+            set(function (s) { s.wallpaper = Object.assign(wp(), u ? { id: "custom", url: u, file: false } : { id: "star", url: "", file: false }); }, "wallpaper");
           } else if (t.type === "file") { pick(t.files && t.files[0]); t.value = ""; }
         });
         function pick(file) {
@@ -1567,11 +1589,21 @@
           im.onerror = function () { URL.revokeObjectURL(src); A.toast("无法读取这张图片"); };
           im.onload = function () {
             URL.revokeObjectURL(src);
-            var k = Math.min(1, 2000 / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement("canvas");
+            var up = A.uploadWallpaper; // 有 NAS 后端：传文件，配置里只存引用
+            var k = Math.min(1, (up ? 2560 : 2000) / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement("canvas");
             c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
             c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+            if (up) {
+              c.toBlob(function (blob) {
+                if (!blob) { A.toast("无法读取这张图片"); return; }
+                up(blob).then(function (v) {
+                  set(function (s) { s.wallpaper = Object.assign(wp(), { id: "custom", file: true, v: v, url: "" }); }, "wallpaper");
+                }, function (e) { A.toast(e && e.message ? "壁纸上传失败：" + e.message : "壁纸上传失败"); });
+              }, "image/jpeg", 0.85);
+              return;
+            }
             var url = c.toDataURL("image/jpeg", 0.85), probe = structuredClone(A.state);
-            probe.settings.wallpaper = Object.assign(wp(), { id: "custom", url: url });
+            probe.settings.wallpaper = Object.assign(wp(), { id: "custom", url: url, file: false });
             try { localStorage.setItem("yeqv.v1", JSON.stringify(probe)); }
             catch (err) { if (/quota/i.test(err.name) || err.code === 22) { A.toast("图片太大，换一张小点的"); return; } }
             set(function (s) { s.wallpaper = probe.settings.wallpaper; }, "wallpaper");
@@ -1768,17 +1800,17 @@
       })();
     </script>
     <style>
-      /* Desktop pass · layout ≥1024px (mobile untouched) + ⌘K command palette */
+      /* Desktop pass · two-column layout ≥900px (tablet landscape + desktop; mobile <768 untouched) + ⌘K command palette */
       .x-kbd, .x-offl { display: none; }
-      @media (min-width: 1024px) {
+      @media (min-width: 900px) {
         /* wallpaper always covers: fixed layers sized to the viewport, plus a document-height fallback under them */
         html:has(.x-bg--d:not([style*="hidden"])) { background: linear-gradient(180deg, rgba(6, 8, 13, .45), rgba(6, 8, 13, .8)), url(bg-desktop.jpg) center top / cover no-repeat, #06080D; }
         .x-bg, .x-wp, .x-shade { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100lvh; object-fit: cover; }
 
         .page { max-width: none; padding-inline: 0; }
         .x-wrap { box-sizing: border-box; max-width: 1280px; padding: 8px 32px 0; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; row-gap: 20px; }
+        .x-wrap > .x-head, .x-wrap > .x-hero, .x-wrap > .x-search { grid-column: 1 / -1; }
         .x-hero { padding-top: 0; }
-        .x-clock { font-size: 96px; line-height: 1.08; }
         .x-date { margin-top: 10px; }
         .x-greet { margin-top: 4px; font-size: 20px; }
         .x-search { width: min(100%, 600px); gap: 12px; }
@@ -1789,7 +1821,7 @@
           box-shadow: inset 0 1px 0 rgba(255, 240, 220, .04); }
         .x-group:has(> .x-chips), .x-group:has(.x-grid > a:nth-of-type(4)), .x-groups > .x-eaddg { grid-column: 1 / -1; }
         .x-gtitle { margin-bottom: 14px; font-size: 16px; }
-        .x-grid { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
+        .x-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; } /* ≥120px: icon + name + desc fit inside the square tile */
         .x-tile { aspect-ratio: 1 / 1; min-height: 0; padding: 14px 10px 12px; gap: 7px; border-radius: 18px; cursor: pointer;
           transition: transform .22s cubic-bezier(.2, .7, .2, 1), border-color .22s ease, background .22s ease, box-shadow .22s ease; }
         .x-tile .x-ic { width: 50px; height: 50px; border-radius: 13px; }
@@ -1803,7 +1835,7 @@
         .x-group.x-flash { animation: x-flash 1.2s ease; }
 
         /* sidebar */
-        .x-side { position: sticky; top: 20px; gap: 16px; }
+        .x-side { position: sticky; top: 20px; align-self: start; gap: 16px; }
         .x-card { padding: 18px 20px; }
         .x-ring { width: 56px; height: 56px; }
         .x-ring .bg { stroke: rgba(255, 240, 220, .16); stroke-width: 3; }
@@ -1814,8 +1846,11 @@
         .x-offl:not([hidden]) { display: block; margin-top: 14px; }
         .x-offl p { margin: 0 0 8px; font: 500 12px/1.4 var(--x-ui); color: var(--x-mist); letter-spacing: .06em; }
         .x-offl ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-        .x-offl li { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 28px; padding: 0 11px 0 9px; border-radius: 14px;
-          background: rgba(226, 109, 90, .08); border: 1px solid rgba(226, 109, 90, .18); font-size: 12.5px; color: #EBC9C2; }
+        .x-offl li { display: flex; max-width: 100%; }
+        .x-offl li a { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 28px; padding: 0 11px 0 9px; border-radius: 14px;
+          background: rgba(226, 109, 90, .08); border: 1px solid rgba(226, 109, 90, .18); font-size: 12.5px; color: #EBC9C2; text-decoration: none; cursor: pointer;
+          transition: background .2s ease, border-color .2s ease; }
+        .x-offl li a:hover { background: rgba(226, 109, 90, .16); border-color: rgba(226, 109, 90, .4); }
         .x-offl li i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: #E26D5A; }
         .x-offl li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1881,17 +1916,20 @@
           var card = sline.closest(".x-card"), offl = document.createElement("div");
           offl.className = "x-offl"; offl.hidden = true; sline.after(offl);
           var drawOff = function () {
-            var off = sline.classList.contains("is-off"), names = [];
+            var off = sline.classList.contains("is-off") || sline.classList.contains("is-alloff"), items = [];
             if (off) {
               var m = {}; A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { m[i.id] = i; }); });
               groupsEl.querySelectorAll(".x-tile[data-id] > .dot.off").forEach(function (d) {
-                var i = m[d.parentNode.getAttribute("data-id")]; if (i) names.push(i.title);
+                var i = m[d.parentNode.getAttribute("data-id")]; if (i) items.push(i);
               });
-              if (!names.length) names = sline.textContent.replace(/^离线：/, "").split("、");
             }
             card.classList.toggle("has-off", off);
-            offl.hidden = !off;
-            offl.innerHTML = off ? "<p>离线 · " + names.length + "</p><ul>" + names.map(function (n) { return '<li title="' + esc(n) + '"><i aria-hidden="true"></i><span>' + esc(n) + "</span></li>"; }).join("") + "</ul>" : "";
+            offl.hidden = !items.length;
+            // 点芯片 = 点图标：按当前内网/外网打开，并记入「最近使用」（data-rid）
+            offl.innerHTML = items.length ? "<p>离线 · " + items.length + "</p><ul>" + items.map(function (i) {
+              var u = A.url(i);
+              return '<li><a href="' + esc(u) + '"' + (u === "#" ? "" : ' target="_blank" rel="noopener"') + ' data-rid="' + esc(i.id) + '" title="打开 ' + esc(i.title) + '"><i aria-hidden="true"></i><span>' + esc(i.title) + "</span></a></li>";
+            }).join("") + "</ul>" : "";
           };
           new MutationObserver(drawOff).observe(sline, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class"] });
           drawOff();
@@ -1908,7 +1946,7 @@
         body.append(back, pal);
         var inp = pal.querySelector("input"), list = pal.querySelector(".x-cmdk-list");
 
-        /* search-box hint (CSS shows it ≥1024px only) */
+        /* search-box hint (CSS shows it ≥900px only) */
         var bar = document.querySelector(".x-bar");
         if (bar) {
           var kb = document.createElement("kbd"); kb.className = "x-kbd"; kb.title = "命令面板"; kb.textContent = MOD + "K";
