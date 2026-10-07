@@ -21,6 +21,32 @@
       });
     });
   }
+  /* ---------------------------------------------- 自定义壁纸（存 NAS 文件） */
+  A.wallpaperUrl = function (w) { return "api/wallpaper?v=" + encodeURIComponent(w && w.v || 0); };
+  /** 上传图片 Blob（jpeg/png/webp），成功返回版本号 v */
+  A.uploadWallpaper = function (blob) {
+    return fetch("api/wallpaper", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": blob.type || "image/jpeg" }, body: blob }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok) { var e = new Error(d.error || ("HTTP " + r.status)); e.status = r.status; throw e; }
+        return d.v;
+      });
+    });
+  };
+  /** 旧配置里的 data URL 壁纸：先传成文件，再改写本机配置（避免把几 MB 的 JSON 推给服务器） */
+  var wpMigrating = null;
+  function migrateLocalWallpaper() {
+    var w = A.state.settings && A.state.settings.wallpaper;
+    if (!w || typeof w.url !== "string" || w.url.indexOf("data:") !== 0) return Promise.resolve(false);
+    if (wpMigrating) return wpMigrating;
+    var dataUrl = w.url;
+    wpMigrating = fetch(dataUrl).then(function (r) { return r.blob(); }).then(A.uploadWallpaper).then(function (v) {
+      var cur = A.state.settings.wallpaper;
+      if (cur && cur.url === dataUrl) { A.state.settings.wallpaper = Object.assign({}, cur, { id: "custom", file: true, v: v, url: "" }); A.save(); A.render(); }
+      return true;
+    }).then(function (x) { wpMigrating = null; return x; }, function (e) { wpMigrating = null; throw e; });
+    return wpMigrating;
+  }
+
   function unlock() { de.classList.remove("nc-locked", "nc-loading"); }
 
   /* ------------------------------------------------------------ styles */
@@ -58,7 +84,7 @@
   A.statusFor = function (it, local) {
     return statusReady().then(function (m) {
       var r = m[it.id];
-      if (r) return { ok: !!r.up, ms: r.ms != null ? r.ms : null };
+      if (r) return { ok: !!r.up, ms: r.ms != null ? r.ms : null, code: r.code || null, auth: !!r.auth, blocked: r.status === "blocked" };
       return local(); // 服务器还没检测过（刚添加的项目）：先用浏览器探测
     });
   };
@@ -126,17 +152,44 @@
   function schedule() { if (!N.user) return; clearTimeout(timer); timer = setTimeout(push, 800); }
   function push() {
     if (inflight) { dirty = true; return; }
+    if (wpMigrating) { dirty = true; return; }
+    var w = A.state.settings && A.state.settings.wallpaper;
+    if (w && typeof w.url === "string" && w.url.indexOf("data:") === 0) {
+      migrateLocalWallpaper().then(function () { push(); }, function (e) {
+        if (e && e.status === 401) return expired();
+        setTimeout(schedule, 15000);
+      });
+      return;
+    }
     var raw = snapshot();
     if (raw === lastSent) return;
     inflight = true; dirty = false;
     api("PUT", "config", { baseVersion: serverVer, data: JSON.parse(raw) }).then(function (d) {
       markSynced(d.version, raw); warned = false;
+      if (d.migrated) pull(true).then(null, function () {}); // 服务器把旧的 data URL 壁纸转成了文件
+      else if (d.overwrote === true) conflict();
       setTimeout(pullStatus, 4000); // 新地址由服务器尽快检测
     }, function (e) {
       if (e.status === 401) return expired();
-      if (!warned) { warned = true; A.toast(e.status === 413 ? "配置太大（壁纸图片过大），未能同步到 NAS" : "暂时无法同步到 NAS，已保存在本机，稍后自动重试"); }
+      if (!warned) { warned = true; A.toast(e.status === 413 ? "配置太大，未能同步到 NAS" : "暂时无法同步到 NAS，已保存在本机，稍后自动重试"); }
       setTimeout(schedule, 15000);
     }).then(function () { inflight = false; if (dirty) schedule(); });
+  }
+  /** 另一台设备在本机上次同步之后改过配置：本机版本已覆盖，提供「改用服务器版」 */
+  function conflict() {
+    A.toast("另一台设备刚改过配置，已用本机版本覆盖", { duration: 10000, action: "改用服务器版", onAction: function () {
+      api("GET", "config?prev=1").then(function (d) {
+        if (!d || !d.data) throw new Error("没有可恢复的服务器版本");
+        var net = A.state.settings && A.state.settings.net; // 内网/外网是每台设备自己的选择
+        var s = normalize(d.data);
+        if (net) s.settings.net = net;
+        A.state = s; A.save(); A.render(); // A.save 已接上同步：作为新版本推回服务器
+        A.toast("已改用另一台设备的版本");
+      }).then(null, function (e) {
+        if (e.status === 401) return expired();
+        A.toast(e.message || "暂时拿不到服务器版本");
+      });
+    } });
   }
   function normalize(s) {
     s.settings = Object.assign(structuredClone(A.defaults.settings), s.settings || {});
