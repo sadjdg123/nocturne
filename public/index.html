@@ -27,11 +27,12 @@
         try {
           if (!N.user) { de.classList.add("nc-locked"); return; }
           var own = localStorage.getItem("nocturne.owner"), ver = +localStorage.getItem("nocturne.ver") || 0, has = !!localStorage.getItem("yeqv.v1");
-          if (own && own !== N.user.name) { localStorage.removeItem("yeqv.v1"); localStorage.removeItem("nocturne.ver"); has = false; ver = 0; }
+          if (own && own !== N.user.name) { localStorage.removeItem("yeqv.v1"); localStorage.removeItem("nocturne.ver"); localStorage.removeItem("nocturne.dirty"); has = false; ver = 0; }
           N.migrate = !N.version && has;
           N.stale = N.version > 0 && ver !== N.version;
+          N.dirty = has && localStorage.getItem("nocturne.dirty") === "1"; // 本机有上次没推上去的修改：先显示本机、推上去，不等服务器
         } catch (e) { N.stale = N.version > 0; }
-        if (N.stale) de.classList.add("nc-loading");
+        if (N.stale && !N.dirty) de.classList.add("nc-loading");
       })();
     </script>
     <style>
@@ -161,11 +162,14 @@
         .x-search { width: min(100%, 640px); margin: 0 auto; }
         .x-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
         .x-tile { aspect-ratio: auto; min-height: 132px; padding: 16px 10px 12px; }
-        .x-tile:hover { transform: translateY(-2px); }
         .x-name { font-size: 13.5px; }
         .x-desc { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; color: var(--x-mist); line-height: 1.3; margin-top: -2px; }
         .x-dock { display: none; }
         .x-toast { bottom: 28px; }
+      }
+      /* 悬停浮起只给鼠标 / 触控板：触屏上点一下会「粘住」 */
+      @media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+        .x-tile:hover { transform: translateY(-2px); }
       }
       @media (prefers-reduced-motion: reduce) {
         .x-tile, .x-chip, .x-toast { transition: none; }
@@ -334,6 +338,7 @@
       .x-tile > .dot.on { background: #7CC9A6; box-shadow: 0 0 0 3px rgba(124, 201, 166, .16), 0 0 8px rgba(124, 201, 166, .65); }
       .x-tile > .dot.off { background: #D66A5A; }
       .x-tile > .dot.checking { background: #8A90A0; }
+      .x-tile > .dot.na { background: #5B6375; opacity: .7; }
       .x-tile > .dot.auth { background: var(--x-amber); box-shadow: 0 0 0 3px rgba(233, 178, 106, .16), 0 0 8px rgba(233, 178, 106, .55); }
       .x-sline.is-alloff { color: var(--x-mist); }
       @keyframes x-pulse { 50% { opacity: .3; } }
@@ -1116,8 +1121,19 @@
             var im = new Image();
             im.onload = function () {
               var c = document.createElement("canvas"), k = Math.max(128 / im.width, 128 / im.height), w = im.width * k, h = im.height * k;
-              c.width = c.height = 128; c.getContext("2d").drawImage(im, (128 - w) / 2, (128 - h) / 2, w, h);
-              s.upload = c.toDataURL("image/png"); F.image.value = ""; F.image.placeholder = "已上传图片 · 或输入网址替换"; preview(true);
+              c.width = c.height = 128; var cx = c.getContext("2d"); cx.drawImage(im, (128 - w) / 2, (128 - h) / 2, w, h);
+              /* 没有透明像素就用 JPEG（照片类图标小很多），有透明才用 PNG */
+              var opaque = true;
+              try { var px = cx.getImageData(0, 0, 128, 128).data; for (var i = 3; i < px.length; i += 4) if (px[i] < 255) { opaque = false; break; } } catch (x) { opaque = false; }
+              var type = opaque ? "image/jpeg" : "image/png", st = s;
+              function done(v) { if (s !== st) return; s.upload = v; F.image.value = ""; F.image.placeholder = "已上传图片 · 或输入网址替换"; preview(true); }
+              var dataUrl = opaque ? c.toDataURL(type, 0.9) : c.toDataURL(type);
+              /* 接了 NAS 后端：图标存成文件（api/icons/<id>），配置里只记地址；失败就先用 data URL，服务器同步时会再转存 */
+              if (!A.uploadIcon || !c.toBlob) return done(dataUrl);
+              c.toBlob(function (blob) {
+                if (!blob) return done(dataUrl);
+                A.uploadIcon(blob).then(done, function () { done(dataUrl); });
+              }, type, 0.9);
             };
             im.onerror = function () { A.toast("图片读取失败"); };
             im.src = r.result;
@@ -1137,7 +1153,7 @@
             F.url.value = item.wan || item.lan || ""; F.nm.value = item.title || ""; F.lan.value = item.lan || ""; F.wan.value = item.wan || ""; F.desc.value = item.desc || "";
             s.copied = { el: item.wan ? F.wan : F.lan, v: F.url.value }; s.bg = ic.bg || "";
             if (ic.type === "iconify" && v) { if (v !== "selfhst:" + slug(item.title || "")) { s.mode = "lib"; s.lib = v; } }
-            else if (ic.type === "image" && v) { s.mode = "image"; if (/^data:/.test(v)) { s.upload = v; F.image.placeholder = "已上传图片 · 或输入网址替换"; } else F.image.value = v; }
+            else if (ic.type === "image" && v) { s.mode = "image"; if (/^(data:|api\/icons\/)/.test(v)) { s.upload = v; F.image.placeholder = "已上传图片 · 或输入网址替换"; } else F.image.value = v; }
             else if ((ic.type === "emoji" || ic.type === "text") && v) { s.mode = ic.type; F[ic.type].value = v; }
             if (item.lan && item.wan) sh.querySelector(".x-more").open = true;
           }
@@ -1275,14 +1291,15 @@
             el.setAttribute("href", A.url(e.item));
             var d = el.querySelector(":scope > .dot"); if (!d) return;
             var r = stat.get(e.item.id) || { s: "checking" };
-            var t = r.s === "on" ? "在线" + (r.ms != null ? " · " + r.ms + "ms" : "") : r.s === "auth" ? "在线 · 需登录" : r.s === "off" ? (r.blocked ? "未检测 · 服务器不探测这个地址" : "离线") : "检测中";
+            var t = r.s === "on" ? "在线" + (r.ms != null ? " · " + r.ms + "ms" : "") : r.s === "auth" ? "在线 · 需登录" : r.s === "off" ? "离线" : r.s === "na" ? "未检测 · 服务器不探测这个地址" : "检测中";
             d.className = "dot " + r.s; d.title = t;
             el.title = (e.item.desc ? e.item.desc + " · " : "") + t;
           });
           Object.keys(m).forEach(function (id) {
             if (!m[id].icon) return;
-            ids.push(id);
             var r = stat.get(id);
+            if (r && r.s === "na") return; // 被服务器拦截不探测的地址：灰点，不计入总数和离线
+            ids.push(id);
             if (!r || r.s === "checking") pend++; else if (r.s === "on") on++; else if (r.s === "auth") { on++; auth++; } else off.push(m[id].item.title);
           });
           var total = ids.length, sl = side.querySelector(".x-sline");
@@ -1334,7 +1351,7 @@
               if (g !== gen) return;
               var ok = r && typeof r === "object" ? !!r.ok : !!r, ms = r && typeof r === "object" && r.ms != null ? r.ms : Math.round(performance.now() - t0);
               var needLogin = r && typeof r === "object" && (r.auth || r.code === 401 || r.code === 403);
-              stat.set(it.id, ok ? { s: needLogin ? "auth" : "on", ms: ms } : { s: "off", blocked: !!(r && r.blocked) });
+              stat.set(it.id, ok ? { s: needLogin ? "auth" : "on", ms: ms } : r && r.blocked ? { s: "na" } : { s: "off" });
               active--; left--; apply();
               if (left) next(); else finish();
             });
@@ -1451,9 +1468,27 @@
         /* ---- wallpaper + visibility ---- */
         var imgs = [].slice.call(document.querySelectorAll(".x-bg")), shade = document.querySelector(".x-shade");
         var layer = document.createElement("div"); layer.className = "x-wp"; layer.hidden = true; shade.before(layer);
+        /* 自定义壁纸先预加载：加载成功才替换；文件不见了（404 / 导出导入没带上）就保留默认壁纸，不会整页变黑 */
+        var wpState = {}, wpWarned = false, wpShown = "";
+        function wpReady(src, isFile) {
+          if (wpState[src] === "ok") return true;
+          if (wpState[src]) return false; // loading / failed
+          wpState[src] = "loading";
+          var im = new Image();
+          im.onload = function () { wpState[src] = "ok"; applyWp(wp()); };
+          im.onerror = function () {
+            wpState[src] = "failed";
+            if (!wpWarned) { wpWarned = true; A.toast(isFile ? "自定义壁纸文件不见了，已用默认壁纸" : "自定义壁纸加载失败，已用默认壁纸"); }
+          };
+          im.src = src;
+          return false;
+        }
         function applyWp(w) {
           // file:true → 存在 NAS 上的自定义壁纸（/api/wallpaper）；纯静态页没有后端时退回默认壁纸
           var src = w.id !== "custom" ? "" : w.file ? (A.wallpaperUrl ? A.wallpaperUrl(w) : "") : w.url;
+          // 新图还没加载好：先保留正在显示的那张（没有就显示默认壁纸）
+          if (src && !wpReady(src, !!w.file)) src = wpShown && wpState[wpShown] === "ok" && w.id === "custom" ? wpShown : "";
+          wpShown = src;
           var bg = src ? 'url("' + String(src).replace(/["\\\n]/g, encodeURIComponent) + '") center / cover no-repeat' : w.id === "custom" ? "" : (WP[w.id] || WP.star)[1];
           layer.style.background = bg; layer.hidden = !bg;
           var f = w.blur > 0 ? "blur(" + w.blur + "px)" : "";
@@ -1657,10 +1692,18 @@
         function undoToast(msg) { A.toast(msg, { action: "撤销", onAction: A.undo }); }
         function pad(n) { return (n < 10 ? "0" : "") + n; }
         function stamp(t) { var d = new Date(); return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + (t ? "-" + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) : ""); }
-        function download(name) {
-          var url = URL.createObjectURL(new Blob([JSON.stringify(A.state, null, 2)], { type: "application/json" }));
+        function save(name, st) {
+          var url = URL.createObjectURL(new Blob([JSON.stringify(st, null, 2)], { type: "application/json" }));
           var a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
           setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        }
+        function hasFileIcons() {
+          return A.state.groups.some(function (g) { return (g.items || []).some(function (i) { return i.icon && i.icon.type === "image" && /^api\/icons\//.test(String(i.icon.value || "")); }); });
+        }
+        /* NAS 上存成文件的图标在导出时内嵌成 data URL（A.exportState 由后端模块提供）；没有就直接同步下载 */
+        function download(name) {
+          if (A.exportState && hasFileIcons()) return A.exportState().then(function (st) { save(name, st); }, function () { save(name, A.state); });
+          save(name, A.state);
         }
 
         /* ---- 搜索 ---- */
@@ -1727,7 +1770,11 @@
         D.addEventListener("click", function (e) {
           var b = e.target.closest("[data-d]"); if (!b) return;
           var a = b.getAttribute("data-d");
-          if (a === "export") { download("yeqv-backup-" + stamp() + ".json"); A.toast("已导出配置"); }
+          if (a === "export") {
+            download("yeqv-backup-" + stamp() + ".json");
+            var w = A.state.settings.wallpaper;
+            A.toast(w && w.id === "custom" && w.file ? "已导出配置 · 壁纸文件不包含在导出里" : "已导出配置", w && w.file ? { duration: 6000 } : undefined);
+          }
           else if (a === "import") file.click();
           else if (a === "reset") showCf(cf.hidden);
           else if (a === "cancel") showCf(false);
@@ -1808,7 +1855,8 @@
         .x-bg, .x-wp, .x-shade { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100lvh; object-fit: cover; }
 
         .page { max-width: none; padding-inline: 0; }
-        .x-wrap { box-sizing: border-box; max-width: 1280px; padding: 8px 32px 0; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; row-gap: 20px; }
+        /* 横屏 iPhone Pro Max（932/956px）也落在这一档：左右至少让出安全区（灵动岛） */
+        .x-wrap { box-sizing: border-box; max-width: 1280px; padding: 8px max(32px, env(safe-area-inset-right)) 0 max(32px, env(safe-area-inset-left)); grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; row-gap: 20px; }
         .x-wrap > .x-head, .x-wrap > .x-hero, .x-wrap > .x-search { grid-column: 1 / -1; }
         .x-hero { padding-top: 0; }
         .x-date { margin-top: 10px; }
@@ -1826,10 +1874,10 @@
           transition: transform .22s cubic-bezier(.2, .7, .2, 1), border-color .22s ease, background .22s ease, box-shadow .22s ease; }
         .x-tile .x-ic { width: 50px; height: 50px; border-radius: 13px; }
         .x-tile .x-ic .x-emoji { font-size: 28px; }
-        .x-tile:hover { transform: translateY(-3px); background: rgba(30, 36, 52, .66); border-color: rgba(233, 178, 106, .32); box-shadow: 0 14px 30px rgba(0, 0, 0, .32); }
+        .x-tile:hover { background: rgba(30, 36, 52, .66); border-color: rgba(233, 178, 106, .32); }
         .x-tile:focus-visible { outline: 2px solid var(--x-amber); outline-offset: 3px; transform: translateY(-3px); }
         .x-chip { cursor: pointer; transition: border-color .2s ease, background .2s ease, transform .2s ease; }
-        .x-chip:hover { background: rgba(30, 36, 52, .66); transform: translateY(-1px); }
+        .x-chip:hover { background: rgba(30, 36, 52, .66); }
         body.editing .x-tile:hover, body.editing .x-chip:hover { transform: none; box-shadow: none; }
         .x-tile.x-ghost { aspect-ratio: 1 / 1; }
         .x-group.x-flash { animation: x-flash 1.2s ease; }
@@ -1855,16 +1903,21 @@
         .x-offl li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* toast: top-right, clear of chips and the edit bar */
-        .x-toast, body.editing .x-toast { top: 84px; right: 28px; bottom: auto; left: auto; max-width: 400px; transform: translateY(-8px); }
+        .x-toast, body.editing .x-toast { top: 84px; right: max(28px, env(safe-area-inset-right)); bottom: auto; left: auto; max-width: 400px; transform: translateY(-8px); }
         .x-toast.is-on { transform: none; }
 
-        /* ⌘K hint inside the search box */
+        /* ⌘K hint inside the search box: only with a mouse / trackpad (iPad / iPhone landscape get no hint) */
+      }
+      @media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+        .x-tile:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(0, 0, 0, .32); }
+        .x-chip:hover { transform: translateY(-1px); }
+        body.editing .x-tile:hover, body.editing .x-chip:hover { transform: none; box-shadow: none; }
         .x-kbd { display: inline-flex; align-items: center; gap: 2px; flex: none; height: 24px; margin-right: 10px; padding: 0 8px; border-radius: 7px;
           border: 1px solid var(--x-line); background: rgba(255, 255, 255, .04); color: var(--x-mist); font: 500 12px/1 var(--x-ui); cursor: pointer; }
         .x-kbd:hover { color: var(--x-text); border-color: rgba(255, 240, 220, .22); }
       }
       @media (min-width: 1200px) {
-        .x-wrap { padding-inline: 40px; grid-template-columns: minmax(0, 1fr) 300px; column-gap: 32px; }
+        .x-wrap { padding-left: max(40px, env(safe-area-inset-left)); padding-right: max(40px, env(safe-area-inset-right)); grid-template-columns: minmax(0, 1fr) 300px; column-gap: 32px; }
         .x-groups { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
       }
       @media (min-width: 1600px) {
@@ -1908,6 +1961,8 @@
         var A = window.App; if (!A) return;
         var esc = A.util.esc, body = document.body, groupsEl = document.getElementById("x-groups");
         var MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+        /* 触屏（iPhone 横屏、iPad 无触控板）不显示 ⌘K 提示；CSS 也只在 (hover: hover) and (pointer: fine) 下显示 */
+        var FINE = !window.matchMedia || window.matchMedia("(hover: hover) and (pointer: fine)").matches;
         var MOD = MAC ? "⌘" : "Ctrl ";
 
         /* ---- status card: offline names as compact chips (desktop CSS shows it; mobile keeps the sentence) ---- */
@@ -1948,7 +2003,7 @@
 
         /* search-box hint (CSS shows it ≥900px only) */
         var bar = document.querySelector(".x-bar");
-        if (bar) {
+        if (bar && FINE) {
           var kb = document.createElement("kbd"); kb.className = "x-kbd"; kb.title = "命令面板"; kb.textContent = MOD + "K";
           kb.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); open(document.getElementById("x-q").value.trim()); });
           bar.appendChild(kb);
