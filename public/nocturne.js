@@ -102,7 +102,10 @@
     ".nc-pw input{flex:1;min-width:0;height:36px;padding:0 10px;border:1px solid var(--x-line);border-radius:10px;background:rgba(255,255,255,.06);color:var(--x-text);font:400 16px var(--x-ui);outline:none}", /* 16px：iOS 不自动放大 */
     ".nc-form .x-row input[type=password]{flex:1;width:auto;min-width:0;height:36px;padding:0;border:0;background:none;color:var(--x-text);font:400 16px var(--x-ui);text-align:right;outline:none}",
     ".nc-form .x-acts{padding:4px 16px 12px}",
-    ".nc-badge{display:inline-block;margin-left:6px;font-size:12px;color:var(--x-mist)}"
+    ".nc-badge{display:inline-block;margin-left:6px;font-size:12px;color:var(--x-mist)}",
+    ".nc-bk .nc-meta{display:block;margin-top:2px;font-size:12px;color:var(--x-mist);font-variant-numeric:tabular-nums}",
+    ".nc-bk .x-row{gap:10px}",
+    ".nc-bk .nc-mini{flex:none}"
   ].join("\n");
   document.head.appendChild(css);
 
@@ -171,7 +174,7 @@
   }
 
   /* -------------------------------------------------------- config sync */
-  var serverVer = N.version || 0, lastSent = null, timer = null, inflight = false, dirty = false, warned = false, bigWarned = false, restoreNext = false;
+  var serverVer = N.version || 0, lastSent = null, timer = null, inflight = false, dirty = false, warned = false, bigWarned = false, restoreNext = false, replayNext = false;
   function snapshot() { return JSON.stringify(A.state); }
   /* 持久化的「本机有没推上去的修改」标记：页面被关掉 / NAS 连不上时，下次打开据此补推，而不是当成已同步 */
   function markDirty() { if (lastSent === null || snapshot() !== lastSent) ls("set", DIRTY, "1"); }
@@ -184,6 +187,7 @@
   /** opts.keepalive：页面切到后台时用，body 不超过 60KB 才带 keepalive（超过会被浏览器直接拒绝） */
   function push(opts) {
     opts = opts && opts.keepalive ? opts : {};
+    // replayNext：启动时补推上次没确认同步的内容，带 replay:true —— 服务器认出是早先已接受、后来被别的设备改过的旧内容时返回 stale
     if (inflight) { dirty = true; return; }
     if (wpMigrating) { dirty = true; return; }
     var w = A.state.settings && A.state.settings.wallpaper;
@@ -198,17 +202,27 @@
     if (raw === lastSent) return;
     inflight = true; dirty = false;
     var restore = restoreNext; restoreNext = false;
+    var replay = replayNext; replayNext = false;
     var body = { baseVersion: serverVer, data: JSON.parse(raw) };
-    if (restore) body.restore = true; // 「改用服务器版」：服务器先备份当前版本（被替换掉的本机版本）再覆盖
+    if (restore) body.restore = true; // 「改用服务器版」/ 恢复较早的版本：服务器先备份当前版本（被替换掉的本机版本）再覆盖
+    if (replay) body.replay = true;
     var str = JSON.stringify(body), size = bytes(str);
     if (size > 800 * 1024 && !bigWarned) { bigWarned = true; A.toast("配置已有 " + Math.round(size / 1024) + "KB，接近上限，可以删掉一些不用的上传图片"); }
     api("PUT", "config", body, { raw: str, keepalive: opts.keepalive && size < KEEPALIVE_MAX }).then(function (d) {
-      markSynced(d.version, raw); warned = false;
+      warned = false;
+      if (d.stale) {
+        // 这份内容其实早就同步上了，之后另一台设备又改过：不覆盖、不弹冲突，悄悄换成服务器最新版（成功后清掉脏标记）。
+        // 拉取失败就保持旧的 baseVersion，之后再改会走正常的冲突流程（留备份）。
+        lastSent = raw;
+        return pull(true).then(null, function (e) { if (e && e.status === 401) expired(); });
+      }
+      markSynced(d.version, raw);
       if (d.migrated) pull(true).then(null, function () {}); // 服务器把旧的 data URL 壁纸 / 图标转成了文件
       else if (d.overwrote === true) conflict();
       setTimeout(pullStatus, 4000); // 新地址由服务器尽快检测
     }, function (e) {
       if (restore) restoreNext = true;
+      if (replay) replayNext = true;
       if (e.status === 401) return expired();
       if (!warned) { warned = true; A.toast(e.status === 413 ? "配置太大，未能同步到 NAS" : "暂时无法同步到 NAS，已保存在本机，稍后自动重试"); }
       setTimeout(schedule, 15000);
@@ -272,11 +286,59 @@
       }
     });
 
+    /* 「恢复较早的版本」：列出 NAS 上的环形备份（被别的设备覆盖 / 被替换掉的配置），选一份恢复 */
+    var BK_HTML = '<p class="x-gt">数据</p><div class="x-gl nc-ul nc-bk" data-bk><div class="x-row"><span>恢复较早的版本</span><button type="button" class="nc-mini" data-u="bk">查看</button></div></div>' +
+      '<p class="x-hint">被另一台设备覆盖或被替换掉的配置，NAS 上会保留最近 10 份。恢复前当前版本也会先存一份，随时可以换回来。</p>';
+    function fmtTime(t) {
+      var d = new Date(t); if (isNaN(d)) return "";
+      var p = function (n) { return (n < 10 ? "0" : "") + n; }, now = new Date();
+      return (d.getFullYear() !== now.getFullYear() ? d.getFullYear() + "年" : "") + (d.getMonth() + 1) + "月" + d.getDate() + "日 " + p(d.getHours()) + ":" + p(d.getMinutes());
+    }
+    function bkClose() {
+      var box = pane.querySelector("[data-bk]"); if (!box) return;
+      box.querySelectorAll("[data-id], [data-bk-msg]").forEach(function (r) { r.remove(); });
+      var b = box.querySelector('[data-u="bk"]'); if (b) b.textContent = "查看";
+    }
+    function bkOpen() {
+      var box = pane.querySelector("[data-bk]"), b = box.querySelector('[data-u="bk"]');
+      bkClose(); b.textContent = "收起";
+      var msg = document.createElement("div"); msg.className = "x-row"; msg.setAttribute("data-bk-msg", ""); msg.innerHTML = "<span>加载中…</span>";
+      box.appendChild(msg);
+      api("GET", "config/backups").then(function (list) {
+        if (!box.isConnected || b.textContent !== "收起") return;
+        if (!list.length) { msg.innerHTML = '<span class="nc-name">还没有较早的版本</span>'; return; }
+        msg.remove();
+        box.insertAdjacentHTML("beforeend", list.map(function (x) {
+          return '<div class="x-row" data-id="' + esc(x.id) + '" data-label="' + esc(fmtTime(x.time || x.updatedAt || x.at) + "（v" + (+x.version || 0) + "）") + '"><span class="nc-name">' + esc(fmtTime(x.time || x.updatedAt || x.at)) +
+            '<span class="nc-meta">v' + (+x.version || 0) + " · " + (+x.groups || 0) + " 个分组 · " + (+x.items || 0) + " 个项目</span></span>" +
+            '<button type="button" class="nc-mini" data-u="bk-go">恢复</button></div>';
+        }).join(""));
+      }, function (e) {
+        if (e.status === 401) return expired();
+        msg.innerHTML = "<span>" + esc(e.message || "暂时拿不到备份列表") + "</span>";
+      });
+    }
+    function bkRestore(id, label) {
+      api("GET", "config?backup=" + encodeURIComponent(id)).then(function (d) {
+        if (!d || !d.data) throw new Error("这个版本已经不在了");
+        var net = A.state.settings && A.state.settings.net; // 内网/外网是每台设备自己的选择
+        var s = normalize(d.data);
+        if (net) s.settings.net = net;
+        restoreNext = true; // 推上去时带 restore:true：当前版本先进服务器备份，可以再换回来
+        A.state = s; A.save(); A.render();
+        bkClose();
+        A.toast("已恢复到 " + label + "的版本");
+      }).then(null, function (e) {
+        if (e.status === 401) return expired();
+        A.toast(e.message || "恢复失败");
+      });
+    }
+
     function draw() {
       var u = N.user || {};
       if (!N.auth) {
         pane.innerHTML = '<p class="x-gt">账户</p><div class="x-gl"><div class="x-row"><span>登录已关闭</span></div></div>' +
-          '<p class="x-hint">当前以 NOCTURNE_NO_AUTH=1 运行，任何能访问这个地址的人都能修改配置。只建议在纯内网使用。</p>';
+          '<p class="x-hint">当前以 NOCTURNE_NO_AUTH=1 运行，任何能访问这个地址的人都能修改配置。只建议在纯内网使用。</p>' + BK_HTML;
         return;
       }
       pane.innerHTML = '<p class="x-gt">当前账户</p><div class="x-gl"><div class="x-row"><span>' + esc(u.name) + (u.admin ? '<span class="nc-tag">管理员</span>' : "") + '</span><button type="button" class="nc-mini is-red" data-u="logout">退出登录</button></div></div>' +
@@ -291,7 +353,7 @@
           '<label class="x-row"><span>初始密码</span><input type="password" name="password" autocomplete="new-password" placeholder="至少 6 位"></label>' +
           '<label class="x-row"><span>设为管理员</span><input class="x-tg" type="checkbox" role="switch" name="admin"></label>' +
           '<p class="x-err" data-err hidden></p><div class="x-acts"><button type="button" class="x-pb is-amber" data-u="add">添加</button></div></div>' : "") +
-        '<p class="x-hint">每个账户的分组和设置分别保存在 NAS 上，换设备登录即可同步。</p>';
+        '<p class="x-hint">每个账户的分组和设置分别保存在 NAS 上，换设备登录即可同步。</p>' + BK_HTML;
       if (u.admin) loadUsers();
     }
     function formErr(f, m) { var e = f.querySelector("[data-err]"); e.textContent = m || ""; e.hidden = !m; }
@@ -308,7 +370,13 @@
     pane.addEventListener("click", function (e) {
       var b = e.target.closest("[data-u]"); if (!b) return;
       var a = b.getAttribute("data-u"), row = b.closest("[data-name]"), name = row && row.getAttribute("data-name");
-      if (a === "logout") {
+      if (a === "bk") {
+        if (b.textContent === "收起") bkClose(); else bkOpen();
+      } else if (a === "bk-go") {
+        var br = b.closest("[data-id]");
+        if (b.getAttribute("data-sure") !== "1") { b.setAttribute("data-sure", "1"); b.textContent = "确认恢复？"; setTimeout(function () { if (b.isConnected) { b.removeAttribute("data-sure"); b.textContent = "恢复"; } }, 4000); return; }
+        bkRestore(br.getAttribute("data-id"), br.getAttribute("data-label"));
+      } else if (a === "logout") {
         api("POST", "logout").then(null, function () {}).then(function () {
           ls("del", KEY); ls("del", VER); ls("del", OWNER); ls("del", DIRTY); location.reload();
         });
@@ -407,8 +475,10 @@
       //  - 服务器没变（不 stale）：正常推送
       //  - 服务器变了（stale）：用本机旧的 ver 作 baseVersion 推，服务器会 overwrote → 备份 → 弹「改用服务器版」
       unlock();
+      //  - stale 时带 replay:true：如果其实上次已经同步成功、后来被另一台设备改过，服务器返回 stale，直接拉最新版，不覆盖别人的修改
       serverVer = N.stale ? localVer : N.version;
       lastSent = null;
+      replayNext = !!N.stale;
       push();
       start = Promise.resolve();
     } else if (N.stale) {
