@@ -30,23 +30,32 @@ const PROBE_PRIVATE_ONLY = flag(process.env.PROBE_PRIVATE_ONLY); // 只探测内
 const PROBE_TLS_STRICT = flag(process.env.PROBE_TLS_STRICT); // 校验 HTTPS 证书（默认不校验：自签名也算在线）
 const ICON_UPSTREAM = "https://api.iconify.design/";
 const VERSION = require("./package.json").version;
-const MAX_BODY = 1024 * 1024; // JSON 请求（配置等）上限；壁纸走 /api/wallpaper 单独存文件
+const MAX_BODY = 2 * 1024 * 1024; // JSON 请求（配置等）上限；壁纸 / 上传的图标都单独存文件，这里只是安全余量
+const MAX_ICON = 512 * 1024;
 const MAX_WALLPAPER = 15 * 1024 * 1024;
 const NO_AUTH_USER = "default";
 
 const CONFIG_DIR = path.join(DATA_DIR, "config");
 const CACHE_DIR = path.join(DATA_DIR, "cache");
 const WALLPAPER_DIR = path.join(DATA_DIR, "wallpapers");
-const BACKUP_DIR = path.join(DATA_DIR, "backup"); // 被另一台设备覆盖前的那一版配置
+const BACKUP_DIR = path.join(DATA_DIR, "backup"); // 被覆盖前的配置：backup/<user>/<时间戳>.json，每人保留最近 BACKUP_KEEP 份
+const ICONS_DIR = path.join(DATA_DIR, "icons"); // 上传的图标：icons/<user>/<id>.<ext>
+const BACKUP_KEEP = 10;
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 
-const log = (...a) => console.log(new Date().toISOString(), ...a);
+/** 本地时间 + 时区偏移（跟随 TZ 环境变量），例如 2026-10-08 03:14:05.123+08:00 */
+function stamp(d = new Date()) {
+  const p = (n, w = 2) => String(n).padStart(w, "0"), o = -d.getTimezoneOffset();
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + "." + p(d.getMilliseconds(), 3) +
+    (o >= 0 ? "+" : "-") + p(Math.floor(Math.abs(o) / 60)) + ":" + p(Math.abs(o) % 60);
+}
+const log = (...a) => console.log(stamp(), ...a);
 
 /* ------------------------------------------------------------------ storage */
 
 function ensureDirs() {
-  for (const d of [DATA_DIR, CONFIG_DIR, CACHE_DIR, WALLPAPER_DIR, BACKUP_DIR]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [DATA_DIR, CONFIG_DIR, CACHE_DIR, WALLPAPER_DIR, BACKUP_DIR, ICONS_DIR]) fs.mkdirSync(d, { recursive: true });
 }
 function readJSON(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; }
@@ -65,6 +74,21 @@ function writeJSON(file, data) {
   writeQueues.set(file, next);
   next.finally(() => { if (writeQueues.get(file) === next) writeQueues.delete(file); }).catch(() => {});
   return next;
+}
+async function writeFileAtomic(file, buf) {
+  const tmp = file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
+  const fh = await fsp.open(tmp, "w", 0o600);
+  try { await fh.writeFile(buf); await fh.sync(); } finally { await fh.close(); }
+  await fsp.rename(tmp, file);
+}
+/** 按用户串行：配置的「迁移 → 读 → 判冲突 → 备份 → 写」、壁纸 / 图标写入、删除用户都在这把锁里，避免并发交错 */
+const userLocks = new Map();
+function withUserLock(name, fn) {
+  const k = String(name).toLowerCase();
+  const run = (userLocks.get(k) || Promise.resolve()).catch(() => {}).then(fn);
+  userLocks.set(k, run);
+  run.finally(() => { if (userLocks.get(k) === run) userLocks.delete(k); }).catch(() => {});
+  return run;
 }
 
 /* -------------------------------------------------------------------- users */
@@ -164,29 +188,74 @@ function dropSessionsOf(name, exceptKey) {
 /* ------------------------------------------------------------- rate limiting */
 
 const PRIVATE_IP = /^(::1$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|fc|fd|::ffff:(127|10|192\.168|172\.(1[6-9]|2\d|3[01]))\.)/i;
+const cleanIp = (s) => { s = String(s || "").trim().replace(/^\[|\](:\d+)?$/g, ""); return net.isIP(s) ? s : ""; };
 function clientIp(req) {
   const ra = req.socket.remoteAddress || "";
-  // 只有来自内网（如群晖反向代理、Lucky）的连接才信任 X-Forwarded-For / X-Real-IP
+  // 只有直连的对端是内网地址（群晖反向代理、Lucky、Docker 网关）时才信任代理头：
+  //  - X-Real-IP：DSM / Lucky / nginx 设成 $remote_addr，客户端无法伪造
+  //  - 否则取 X-Forwarded-For 最右边的合法地址：离我们最近的那一跳代理追加的（最左边的值客户端可以随便填）
   if (PRIVATE_IP.test(ra)) {
-    const xr = String(req.headers["x-real-ip"] || "").trim();
-    const xf = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-    if (xf || xr) return xf || xr;
+    const xr = cleanIp(req.headers["x-real-ip"]);
+    if (xr) return xr;
+    const xf = String(req.headers["x-forwarded-for"] || "").split(",").map((x) => x.trim()).filter(Boolean);
+    for (let i = xf.length - 1; i >= 0; i--) { const v = cleanIp(xf[i]); if (v) return v; }
   }
   return ra;
 }
-const fails = new Map(); // ip -> [timestamps]
-const FAIL_WINDOW = 10 * 60 * 1000, FAIL_MAX = 5;
-function failsOf(ip) {
-  const now = Date.now(), list = (fails.get(ip) || []).filter((t) => now - t < FAIL_WINDOW);
-  if (list.length) fails.set(ip, list); else fails.delete(ip);
-  return list;
+/** 滑动窗口计数：key -> [时间戳] */
+function failCounter(windowMs, maxKeys) {
+  const m = new Map();
+  const of = (k) => {
+    const now = Date.now(), list = (m.get(k) || []).filter((t) => now - t < windowMs);
+    if (list.length) m.set(k, list); else m.delete(k);
+    return list;
+  };
+  const add = (k) => {
+    const list = of(k); list.push(Date.now()); m.set(k, list);
+    if (m.size > maxKeys) m.delete(m.keys().next().value); // 防止随便编的用户名把内存撑大
+    return list;
+  };
+  setInterval(() => { for (const k of [...m.keys()]) of(k); }, 60000).unref();
+  return { of, add, clear: (k) => m.delete(k) };
 }
-setInterval(() => { for (const ip of fails.keys()) failsOf(ip); }, 60000).unref();
+const FAIL_WINDOW = 10 * 60 * 1000, FAIL_MAX = 5; // 按 IP：10 分钟 5 次
+const NAME_WINDOW = 15 * 60 * 1000, NAME_MAX = 10, NAME_SLOW = 5; // 按用户名：15 分钟 10 次封顶，第 5 次起逐步变慢（和 IP 无关）
+const ipFails = failCounter(FAIL_WINDOW, 10000);
+const nameFails = failCounter(NAME_WINDOW, 5000);
+const nameKey = (n) => String(n || "").trim().toLowerCase().slice(0, 64);
 
 /* ------------------------------------------------------------------ configs */
 
 const configFile = (name) => path.join(CONFIG_DIR, name.toLowerCase() + ".json");
-const backupFile = (name) => path.join(BACKUP_DIR, name.toLowerCase() + ".json");
+const backupDir = (name) => path.join(BACKUP_DIR, name.toLowerCase());
+const legacyBackupFile = (name) => path.join(BACKUP_DIR, name.toLowerCase() + ".json"); // 旧版：每人只有一个槽
+let backupSeq = 0;
+/** 旧版单槽备份 → 环形目录 */
+async function migrateLegacyBackup(name) {
+  const old = legacyBackupFile(name);
+  let st; try { st = await fsp.stat(old); } catch (e) { return; }
+  if (!st.isFile()) return;
+  await fsp.mkdir(backupDir(name), { recursive: true });
+  await fsp.rename(old, path.join(backupDir(name), String(Math.round(st.mtimeMs)).padStart(15, "0") + "-legacy.json"));
+}
+async function listBackups(name) {
+  await migrateLegacyBackup(name);
+  let files; try { files = await fsp.readdir(backupDir(name)); } catch (e) { return []; }
+  return files.filter((f) => /^\d{15}-[\w-]+\.json$/.test(f)).sort().reverse().map((f) => path.join(backupDir(name), f)); // 新的在前
+}
+/** 写一份备份（环形，保留最近 BACKUP_KEEP 份）；必须在 withUserLock 里调用 */
+async function addBackup(name, doc) {
+  await migrateLegacyBackup(name);
+  await fsp.mkdir(backupDir(name), { recursive: true });
+  const f = path.join(backupDir(name), String(Date.now()).padStart(15, "0") + "-" + String(++backupSeq % 1e6).padStart(6, "0") + "-v" + (doc.version || 0) + ".json");
+  await writeJSON(f, doc);
+  const all = await listBackups(name);
+  for (const x of all.slice(BACKUP_KEEP)) await fsp.rm(x, { force: true });
+}
+async function latestBackup(name) {
+  for (const f of await listBackups(name)) { const d = readJSON(f, null); if (d && d.data) return d; }
+  return null;
+}
 const configCache = new Map(); // lname -> {mtimeMs, doc}
 function readConfig(name) {
   const f = configFile(name);
@@ -246,7 +315,7 @@ async function removeWallpaper(name) {
 }
 function readRaw(req, limit) {
   return new Promise((resolve, reject) => {
-    const tooBig = () => Object.assign(new Error("图片太大（上限 " + Math.round(limit / 1048576) + "MB）"), { status: 413, close: true });
+    const tooBig = () => Object.assign(new Error("图片太大（上限 " + (limit >= 1048576 ? Math.round(limit / 1048576) + "MB" : Math.round(limit / 1024) + "KB") + "）"), { status: 413, close: true });
     if (+req.headers["content-length"] > limit) return reject(tooBig());
     const chunks = []; let size = 0;
     req.on("data", (c) => {
@@ -272,10 +341,91 @@ async function migrateWallpaper(name, data) {
   log("wallpaper migrated from data URL", name, ok ? "ok" : "dropped (unreadable)");
   return true;
 }
-async function migrateAllWallpapers() {
+
+/* -------------------------------------------------------------------- icons */
+
+/** 上传的图标存成文件 /data/icons/<user>/<id>.<ext>，配置里记 {type:"image", value:"api/icons/<id>"}。
+ *  只收位图（PNG / JPEG / WebP，按文件头判断），不收 SVG（可以内嵌脚本）。 */
+const ICON_ID = /^[A-Za-z0-9_-]{16,64}$/;
+const ICON_REF = /^api\/icons\/([A-Za-z0-9_-]{16,64})$/;
+const ICON_ORPHAN_GRACE = 24 * 3600 * 1000; // 没被引用满 24 小时才删（撤销、「改用服务器版」还能找回）
+const iconDir = (name) => path.join(ICONS_DIR, name.toLowerCase());
+const newIconId = () => crypto.randomBytes(16).toString("base64url");
+function findIcon(name, id) {
+  if (!ICON_ID.test(id)) return null;
+  for (const ext of Object.keys(WP_TYPES)) {
+    const f = path.join(iconDir(name), id + "." + ext);
+    try { const st = fs.statSync(f); if (st.isFile()) return { file: f, ext, st }; } catch (e) { /* next */ }
+  }
+  return null;
+}
+async function storeIcon(name, id, buf) {
+  const ext = sniffImage(buf);
+  if (!ext) throw Object.assign(new Error("图标只支持 PNG / JPEG / WebP 图片"), { status: 415 });
+  if (buf.length > MAX_ICON) throw Object.assign(new Error("图标太大（上限 512KB）"), { status: 413 });
+  await fsp.mkdir(iconDir(name), { recursive: true });
+  await writeFileAtomic(path.join(iconDir(name), id + "." + ext), buf);
+  for (const e of Object.keys(WP_TYPES)) if (e !== ext) await fsp.rm(path.join(iconDir(name), id + "." + e), { force: true });
+  return ext;
+}
+async function removeIcon(name, id) {
+  if (!ICON_ID.test(id)) return;
+  for (const e of Object.keys(WP_TYPES)) await fsp.rm(path.join(iconDir(name), id + "." + e), { force: true });
+}
+function allItems(data) {
+  const out = [];
+  for (const g of (data && Array.isArray(data.groups) ? data.groups : [])) for (const it of (g && Array.isArray(g.items) ? g.items : [])) if (it && typeof it === "object") out.push(it);
+  return out;
+}
+/** 配置里的 data URL 图标 → 文件。返回改动数量。必须在 withUserLock 里调用。 */
+async function migrateIcons(name, data) {
+  let n = 0;
+  for (const it of allItems(data)) {
+    const ic = it.icon;
+    if (!ic || ic.type !== "image" || typeof ic.value !== "string" || !ic.value.startsWith("data:")) continue;
+    const m = /^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=\s]+)$/i.exec(ic.value);
+    if (!m) continue; // SVG 等：保持原样（只在 <img> 里显示，不执行脚本）
+    const buf = Buffer.from(m[2], "base64");
+    if (!sniffImage(buf) || buf.length > MAX_ICON) continue;
+    const id = newIconId();
+    try { await storeIcon(name, id, buf); } catch (e) { log("icon migrate", name, e.message); continue; }
+    it.icon = Object.assign({}, ic, { value: "api/icons/" + id });
+    n++;
+  }
+  if (n) log("icons migrated from data URL", name, n);
+  return n;
+}
+function iconRefs(data, set) {
+  for (const it of allItems(data)) { const m = it.icon && typeof it.icon.value === "string" && ICON_REF.exec(it.icon.value); if (m) set.add(m[1]); }
+  return set;
+}
+/** 清理没被当前配置和备份引用的图标文件（尽力而为）。必须在 withUserLock 里调用。 */
+async function cleanupIcons(name) {
+  let files; try { files = await fsp.readdir(iconDir(name)); } catch (e) { return; }
+  const refs = iconRefs(readConfig(name).data, new Set());
+  for (const f of await listBackups(name)) iconRefs((readJSON(f, null) || {}).data, refs);
+  const markFile = path.join(iconDir(name), ".orphans.json"), marks = readJSON(markFile, {}), now = Date.now(), next = {};
+  let changed = false;
+  for (const f of files) {
+    const m = /^([A-Za-z0-9_-]{16,64})\.(png|jpg|webp)$/.exec(f);
+    if (!m || refs.has(m[1])) continue;
+    const since = marks[m[1]] || now;
+    if (now - since > ICON_ORPHAN_GRACE) { await fsp.rm(path.join(iconDir(name), f), { force: true }); changed = true; log("icon removed (unreferenced)", name, m[1]); }
+    else next[m[1]] = since;
+  }
+  if (changed || JSON.stringify(next) !== JSON.stringify(marks)) await writeJSON(markFile, next);
+}
+/** data URL 壁纸 / 图标 → 文件。返回是否改动了 data。必须在 withUserLock 里调用。 */
+async function migrateData(name, data) {
+  const a = await migrateWallpaper(name, data), b = await migrateIcons(name, data);
+  return a || b > 0;
+}
+async function migrateAll() {
   for (const name of allUserNames()) {
-    const cur = readConfig(name);
-    if (cur.data && await migrateWallpaper(name, cur.data)) await writeConfig(name, cur.data);
+    await withUserLock(name, async () => {
+      const cur = readConfig(name);
+      if (cur.data && await migrateData(name, cur.data)) await writeConfig(name, cur.data);
+    });
   }
 }
 
@@ -316,11 +466,27 @@ const ALWAYS_BLOCK = blockList([["169.254.0.0", 16], ["0.0.0.0", 8], ["100.100.1
 const LOOPBACK = blockList([["127.0.0.0", 8]], [["::1", 128]]);
 const PRIVATE_NET = blockList([["10.0.0.0", 8], ["172.16.0.0", 12], ["192.168.0.0", 16], ["100.64.0.0", 10], ["127.0.0.0", 8]], [["fc00::", 7], ["::1", 128]]);
 const METADATA_HOST = /^(metadata\.google\.internal|metadata\.goog|metadata|instance-data(\.ec2\.internal)?|metadata\.azure\.com)\.?$/i;
-function normIp(a) { // IPv4-mapped IPv6（::ffff:1.2.3.4 / ::ffff:102:304）→ IPv4
-  let m = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(a);
-  if (m) return m[1];
-  m = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(a);
-  if (m) { const h = parseInt(m[1], 16), l = parseInt(m[2], 16); return [h >> 8, h & 255, l >> 8, l & 255].join("."); }
+/** IPv6 → 8 个 16 位整数（支持 :: 缩写和末尾内嵌 IPv4），不是合法 IPv6 返回 null */
+function v6words(a) {
+  a = String(a).replace(/%.*$/, "");
+  if (net.isIP(a) !== 6) return null;
+  const m4 = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(a);
+  if (m4) a = a.slice(0, m4.index) + ((+m4[1] << 8) | +m4[2]).toString(16) + ":" + ((+m4[3] << 8) | +m4[4]).toString(16);
+  const [l, r] = a.split("::"), L = l ? l.split(":") : [], R = r != null && r ? r.split(":") : [];
+  const words = r == null ? L : [...L, ...Array(8 - L.length - R.length).fill("0"), ...R];
+  return words.length === 8 ? words.map((w) => parseInt(w, 16)) : null;
+}
+/** 内嵌 IPv4 的 IPv6 → IPv4：IPv4-mapped ::ffff:a.b.c.d、IPv4-compatible ::a.b.c.d（已废弃）、
+ *  NAT64 64:ff9b::/96 与本地 NAT64 64:ff9b:1::/48（RFC 8215，取末 32 位）。其他原样返回。 */
+function normIp(a) {
+  const w = v6words(a);
+  if (!w) return a;
+  const v4 = () => [w[6] >> 8, w[6] & 255, w[7] >> 8, w[7] & 255].join(".");
+  const zero = (from, to) => w.slice(from, to).every((x) => x === 0);
+  if (zero(0, 5) && w[5] === 0xffff) return v4(); // ::ffff:0:0/96
+  if (zero(0, 6) && (w[6] || w[7] > 1)) return v4(); // ::a.b.c.d（排除 :: 和 ::1）
+  if (w[0] === 0x64 && w[1] === 0xff9b && zero(2, 6)) return v4(); // 64:ff9b::/96
+  if (w[0] === 0x64 && w[1] === 0xff9b && w[2] === 1) return v4(); // 64:ff9b:1::/48
   return a;
 }
 function selfAddrs() {
@@ -328,7 +494,7 @@ function selfAddrs() {
   for (const list of Object.values(os.networkInterfaces())) for (const i of list || []) s.add(normIp(i.address));
   return s;
 }
-/** 返回 {address, family} 或 {blocked: 原因} */
+/** 返回 {addrs:[{address, family}]}（全部检查过）或 {blocked: 原因} / {error} */
 async function vetTarget(u) {
   const host = u.hostname.replace(/^\[|\]$/g, "");
   if (METADATA_HOST.test(host)) return { blocked: "metadata host" };
@@ -340,15 +506,19 @@ async function vetTarget(u) {
     catch (e) { return { error: e.code || "dns error" }; }
     if (!addrs.length) return { error: "ENOTFOUND" };
   }
-  const mine = selfAddrs();
+  const mine = selfAddrs(), ok = [];
   for (const a of addrs) {
-    const ip = normIp(a.address), type = net.isIP(ip) === 6 ? "ipv6" : "ipv4";
-    if (ALWAYS_BLOCK.check(ip, type)) return { blocked: "link-local / metadata / unspecified address (" + ip + ")" };
-    if (port === PORT && (LOOPBACK.check(ip, type) || mine.has(ip))) return { blocked: "Nocturne itself (" + ip + ":" + port + ")" };
-    if (PROBE_PRIVATE_ONLY && !PRIVATE_NET.check(ip, type)) return { blocked: "not a private address (" + ip + "), PROBE_PRIVATE_ONLY=1" };
+    const raw = String(a.address).replace(/%.*$/, ""), ip = normIp(raw), type = net.isIP(ip) === 6 ? "ipv6" : "ipv4";
+    // 内嵌 IPv4 的地址（NAT64 等）按内嵌的 IPv4 检查；IPv6 本身也要过一遍
+    const v6 = ip !== raw && net.isIP(raw) === 6 && ALWAYS_BLOCK.check(raw, "ipv6");
+    if (v6 || ALWAYS_BLOCK.check(ip, type)) return { blocked: "link-local / metadata / unspecified address (" + raw + ")" };
+    if (port === PORT && (LOOPBACK.check(ip, type) || mine.has(ip) || mine.has(raw))) return { blocked: "Nocturne itself (" + raw + ":" + port + ")" };
+    if (PROBE_PRIVATE_ONLY && !PRIVATE_NET.check(ip, type)) return { blocked: "not a private address (" + raw + "), PROBE_PRIVATE_ONLY=1" };
+    // NAT64 要连 IPv6 本身（由网关转换）；mapped / compatible 直接连内嵌的 IPv4
+    const conn = raw.toLowerCase().startsWith("64:ff9b:") ? raw : ip;
+    ok.push({ address: conn, family: net.isIP(conn) });
   }
-  const a = addrs[0], ip = normIp(a.address);
-  return { address: ip, family: net.isIP(ip) };
+  return { addrs: ok };
 }
 
 const results = new Map(); // url -> {up, ms, checkedAt, code, error, blocked}
@@ -371,7 +541,8 @@ function probe(url) {
         method: "GET",
         rejectUnauthorized: PROBE_TLS_STRICT, // 默认 false：家里的自签名证书也算在线
         // 只连接上面检查过的地址（不再二次解析，防 DNS rebinding）；Host / SNI 仍是原主机名
-        lookup: (h, o, cb) => (o && o.all ? cb(null, [{ address: v.address, family: v.family }]) : cb(null, v.address, v.family)),
+        // o.all：返回检查过的全部地址，Node 的 happy-eyeballs 才能从 IPv6 回退到 IPv4
+        lookup: (h, o, cb) => (o && o.all ? cb(null, v.addrs.map((a) => ({ address: a.address, family: a.family }))) : cb(null, v.addrs[0].address, v.addrs[0].family)),
         headers: { "User-Agent": "Nocturne-StatusProbe/" + VERSION, Accept: "*/*", Connection: "close" },
       }, (res) => {
         const ms = Number(process.hrtime.bigint() - t0) / 1e6;
@@ -449,6 +620,8 @@ function statusFor(name) {
     if (t && t.reserved) r = { up: false, ms: null, checkedAt: null, via: "http", error: "reserved domain" };
     else if (t && results.has(t.url)) r = Object.assign({ via: "http" }, results.get(t.url));
     const c = it.container && docker.available ? byName.get(String(it.container).toLowerCase()) : null;
+    // xxx.local（Bonjour / mDNS）在容器的 bridge 网络里解析不了，但浏览器可以：不返回这一项，让前端退回浏览器探测
+    if (r && !c && /^(ENOTFOUND|EAI_AGAIN)$/.test(r.error || "") && /\.local\.?$/i.test(new URL(t.url).hostname)) continue;
     // HTTP 探测不可用（没有地址 / 网络错误）时，用关联容器的运行状态
     if (c && (!r || (!r.up && !r.code))) r = { up: c.state === "running", ms: null, checkedAt: docker.checkedAt, via: "docker", state: c.state, status: c.status };
     // code：HTTP 状态码；401/403 说明服务在线、只是需要登录（auth:true），前端单独显示
@@ -627,19 +800,27 @@ async function api(req, res, url) {
   if (p === "/login" && m === "POST") {
     if (NO_AUTH) return json(res, 200, { ok: true, user: currentUser(req) });
     const ip = clientIp(req);
-    if (failsOf(ip).length >= FAIL_MAX) {
-      const wait = Math.ceil((failsOf(ip)[0] + FAIL_WINDOW - Date.now()) / 60000);
+    const ipList = ipFails.of(ip);
+    if (ipList.length >= FAIL_MAX) {
+      const wait = Math.ceil((ipList[0] + FAIL_WINDOW - Date.now()) / 60000);
       return json(res, 429, { error: "尝试次数过多，请 " + wait + " 分钟后再试" });
     }
     const b = await readBody(req);
+    // 按用户名兜底（和 IP 无关，换 IP 也绕不过去）：只影响这一个用户名，其他账户照常登录
+    const nk = nameKey(b.name), nList = nameFails.of(nk);
+    if (nList.length >= NAME_MAX) {
+      const wait = Math.ceil((nList[0] + NAME_WINDOW - Date.now()) / 60000);
+      return json(res, 429, { error: "这个账户尝试次数过多，请 " + wait + " 分钟后再试" });
+    }
+    if (nList.length >= NAME_SLOW) await new Promise((r) => setTimeout(r, Math.min(8000, 1000 * (nList.length - NAME_SLOW + 1)))); // 逐步变慢
     const u = findUser(String(b.name || "").trim());
     const ok = await verifyPassword(String(b.password || ""), u ? u.hash : DUMMY_HASH);
     if (!u || !ok) {
-      const list = failsOf(ip); list.push(Date.now()); fails.set(ip, list);
+      const list = ipFails.add(ip); nameFails.add(nk);
       log("login failed", ip, JSON.stringify(String(b.name || "").slice(0, 40)));
       return json(res, 401, { error: "用户名或密码不正确", left: Math.max(0, FAIL_MAX - list.length) });
     }
-    fails.delete(ip);
+    ipFails.clear(ip); nameFails.clear(nk);
     setCookie(req, res, newSession(u.name));
     return json(res, 200, { ok: true, user: { name: u.name, admin: !!u.admin } });
   }
@@ -656,27 +837,39 @@ async function api(req, res, url) {
   if (!me) return json(res, 401, { error: "未登录" });
 
   if (p === "/config") {
-    if (m === "GET" && url.searchParams.get("prev") === "1") { // 上一次被覆盖掉的服务器版本
-      const prev = readJSON(backupFile(me.name), null);
-      return prev && prev.data ? json(res, 200, prev) : json(res, 404, { error: "没有可恢复的服务器版本" });
+    if (m === "GET" && url.searchParams.get("prev") === "1") { // 最近一次被覆盖掉的版本（环形备份里最新的一份）
+      const prev = await withUserLock(me.name, () => latestBackup(me.name));
+      return prev ? json(res, 200, prev) : json(res, 404, { error: "没有可恢复的服务器版本" });
     }
     if (m === "GET") {
-      let doc = readConfig(me.name);
-      if (doc.data && await migrateWallpaper(me.name, doc.data)) doc = await writeConfig(me.name, doc.data);
+      const doc = await withUserLock(me.name, async () => {
+        const d = readConfig(me.name);
+        return d.data && await migrateData(me.name, d.data) ? writeConfig(me.name, d.data) : d;
+      });
       return json(res, 200, doc);
     }
     if (m === "PUT") {
-      const b = await readBody(req);
+      const b = await readBody(req); // 读请求体不占锁
       if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
-      const migrated = await migrateWallpaper(me.name, b.data);
-      const cur = readConfig(me.name);
-      // 客户端带上它基于的版本号；对不上说明另一台设备在这之间改过 → 仍以本次为准（后写覆盖），
-      // 但把被覆盖的那一版留在 backup/，客户端可以「改用服务器版」
-      const overwrote = b.baseVersion != null && +b.baseVersion !== (cur.version || 0) && !!cur.data;
-      if (overwrote) await writeJSON(backupFile(me.name), cur);
-      const doc = await writeConfig(me.name, b.data);
-      probeSoon();
-      return json(res, 200, { version: doc.version, updatedAt: doc.updatedAt, overwrote, ...(migrated ? { migrated: true } : {}) });
+      const r = await withUserLock(me.name, async () => {
+        const migrated = await migrateData(me.name, b.data);
+        const cur = readConfig(me.name);
+        // 内容和服务器上的一样：不算冲突、不升版本（同一台设备 keepalive 补发和正常推送前后脚到达时常见）
+        if (cur.data && JSON.stringify(cur.data) === JSON.stringify(b.data)) {
+          return { version: cur.version || 0, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, ...(migrated ? { migrated: true } : {}) };
+        }
+        // 客户端带上它基于的版本号；对不上说明另一台设备在这之间改过 → 仍以本次为准（后写覆盖），
+        // 但把被覆盖的那一版留在 backup/，客户端可以「改用服务器版」
+        const overwrote = b.baseVersion != null && +b.baseVersion !== (cur.version || 0) && !!cur.data;
+        // restore:true =「改用服务器版」：当前版本（刚被替换掉的本机版本）也先进备份，可以找回
+        if (cur.data && (overwrote || b.restore === true)) await addBackup(me.name, cur);
+        const doc = await writeConfig(me.name, b.data);
+        await cleanupIcons(me.name).catch((e) => log("icon cleanup", me.name, e.message));
+        return { version: doc.version, updatedAt: doc.updatedAt, overwrote, ...(migrated ? { migrated: true } : {}) };
+      });
+      if (!r.unchanged) probeSoon();
+      delete r.unchanged;
+      return json(res, 200, r);
     }
     return json(res, 405, { error: "Method Not Allowed" });
   }
@@ -699,11 +892,36 @@ async function api(req, res, url) {
       // 只收原始图片：跨站表单发不出 image/* 的 Content-Type，配合 SameSite=Lax 防 CSRF
       if (!/^image\/(jpeg|png|webp)\b/.test(ct)) return json(res, 415, { error: "需要 image/jpeg、image/png 或 image/webp" });
       const buf = await readRaw(req, MAX_WALLPAPER);
-      const ext = await storeWallpaper(me.name, buf);
+      const ext = await withUserLock(me.name, () => storeWallpaper(me.name, buf));
       const v = Date.now();
       return json(res, 200, { ok: true, v, type: WP_TYPES[ext], size: buf.length, url: "api/wallpaper?v=" + v });
     }
-    if (m === "DELETE") { await removeWallpaper(me.name); return json(res, 200, { ok: true }); }
+    if (m === "DELETE") { await withUserLock(me.name, () => removeWallpaper(me.name)); return json(res, 200, { ok: true }); }
+    return json(res, 405, { error: "Method Not Allowed" });
+  }
+
+  // 上传的图标：POST /api/icons（服务器生成 id）或 PUT /api/icons/<id>；GET / DELETE /api/icons/<id>
+  if (p === "/icons" || p.startsWith("/icons/")) {
+    const id = p === "/icons" ? "" : decodeURIComponent(p.slice("/icons/".length));
+    if ((m === "POST" && !id) || (m === "PUT" && id)) {
+      if (id && !ICON_ID.test(id)) return json(res, 400, { error: "图标 id 不合法" });
+      const ct = String(req.headers["content-type"] || "").toLowerCase();
+      if (!/^image\/(jpeg|png|webp)\b/.test(ct)) return json(res, 415, { error: "需要 image/jpeg、image/png 或 image/webp（不支持 SVG）" });
+      const buf = await readRaw(req, MAX_ICON);
+      const nid = id || newIconId();
+      const ext = await withUserLock(me.name, () => storeIcon(me.name, nid, buf));
+      return json(res, 200, { ok: true, id: nid, type: WP_TYPES[ext], size: buf.length, url: "api/icons/" + nid });
+    }
+    if (!ICON_ID.test(id)) return json(res, id ? 400 : 405, { error: id ? "图标 id 不合法" : "Method Not Allowed" });
+    if (m === "GET" || m === "HEAD") {
+      const f = findIcon(me.name, id);
+      if (!f) return json(res, 404, { error: "图标不存在" });
+      const etag = '"' + f.st.size.toString(36) + "-" + Math.round(f.st.mtimeMs).toString(36) + '"';
+      const headers = { "Content-Type": WP_TYPES[f.ext], ETag: etag, Vary: "Cookie", "Cache-Control": "private, max-age=86400", "Content-Security-Policy": "default-src 'none'" };
+      if (req.headers["if-none-match"] === etag) { res.writeHead(304, headers); return res.end(); }
+      return send(res, 200, fs.readFileSync(f.file), headers);
+    }
+    if (m === "DELETE") { await withUserLock(me.name, () => removeIcon(me.name, id)); return json(res, 200, { ok: true }); }
     return json(res, 405, { error: "Method Not Allowed" });
   }
 
@@ -768,10 +986,14 @@ async function api(req, res, url) {
         users.users = users.users.filter((u) => u !== target);
         await saveUsers();
         await dropSessionsOf(target.name);
-        await fsp.rm(configFile(target.name), { force: true });
-        await removeWallpaper(target.name);
-        await fsp.rm(backupFile(target.name), { force: true });
-        configCache.delete(configFile(target.name));
+        await withUserLock(target.name, async () => {
+          await fsp.rm(configFile(target.name), { force: true });
+          await removeWallpaper(target.name);
+          await fsp.rm(legacyBackupFile(target.name), { force: true });
+          await fsp.rm(backupDir(target.name), { recursive: true, force: true });
+          await fsp.rm(iconDir(target.name), { recursive: true, force: true });
+          configCache.delete(configFile(target.name));
+        });
         return json(res, 200, { ok: true });
       }
     }
@@ -803,7 +1025,7 @@ const server = http.createServer(async (req, res) => {
 function main() {
   ensureDirs();
   loadState();
-  migrateAllWallpapers().catch((e) => log("wallpaper migrate", e.message));
+  migrateAll().catch((e) => log("migrate", e.message));
   server.listen(PORT, HOST, () => {
     log(`夜曲 Nocturne v${VERSION} 已启动 http://${HOST}:${PORT}  data=${DATA_DIR}  auth=${NO_AUTH ? "off" : "on"}  users=${users.users.length}`);
     if (!NO_AUTH && !users.users.length) log("尚未创建账户：打开网页创建管理员");
