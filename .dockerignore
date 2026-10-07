@@ -6,3 +6,5 @@ node_modules
 *.zip
 docker-compose.yml
 .DS_Store
+docs
+tools
