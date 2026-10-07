@@ -12,6 +12,9 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const zlib = require("node:zlib");
+const dns = require("node:dns");
+const net = require("node:net");
+const os = require("node:os");
 
 const PORT = +process.env.PORT || 8080;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -22,13 +25,19 @@ const STATUS_INTERVAL = Math.max(10, +process.env.STATUS_INTERVAL || 30) * 1000;
 const PROBE_TIMEOUT = Math.max(1, +process.env.PROBE_TIMEOUT || 4) * 1000;
 const SESSION_DAYS = Math.max(1, +process.env.SESSION_DAYS || 30);
 const DOCKER_SOCK = process.env.DOCKER_SOCK || "/var/run/docker.sock";
+const flag = (v) => /^(1|true|yes|on)$/i.test(v || "");
+const PROBE_PRIVATE_ONLY = flag(process.env.PROBE_PRIVATE_ONLY); // 只探测内网地址
+const PROBE_TLS_STRICT = flag(process.env.PROBE_TLS_STRICT); // 校验 HTTPS 证书（默认不校验：自签名也算在线）
 const ICON_UPSTREAM = "https://api.iconify.design/";
 const VERSION = require("./package.json").version;
-const MAX_BODY = 12 * 1024 * 1024; // 自定义壁纸以 data URL 存在配置里，留足空间
+const MAX_BODY = 1024 * 1024; // JSON 请求（配置等）上限；壁纸走 /api/wallpaper 单独存文件
+const MAX_WALLPAPER = 15 * 1024 * 1024;
 const NO_AUTH_USER = "default";
 
 const CONFIG_DIR = path.join(DATA_DIR, "config");
 const CACHE_DIR = path.join(DATA_DIR, "cache");
+const WALLPAPER_DIR = path.join(DATA_DIR, "wallpapers");
+const BACKUP_DIR = path.join(DATA_DIR, "backup"); // 被另一台设备覆盖前的那一版配置
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 
@@ -37,7 +46,7 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 /* ------------------------------------------------------------------ storage */
 
 function ensureDirs() {
-  for (const d of [DATA_DIR, CONFIG_DIR, CACHE_DIR]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [DATA_DIR, CONFIG_DIR, CACHE_DIR, WALLPAPER_DIR, BACKUP_DIR]) fs.mkdirSync(d, { recursive: true });
 }
 function readJSON(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; }
@@ -177,6 +186,7 @@ setInterval(() => { for (const ip of fails.keys()) failsOf(ip); }, 60000).unref(
 /* ------------------------------------------------------------------ configs */
 
 const configFile = (name) => path.join(CONFIG_DIR, name.toLowerCase() + ".json");
+const backupFile = (name) => path.join(BACKUP_DIR, name.toLowerCase() + ".json");
 const configCache = new Map(); // lname -> {mtimeMs, doc}
 function readConfig(name) {
   const f = configFile(name);
@@ -202,6 +212,73 @@ function allUserNames() {
   return NO_AUTH ? [NO_AUTH_USER, ...users.users.map((u) => u.name)] : users.users.map((u) => u.name);
 }
 
+/* --------------------------------------------------------------- wallpapers */
+
+/** 自定义壁纸存成文件 /data/wallpapers/<user>.<ext>，配置里只记 {id:"custom", file:true, v} */
+const WP_TYPES = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
+function sniffImage(buf) {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpg";
+  if (buf.length > 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
+  if (buf.length > 12 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP") return "webp";
+  return null;
+}
+const wallpaperBase = (name) => path.join(WALLPAPER_DIR, name.toLowerCase());
+function findWallpaper(name) {
+  for (const ext of Object.keys(WP_TYPES)) {
+    const f = wallpaperBase(name) + "." + ext;
+    try { const st = fs.statSync(f); if (st.isFile()) return { file: f, ext, st }; } catch (e) { /* next */ }
+  }
+  return null;
+}
+async function storeWallpaper(name, buf) {
+  const ext = sniffImage(buf);
+  if (!ext) throw Object.assign(new Error("只支持 JPEG / PNG / WebP 图片"), { status: 415 });
+  const file = wallpaperBase(name) + "." + ext;
+  const tmp = file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
+  const fh = await fsp.open(tmp, "w", 0o600);
+  try { await fh.writeFile(buf); await fh.sync(); } finally { await fh.close(); }
+  await fsp.rename(tmp, file);
+  for (const e of Object.keys(WP_TYPES)) if (e !== ext) await fsp.rm(wallpaperBase(name) + "." + e, { force: true });
+  return ext;
+}
+async function removeWallpaper(name) {
+  for (const e of Object.keys(WP_TYPES)) await fsp.rm(wallpaperBase(name) + "." + e, { force: true });
+}
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    const tooBig = () => Object.assign(new Error("图片太大（上限 " + Math.round(limit / 1048576) + "MB）"), { status: 413, close: true });
+    if (+req.headers["content-length"] > limit) return reject(tooBig());
+    const chunks = []; let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > limit) { reject(tooBig()); req.removeAllListeners("data"); req.resume(); return; }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+/** 旧版把壁纸以 data URL 存在配置里：解码落盘，改写成文件引用。返回是否改动了 data。 */
+async function migrateWallpaper(name, data) {
+  const w = data && data.settings && data.settings.wallpaper;
+  if (!w || typeof w.url !== "string" || !w.url.startsWith("data:")) return false;
+  const m = /^data:image\/[a-z+.-]+;base64,([A-Za-z0-9+/=\s]+)$/i.exec(w.url);
+  let ok = false;
+  if (m) {
+    try { await storeWallpaper(name, Buffer.from(m[1], "base64")); ok = true; } catch (e) { log("wallpaper migrate", name, e.message); }
+  }
+  data.settings.wallpaper = Object.assign({}, w, ok ? { id: "custom", file: true, v: Date.now(), url: "" } : { id: "star", url: "" });
+  if (!ok) delete data.settings.wallpaper.file;
+  log("wallpaper migrated from data URL", name, ok ? "ok" : "dropped (unreadable)");
+  return true;
+}
+async function migrateAllWallpapers() {
+  for (const name of allUserNames()) {
+    const cur = readConfig(name);
+    if (cur.data && await migrateWallpaper(name, cur.data)) await writeConfig(name, cur.data);
+  }
+}
+
 /* ------------------------------------------------------------------- status */
 
 const RESERVED = /(^|\.)(example\.(com|net|org)|example|test|invalid)$/i;
@@ -224,29 +301,87 @@ function itemsOf(doc) {
   return out;
 }
 
-const results = new Map(); // url -> {up, ms, checkedAt, code, error}
+/* 探测安全边界（服务端代为请求 = 受控 SSRF，所以要设限）：
+ *  - 永远拦截：链路本地 169.254.0.0/16、fe80::/10（含云厂商元数据 169.254.169.254）、元数据主机名、0.0.0.0/8 与 ::、
+ *    以及本机 Nocturne 自己的端口（回环 / 本机网卡地址）
+ *  - 主机名先 DNS 解析，所有解析结果都要过检查；实际连接只用检查过的地址（防 DNS rebinding）
+ *  - PROBE_PRIVATE_ONLY=1：只允许内网（RFC1918 / CGNAT 100.64/10 / ULA fc00::/7 / 回环）；.local/.lan/.home.arpa 也要解析到内网才放行 */
+function blockList(v4, v6) {
+  const b = new net.BlockList();
+  for (const [a, n] of v4) b.addSubnet(a, n, "ipv4");
+  for (const [a, n] of v6) b.addSubnet(a, n, "ipv6");
+  return b;
+}
+const ALWAYS_BLOCK = blockList([["169.254.0.0", 16], ["0.0.0.0", 8], ["100.100.100.200", 32]], [["fe80::", 10], ["::", 128], ["fd00:ec2::254", 128]]);
+const LOOPBACK = blockList([["127.0.0.0", 8]], [["::1", 128]]);
+const PRIVATE_NET = blockList([["10.0.0.0", 8], ["172.16.0.0", 12], ["192.168.0.0", 16], ["100.64.0.0", 10], ["127.0.0.0", 8]], [["fc00::", 7], ["::1", 128]]);
+const METADATA_HOST = /^(metadata\.google\.internal|metadata\.goog|metadata|instance-data(\.ec2\.internal)?|metadata\.azure\.com)\.?$/i;
+function normIp(a) { // IPv4-mapped IPv6（::ffff:1.2.3.4 / ::ffff:102:304）→ IPv4
+  let m = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(a);
+  if (m) return m[1];
+  m = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(a);
+  if (m) { const h = parseInt(m[1], 16), l = parseInt(m[2], 16); return [h >> 8, h & 255, l >> 8, l & 255].join("."); }
+  return a;
+}
+function selfAddrs() {
+  const s = new Set();
+  for (const list of Object.values(os.networkInterfaces())) for (const i of list || []) s.add(normIp(i.address));
+  return s;
+}
+/** 返回 {address, family} 或 {blocked: 原因} */
+async function vetTarget(u) {
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  if (METADATA_HOST.test(host)) return { blocked: "metadata host" };
+  const port = +u.port || (u.protocol === "https:" ? 443 : 80);
+  let addrs;
+  if (net.isIP(host)) addrs = [{ address: host, family: net.isIP(host) }];
+  else {
+    try { addrs = await dns.promises.lookup(host, { all: true, verbatim: true }); }
+    catch (e) { return { error: e.code || "dns error" }; }
+    if (!addrs.length) return { error: "ENOTFOUND" };
+  }
+  const mine = selfAddrs();
+  for (const a of addrs) {
+    const ip = normIp(a.address), type = net.isIP(ip) === 6 ? "ipv6" : "ipv4";
+    if (ALWAYS_BLOCK.check(ip, type)) return { blocked: "link-local / metadata / unspecified address (" + ip + ")" };
+    if (port === PORT && (LOOPBACK.check(ip, type) || mine.has(ip))) return { blocked: "Nocturne itself (" + ip + ":" + port + ")" };
+    if (PROBE_PRIVATE_ONLY && !PRIVATE_NET.check(ip, type)) return { blocked: "not a private address (" + ip + "), PROBE_PRIVATE_ONLY=1" };
+  }
+  const a = addrs[0], ip = normIp(a.address);
+  return { address: ip, family: net.isIP(ip) };
+}
+
+const results = new Map(); // url -> {up, ms, checkedAt, code, error, blocked}
+const blockedLogged = new Set();
 let docker = { available: false, containers: [], checkedAt: null, error: null };
 
 function probe(url) {
   return new Promise((resolve) => {
     const t0 = process.hrtime.bigint();
-    let done = false;
+    let done = false, req = null;
     const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(Object.assign(r, { checkedAt: new Date().toISOString() })); };
+    const timer = setTimeout(() => { if (req) req.destroy(new Error("timeout")); finish({ up: false, ms: null, error: "timeout" }); }, PROBE_TIMEOUT);
     let u; try { u = new URL(url); } catch (e) { return finish({ up: false, ms: null, error: "bad url" }); }
-    const mod = u.protocol === "https:" ? https : http;
-    const req = mod.request(u, {
-      method: "GET",
-      rejectUnauthorized: false, // 自签名证书也算在线
-      headers: { "User-Agent": "Nocturne-StatusProbe/" + VERSION, Accept: "*/*", Connection: "close" },
-    }, (res) => {
-      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-      const code = res.statusCode || 0;
-      res.destroy();
-      finish({ up: code > 0 && code < 500, ms: Math.round(ms), code });
-    });
-    const timer = setTimeout(() => { req.destroy(new Error("timeout")); finish({ up: false, ms: null, error: "timeout" }); }, PROBE_TIMEOUT);
-    req.on("error", (e) => finish({ up: false, ms: null, error: e.code || e.message }));
-    req.end();
+    vetTarget(u).then((v) => {
+      if (done) return;
+      if (v.blocked) { if (!blockedLogged.has(u.host)) { blockedLogged.add(u.host); log("probe blocked", u.host, v.blocked); } return finish({ up: false, ms: null, blocked: true, error: "blocked: " + v.blocked }); }
+      if (v.error) return finish({ up: false, ms: null, error: v.error });
+      const mod = u.protocol === "https:" ? https : http;
+      req = mod.request(u, {
+        method: "GET",
+        rejectUnauthorized: PROBE_TLS_STRICT, // 默认 false：家里的自签名证书也算在线
+        // 只连接上面检查过的地址（不再二次解析，防 DNS rebinding）；Host / SNI 仍是原主机名
+        lookup: (h, o, cb) => (o && o.all ? cb(null, [{ address: v.address, family: v.family }]) : cb(null, v.address, v.family)),
+        headers: { "User-Agent": "Nocturne-StatusProbe/" + VERSION, Accept: "*/*", Connection: "close" },
+      }, (res) => {
+        const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+        const code = res.statusCode || 0;
+        res.destroy();
+        finish({ up: code > 0 && code < 500, ms: Math.round(ms), code });
+      });
+      req.on("error", (e) => finish({ up: false, ms: null, error: e.code || e.message }));
+      req.end();
+    }, (e) => finish({ up: false, ms: null, error: e.message }));
   });
 }
 
@@ -316,7 +451,9 @@ function statusFor(name) {
     const c = it.container && docker.available ? byName.get(String(it.container).toLowerCase()) : null;
     // HTTP 探测不可用（没有地址 / 网络错误）时，用关联容器的运行状态
     if (c && (!r || (!r.up && !r.code))) r = { up: c.state === "running", ms: null, checkedAt: docker.checkedAt, via: "docker", state: c.state, status: c.status };
-    if (r) out[it.id] = { up: r.up, ms: r.ms, checkedAt: r.checkedAt, via: r.via, ...(r.code ? { code: r.code } : {}), ...(r.state ? { state: r.state } : {}) };
+    // code：HTTP 状态码；401/403 说明服务在线、只是需要登录（auth:true），前端单独显示
+    if (r) out[it.id] = { up: r.up, ms: r.ms, checkedAt: r.checkedAt, via: r.via, status: r.blocked ? "blocked" : r.up ? (r.code === 401 || r.code === 403 ? "auth" : "up") : "down",
+      ...(r.code ? { code: r.code } : {}), ...(r.code === 401 || r.code === 403 ? { auth: true } : {}), ...(r.state ? { state: r.state } : {}), ...(r.error ? { error: r.error } : {}) };
   }
   return out;
 }
@@ -336,10 +473,12 @@ function readBody(req) {
     const ct = String(req.headers["content-type"] || "");
     // 只接受 JSON：跨站表单无法伪造（需 CORS 预检），配合 SameSite=Lax 防 CSRF
     if (!/^application\/json\b/i.test(ct)) return reject(Object.assign(new Error("需要 application/json"), { status: 415 }));
+    const tooBig = () => Object.assign(new Error("请求体过大"), { status: 413, close: true });
+    if (+req.headers["content-length"] > MAX_BODY) return reject(tooBig());
     const chunks = []; let size = 0;
     req.on("data", (c) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(Object.assign(new Error("请求体过大"), { status: 413 })); req.destroy(); return; }
+      if (size > MAX_BODY) { reject(tooBig()); req.removeAllListeners("data"); req.resume(); return; }
       chunks.push(c);
     });
     req.on("end", () => {
@@ -398,7 +537,9 @@ function serveIndex(req, res) {
   };
   const tag = "<script>window.NOCTURNE=" + JSON.stringify(boot).replace(/</g, "\\u003c") + ";</script>";
   const html = Buffer.from(indexCache.html.replace("<!--nocturne:boot-->", tag));
-  const headers = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", Vary: "Cookie, Accept-Encoding", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin" };
+  const headers = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", Vary: "Cookie, Accept-Encoding", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
+    // 不允许被别的网站嵌进 iframe（点击劫持）；用不到的浏览器能力一律关掉。内联脚本较多，暂不启用 CSP。
+    "X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(), geolocation=()" };
   if (acceptsGzip(req)) return send(res, 200, zlib.gzipSync(html, { level: 6 }), Object.assign(headers, { "Content-Encoding": "gzip" }));
   send(res, 200, html, headers);
 }
@@ -515,15 +656,54 @@ async function api(req, res, url) {
   if (!me) return json(res, 401, { error: "未登录" });
 
   if (p === "/config") {
-    if (m === "GET") return json(res, 200, readConfig(me.name));
+    if (m === "GET" && url.searchParams.get("prev") === "1") { // 上一次被覆盖掉的服务器版本
+      const prev = readJSON(backupFile(me.name), null);
+      return prev && prev.data ? json(res, 200, prev) : json(res, 404, { error: "没有可恢复的服务器版本" });
+    }
+    if (m === "GET") {
+      let doc = readConfig(me.name);
+      if (doc.data && await migrateWallpaper(me.name, doc.data)) doc = await writeConfig(me.name, doc.data);
+      return json(res, 200, doc);
+    }
     if (m === "PUT") {
       const b = await readBody(req);
       if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
+      const migrated = await migrateWallpaper(me.name, b.data);
       const cur = readConfig(me.name);
-      const doc = await writeConfig(me.name, b.data); // last-write-wins
+      // 客户端带上它基于的版本号；对不上说明另一台设备在这之间改过 → 仍以本次为准（后写覆盖），
+      // 但把被覆盖的那一版留在 backup/，客户端可以「改用服务器版」
+      const overwrote = b.baseVersion != null && +b.baseVersion !== (cur.version || 0) && !!cur.data;
+      if (overwrote) await writeJSON(backupFile(me.name), cur);
+      const doc = await writeConfig(me.name, b.data);
       probeSoon();
-      return json(res, 200, { version: doc.version, updatedAt: doc.updatedAt, overwrote: b.baseVersion != null && +b.baseVersion !== (cur.version || 0) });
+      return json(res, 200, { version: doc.version, updatedAt: doc.updatedAt, overwrote, ...(migrated ? { migrated: true } : {}) });
     }
+    return json(res, 405, { error: "Method Not Allowed" });
+  }
+
+  if (p === "/wallpaper") {
+    if (m === "GET" || m === "HEAD") {
+      const w = findWallpaper(me.name);
+      if (!w) return json(res, 404, { error: "没有自定义壁纸" });
+      const etag = '"' + w.st.size.toString(36) + "-" + Math.round(w.st.mtimeMs).toString(36) + '"';
+      const headers = {
+        "Content-Type": WP_TYPES[w.ext], ETag: etag, "Last-Modified": new Date(w.st.mtimeMs).toUTCString(), Vary: "Cookie",
+        // 前端用 ?v=<上传时间> 区分版本，同一个 v 的内容不会变
+        "Cache-Control": url.searchParams.has("v") ? "private, max-age=31536000, immutable" : "private, no-cache",
+      };
+      if (req.headers["if-none-match"] === etag) { res.writeHead(304, headers); return res.end(); }
+      return send(res, 200, fs.readFileSync(w.file), headers);
+    }
+    if (m === "PUT" || m === "POST") {
+      const ct = String(req.headers["content-type"] || "").toLowerCase();
+      // 只收原始图片：跨站表单发不出 image/* 的 Content-Type，配合 SameSite=Lax 防 CSRF
+      if (!/^image\/(jpeg|png|webp)\b/.test(ct)) return json(res, 415, { error: "需要 image/jpeg、image/png 或 image/webp" });
+      const buf = await readRaw(req, MAX_WALLPAPER);
+      const ext = await storeWallpaper(me.name, buf);
+      const v = Date.now();
+      return json(res, 200, { ok: true, v, type: WP_TYPES[ext], size: buf.length, url: "api/wallpaper?v=" + v });
+    }
+    if (m === "DELETE") { await removeWallpaper(me.name); return json(res, 200, { ok: true }); }
     return json(res, 405, { error: "Method Not Allowed" });
   }
 
@@ -589,6 +769,8 @@ async function api(req, res, url) {
         await saveUsers();
         await dropSessionsOf(target.name);
         await fsp.rm(configFile(target.name), { force: true });
+        await removeWallpaper(target.name);
+        await fsp.rm(backupFile(target.name), { force: true });
         configCache.delete(configFile(target.name));
         return json(res, 200, { ok: true });
       }
@@ -608,9 +790,11 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return await api(req, res, url);
     if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method Not Allowed");
-    return serveStatic(req, res, url.pathname);
+    // 旧浏览器/工具会直接请求 /favicon.ico：给 SVG 图标（登录前也可访问）
+    return serveStatic(req, res, url.pathname === "/favicon.ico" ? "/favicon.svg" : url.pathname);
   } catch (e) {
     if (!e.status) log("error", req.method, url.pathname, e.stack || e.message);
+    if (e.close) res.setHeader("Connection", "close"); // 没读完的请求体不再接收
     if (!res.headersSent) json(res, e.status || 500, { error: e.status ? e.message : "服务器内部错误" });
     else res.destroy();
   }
@@ -619,6 +803,7 @@ const server = http.createServer(async (req, res) => {
 function main() {
   ensureDirs();
   loadState();
+  migrateAllWallpapers().catch((e) => log("wallpaper migrate", e.message));
   server.listen(PORT, HOST, () => {
     log(`夜曲 Nocturne v${VERSION} 已启动 http://${HOST}:${PORT}  data=${DATA_DIR}  auth=${NO_AUTH ? "off" : "on"}  users=${users.users.length}`);
     if (!NO_AUTH && !users.users.length) log("尚未创建账户：打开网页创建管理员");
