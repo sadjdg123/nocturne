@@ -1767,5 +1767,348 @@
         A.on("editmode", nodrag);
       })();
     </script>
+    <style>
+      /* Desktop pass · layout ≥1024px (mobile untouched) + ⌘K command palette */
+      .x-kbd, .x-offl { display: none; }
+      @media (min-width: 1024px) {
+        /* wallpaper always covers: fixed layers sized to the viewport, plus a document-height fallback under them */
+        html:has(.x-bg--d:not([style*="hidden"])) { background: linear-gradient(180deg, rgba(6, 8, 13, .45), rgba(6, 8, 13, .8)), url(bg-desktop.jpg) center top / cover no-repeat, #06080D; }
+        .x-bg, .x-wp, .x-shade { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100lvh; object-fit: cover; }
+
+        .page { max-width: none; padding-inline: 0; }
+        .x-wrap { box-sizing: border-box; max-width: 1280px; padding: 8px 32px 0; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; row-gap: 20px; }
+        .x-hero { padding-top: 0; }
+        .x-clock { font-size: 96px; line-height: 1.08; }
+        .x-date { margin-top: 10px; }
+        .x-greet { margin-top: 4px; font-size: 20px; }
+        .x-search { width: min(100%, 600px); gap: 12px; }
+
+        /* groups: glass panels in a responsive grid; small groups sit side by side */
+        .x-groups { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; align-items: start; align-content: start; }
+        .x-group { padding: 14px 18px 18px; border-radius: 22px; background: rgba(10, 13, 20, .30); border: 1px solid rgba(255, 240, 220, .07);
+          box-shadow: inset 0 1px 0 rgba(255, 240, 220, .04); }
+        .x-group:has(> .x-chips), .x-group:has(.x-grid > a:nth-of-type(4)), .x-groups > .x-eaddg { grid-column: 1 / -1; }
+        .x-gtitle { margin-bottom: 14px; font-size: 16px; }
+        .x-grid { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
+        .x-tile { aspect-ratio: 1 / 1; min-height: 0; padding: 14px 10px 12px; gap: 7px; border-radius: 18px; cursor: pointer;
+          transition: transform .22s cubic-bezier(.2, .7, .2, 1), border-color .22s ease, background .22s ease, box-shadow .22s ease; }
+        .x-tile .x-ic { width: 50px; height: 50px; border-radius: 13px; }
+        .x-tile .x-ic .x-emoji { font-size: 28px; }
+        .x-tile:hover { transform: translateY(-3px); background: rgba(30, 36, 52, .66); border-color: rgba(233, 178, 106, .32); box-shadow: 0 14px 30px rgba(0, 0, 0, .32); }
+        .x-tile:focus-visible { outline: 2px solid var(--x-amber); outline-offset: 3px; transform: translateY(-3px); }
+        .x-chip { cursor: pointer; transition: border-color .2s ease, background .2s ease, transform .2s ease; }
+        .x-chip:hover { background: rgba(30, 36, 52, .66); transform: translateY(-1px); }
+        body.editing .x-tile:hover, body.editing .x-chip:hover { transform: none; box-shadow: none; }
+        .x-tile.x-ghost { aspect-ratio: 1 / 1; }
+        .x-group.x-flash { animation: x-flash 1.2s ease; }
+
+        /* sidebar */
+        .x-side { position: sticky; top: 20px; gap: 16px; }
+        .x-card { padding: 18px 20px; }
+        .x-ring { width: 56px; height: 56px; }
+        .x-ring .bg { stroke: rgba(255, 240, 220, .16); stroke-width: 3; }
+        .x-ring .fg { stroke-width: 3; }
+        .x-card.has-off .x-ring .bg { stroke: rgba(226, 109, 90, .45); }
+        .x-cnt { font-size: 34px; }
+        .x-sline.is-off { display: none; }
+        .x-offl:not([hidden]) { display: block; margin-top: 14px; }
+        .x-offl p { margin: 0 0 8px; font: 500 12px/1.4 var(--x-ui); color: var(--x-mist); letter-spacing: .06em; }
+        .x-offl ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+        .x-offl li { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 28px; padding: 0 11px 0 9px; border-radius: 14px;
+          background: rgba(226, 109, 90, .08); border: 1px solid rgba(226, 109, 90, .18); font-size: 12.5px; color: #EBC9C2; }
+        .x-offl li i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: #E26D5A; }
+        .x-offl li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* toast: top-right, clear of chips and the edit bar */
+        .x-toast, body.editing .x-toast { top: 84px; right: 28px; bottom: auto; left: auto; max-width: 400px; transform: translateY(-8px); }
+        .x-toast.is-on { transform: none; }
+
+        /* ⌘K hint inside the search box */
+        .x-kbd { display: inline-flex; align-items: center; gap: 2px; flex: none; height: 24px; margin-right: 10px; padding: 0 8px; border-radius: 7px;
+          border: 1px solid var(--x-line); background: rgba(255, 255, 255, .04); color: var(--x-mist); font: 500 12px/1 var(--x-ui); cursor: pointer; }
+        .x-kbd:hover { color: var(--x-text); border-color: rgba(255, 240, 220, .22); }
+      }
+      @media (min-width: 1200px) {
+        .x-wrap { padding-inline: 40px; grid-template-columns: minmax(0, 1fr) 300px; column-gap: 32px; }
+        .x-groups { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+      }
+      @media (min-width: 1600px) {
+        .x-wrap { max-width: 1440px; }
+      }
+      @keyframes x-flash { 0%, 100% { border-color: rgba(255, 240, 220, .07); } 30% { border-color: rgba(233, 178, 106, .6); } }
+
+      /* command palette (any width; opened by ⌘K / Ctrl+K / "/") */
+      .x-cmdk-back { position: fixed; inset: 0; z-index: 70; background: rgba(4, 6, 10, .42); opacity: 0; transition: opacity .18s ease; }
+      .x-cmdk { position: fixed; z-index: 71; top: 18vh; left: 50%; width: min(560px, calc(100vw - 24px)); max-height: min(64vh, 520px); display: flex; flex-direction: column;
+        border-radius: 20px; background: rgba(14, 18, 28, .78); color: var(--x-text); box-shadow: 0 30px 80px rgba(0, 0, 0, .55), 0 2px 0 rgba(255, 240, 220, .04) inset;
+        transform: translate(-50%, -6px) scale(.98); opacity: 0; transition: opacity .18s ease, transform .18s cubic-bezier(.2, .7, .2, 1); overflow: hidden; }
+      .x-cmdk-back.is-on { opacity: 1; }
+      .x-cmdk.is-on { opacity: 1; transform: translate(-50%, 0); }
+      .x-cmdk-in { display: flex; align-items: center; gap: 12px; height: 58px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--x-line); flex: none; }
+      .x-cmdk-in svg { width: 18px; height: 18px; color: var(--x-mist); flex: none; }
+      .x-cmdk-in input, .x-cmdk-in input:focus { flex: 1; min-width: 0; height: 100%; border: 0; background: none; color: var(--x-text); font: 400 17px var(--x-ui); outline: none; box-shadow: none; -webkit-appearance: none; appearance: none; }
+      .x-cmdk-in input::placeholder { color: var(--x-mist); }
+      .x-cmdk-in kbd { flex: none; padding: 3px 7px; border-radius: 6px; border: 1px solid var(--x-line); color: var(--x-mist); font: 500 11px/1 var(--x-ui); }
+      .x-cmdk-list { overflow-y: auto; overscroll-behavior: contain; padding: 6px 8px 8px; }
+      .x-cmdk-sec { margin: 10px 10px 4px; font: 500 11.5px/1.4 var(--x-ui); color: var(--x-mist); letter-spacing: .1em; }
+      .x-cmdk-row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 6px 10px; border-radius: 12px; cursor: pointer; }
+      .x-cmdk-row[aria-selected="true"] { background: rgba(255, 240, 220, .08); box-shadow: inset 2px 0 0 var(--x-amber); }
+      .x-cmdk-row .x-ic { width: 32px; height: 32px; border-radius: 9px; font-size: 13px; }
+      .x-cmdk-row .x-ic .x-emoji { font-size: 18px; }
+      .x-cmdk-g { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 9px; background: rgba(255, 255, 255, .06); color: var(--x-amber); font: 500 15px/1 var(--x-ui); }
+      .x-cmdk-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
+      .x-cmdk-t b { font-weight: 500; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .x-cmdk-t b mark { background: none; color: var(--x-amber); }
+      .x-cmdk-t small { font-size: 12px; color: var(--x-mist); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .x-cmdk-tag { flex: none; font-size: 11.5px; color: var(--x-mist); padding: 2px 8px; border-radius: 10px; background: rgba(255, 255, 255, .05); }
+      .x-cmdk-empty { margin: 18px 12px; font-size: 14px; color: var(--x-mist); text-align: center; }
+      .x-cmdk-foot { flex: none; display: flex; gap: 16px; padding: 9px 18px; border-top: 1px solid var(--x-line); font-size: 11.5px; color: var(--x-mist); }
+      @media (max-width: 767px) { .x-cmdk-foot { display: none; } .x-cmdk { top: 10vh; } }
+      @media (prefers-reduced-motion: reduce) { .x-cmdk, .x-cmdk-back, .x-tile, .x-chip { transition: none; } .x-group.x-flash { animation: none; } }
+    </style>
+    <script>
+      /* Desktop pass · ⌘K command palette, search-box hint, structured offline list. App API only. */
+      (function () {
+        "use strict";
+        var A = window.App; if (!A) return;
+        var esc = A.util.esc, body = document.body, groupsEl = document.getElementById("x-groups");
+        var MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+        var MOD = MAC ? "⌘" : "Ctrl ";
+
+        /* ---- status card: offline names as compact chips (desktop CSS shows it; mobile keeps the sentence) ---- */
+        var side = document.querySelector(".x-side"), sline = side && side.querySelector(".x-sline");
+        if (sline) {
+          var card = sline.closest(".x-card"), offl = document.createElement("div");
+          offl.className = "x-offl"; offl.hidden = true; sline.after(offl);
+          var drawOff = function () {
+            var off = sline.classList.contains("is-off"), names = [];
+            if (off) {
+              var m = {}; A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { m[i.id] = i; }); });
+              groupsEl.querySelectorAll(".x-tile[data-id] > .dot.off").forEach(function (d) {
+                var i = m[d.parentNode.getAttribute("data-id")]; if (i) names.push(i.title);
+              });
+              if (!names.length) names = sline.textContent.replace(/^离线：/, "").split("、");
+            }
+            card.classList.toggle("has-off", off);
+            offl.hidden = !off;
+            offl.innerHTML = off ? "<p>离线 · " + names.length + "</p><ul>" + names.map(function (n) { return '<li title="' + esc(n) + '"><i aria-hidden="true"></i><span>' + esc(n) + "</span></li>"; }).join("") + "</ul>" : "";
+          };
+          new MutationObserver(drawOff).observe(sline, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+          drawOff();
+        }
+
+        /* ---- palette DOM ---- */
+        var back = document.createElement("div"); back.className = "x-cmdk-back"; back.hidden = true;
+        var pal = document.createElement("div"); pal.className = "x-cmdk x-glass"; pal.hidden = true;
+        pal.setAttribute("role", "dialog"); pal.setAttribute("aria-modal", "true"); pal.setAttribute("aria-label", "命令面板");
+        pal.innerHTML = '<div class="x-cmdk-in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+          '<input type="text" role="combobox" aria-expanded="true" aria-controls="x-cmdk-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="搜索服务、分组或操作…" aria-label="搜索服务、分组或操作"><kbd>Esc</kbd></div>' +
+          '<div class="x-cmdk-list" id="x-cmdk-list" role="listbox" aria-label="结果"></div>' +
+          '<div class="x-cmdk-foot"><span>↑↓ 选择</span><span>↵ 打开</span><span>' + MOD.trim() + '↵ 新标签页</span><span>Esc 关闭</span></div>';
+        body.append(back, pal);
+        var inp = pal.querySelector("input"), list = pal.querySelector(".x-cmdk-list");
+
+        /* search-box hint (CSS shows it ≥1024px only) */
+        var bar = document.querySelector(".x-bar");
+        if (bar) {
+          var kb = document.createElement("kbd"); kb.className = "x-kbd"; kb.title = "命令面板"; kb.textContent = MOD + "K";
+          kb.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); open(document.getElementById("x-q").value.trim()); });
+          bar.appendChild(kb);
+        }
+
+        /* ---- fuzzy matching ---- */
+        function match(text, q) {
+          text = String(text || ""); if (!q) return { s: 0, hits: [] };
+          var t = text.toLowerCase(), at = t.indexOf(q), hits = [], k;
+          if (at > -1) {
+            for (k = 0; k < q.length; k++) hits.push(at + k);
+            return { s: 100 - Math.min(at, 30) + (at === 0 ? 40 : /[\s\-_.\/:]/.test(t[at - 1] || "") ? 20 : 0) + (t.length === q.length ? 30 : 0), hits: hits };
+          }
+          var j = 0, last = -1, gaps = 0;
+          for (k = 0; k < t.length && j < q.length; k++) {
+            if (t[k] === q[j]) { if (last > -1) gaps += k - last - 1; hits.push(k); last = k; j++; }
+          }
+          if (j < q.length) return null;
+          return { s: Math.max(1, 60 - gaps * 3 - hits[0]), hits: hits };
+        }
+        function mark(text, hits) {
+          if (!hits || !hits.length) return esc(text);
+          var set = {}; hits.forEach(function (h) { set[h] = 1; });
+          return Array.from(String(text)).map(function (c, i) { return set[i] ? "<mark>" + esc(c) + "</mark>" : esc(c); }).join("");
+        }
+        function host(u) { try { return new URL(u).host; } catch (e) { return u || ""; } }
+
+        /* ---- results ---- */
+        function engine() {
+          var st = A.state.settings;
+          return (st.engines || []).filter(function (x) { return x.id === st.engine; })[0] || (st.engines || [])[0];
+        }
+        function actions(q) {
+          var editing = body.classList.contains("editing"), net = A.state.settings.net === "lan" ? "lan" : "wan";
+          var list = [
+            { k: "net", t: net === "lan" ? "切换到外网" : "切换到内网", d: "当前：" + (net === "lan" ? "内网" : "外网") + "地址", g: "⇄", kw: "切换内网外网 lan wan network" },
+            { k: "edit", t: editing ? "退出编辑" : "进入编辑", d: MOD + "E", g: "✎", kw: "编辑 edit 排序 拖动" },
+            { k: "add", t: "添加项目", d: "新建一个服务或链接", g: "+", kw: "添加 新建 add new item" },
+            { k: "settings", t: "打开设置", d: MOD + ",", g: "⚙", kw: "设置 settings 壁纸 外观 preferences" }
+          ];
+          return list;
+        }
+        var rows = [], sel = 0;
+        function build() {
+          var raw = inp.value.trim(), q = raw.toLowerCase(), out = [];
+          var items = [];
+          A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { items.push({ i: i, g: g }); }); });
+          if (!q) {
+            var byId = {}; items.forEach(function (x) { byId[x.i.id] = x; });
+            var rec = (A.state.recent || []).map(function (id) { return byId[id]; }).filter(Boolean).slice(0, 5);
+            rec.forEach(function (x) { out.push({ type: "item", sec: "最近使用", x: x, hits: [] }); });
+            var seen = {}; rec.forEach(function (x) { seen[x.i.id] = 1; });
+            items.filter(function (x) { return !seen[x.i.id]; }).slice(0, Math.max(0, 6 - rec.length)).forEach(function (x) { out.push({ type: "item", sec: rec.length ? "最近使用" : "服务", x: x, hits: [] }); });
+            actions().forEach(function (a) { out.push({ type: "action", sec: "操作", a: a, hits: [] }); });
+          } else {
+            var it = [];
+            items.forEach(function (x) {
+              var u = A.url(x.i), mt = match(x.i.title, q), md = match(x.i.desc, q), mu = match(u, q) || match(x.i.lan, q) || match(x.i.wan, q);
+              var s = Math.max(mt ? mt.s * 3 : 0, md ? md.s * 1.5 : 0, mu ? mu.s : 0);
+              if (s > 0) it.push({ type: "item", sec: "服务", x: x, hits: mt ? mt.hits : [], s: s });
+            });
+            it.sort(function (a, b) { return b.s - a.s; });
+            out = out.concat(it.slice(0, 12));
+            var gs = [];
+            A.state.groups.forEach(function (g) { var m = match(g.name, q); if (m) gs.push({ type: "group", sec: "分组", g: g, hits: m.hits, s: m.s }); });
+            gs.sort(function (a, b) { return b.s - a.s; }); out = out.concat(gs);
+            var as = [];
+            actions().forEach(function (a) { var m = match(a.t, q), mk = match(a.kw, q); if (m || mk) as.push({ type: "action", sec: "操作", a: a, hits: m ? m.hits : [], s: Math.max(m ? m.s * 2 : 0, mk ? mk.s : 0) }); });
+            as.sort(function (a, b) { return b.s - a.s; }); out = out.concat(as);
+            var e = engine();
+            if (e) out.push({ type: "search", sec: "搜索", e: e, q: raw, hits: [] });
+          }
+          rows = out; sel = 0; draw();
+        }
+        function rowHTML(r, n) {
+          var icon, title, sub, tag = "";
+          if (r.type === "item") {
+            icon = A.util.iconHTML(r.x.i.icon, r.x.i.title); title = mark(r.x.i.title, r.hits);
+            sub = esc([r.x.i.desc, host(A.url(r.x.i))].filter(Boolean).join(" · ")); tag = esc(r.x.g.name);
+          } else if (r.type === "group") {
+            icon = '<span class="x-cmdk-g" aria-hidden="true">#</span>'; title = mark(r.g.name, r.hits); sub = (r.g.items || []).length + " 个项目"; tag = "分组";
+          } else if (r.type === "action") {
+            icon = '<span class="x-cmdk-g" aria-hidden="true">' + r.a.g + "</span>"; title = mark(r.a.t, r.hits); sub = esc(r.a.d); tag = "操作";
+          } else {
+            icon = '<span class="x-cmdk-g" aria-hidden="true">↗</span>'; title = "用 " + esc(r.e.name) + " 搜索 “" + esc(r.q) + "”"; sub = host(r.e.url); tag = "";
+          }
+          return '<div class="x-cmdk-row" role="option" id="x-cmdk-o' + n + '" data-n="' + n + '" aria-selected="' + (n === sel) + '">' + icon +
+            '<span class="x-cmdk-t"><b>' + title + "</b>" + (sub ? "<small>" + sub + "</small>" : "") + "</span>" + (tag ? '<span class="x-cmdk-tag">' + tag + "</span>" : "") + "</div>";
+        }
+        function draw() {
+          var h = "", lastSec = null;
+          rows.forEach(function (r, n) {
+            if (r.sec !== lastSec) { h += '<p class="x-cmdk-sec" role="presentation">' + esc(r.sec) + "</p>"; lastSec = r.sec; }
+            h += rowHTML(r, n);
+          });
+          list.innerHTML = h || '<p class="x-cmdk-empty">没有匹配的结果</p>';
+          setSel(sel, true);
+        }
+        function setSel(n, quiet) {
+          if (!rows.length) { inp.removeAttribute("aria-activedescendant"); return; }
+          sel = (n + rows.length) % rows.length;
+          list.querySelectorAll(".x-cmdk-row").forEach(function (el) { el.setAttribute("aria-selected", String(+el.getAttribute("data-n") === sel)); });
+          var cur = list.querySelector('[data-n="' + sel + '"]');
+          inp.setAttribute("aria-activedescendant", "x-cmdk-o" + sel);
+          if (cur && !quiet) cur.scrollIntoView({ block: "nearest" });
+          else if (cur && sel === 0) list.scrollTop = 0;
+        }
+
+        /* ---- run ---- */
+        var suppress = false;
+        /* registered after Stage 4's tracker, so a synthetic tile click records 最近使用 and is then cancelled */
+        document.addEventListener("click", function (e) { if (suppress) e.preventDefault(); });
+        function record(id) {
+          if (body.classList.contains("editing")) return;
+          var a = groupsEl.querySelector('a[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]'); if (!a) return;
+          suppress = true;
+          try { a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } finally { suppress = false; }
+        }
+        function go(url, newTab) {
+          if (!url || url === "#") { A.toast("这个项目还没有地址"); return; }
+          if (newTab) window.open(url, "_blank", "noopener"); else location.assign(url);
+        }
+        function run(r, newTab) {
+          if (!r) return;
+          close(r.type !== "group");
+          if (r.type === "item") { record(r.x.i.id); go(A.url(r.x.i), newTab); }
+          else if (r.type === "search") go(r.e.url.replace("%s", encodeURIComponent(r.q)), newTab);
+          else if (r.type === "group") {
+            var sec = groupsEl.querySelector('.x-group[data-gid="' + r.g.id + '"]');
+            if (sec) {
+              sec.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+              sec.classList.remove("x-flash"); void sec.offsetWidth; sec.classList.add("x-flash");
+              setTimeout(function () { sec.classList.remove("x-flash"); }, 1300);
+              var first = sec.querySelector("a[data-id]"); if (first) first.focus({ preventScroll: true });
+            }
+          } else {
+            var k = r.a.k;
+            if (k === "net") { var nb = document.querySelector(".x-net"); if (nb) nb.click(); }
+            else if (k === "edit") {
+              if (body.classList.contains("editing")) { var dn = document.querySelector('.x-ebar [data-e="done"]'); if (dn) dn.click(); }
+              else A.emit("edit", { handled: false });
+            } else if (k === "add") {
+              var g = A.state.groups.filter(function (x) { return x.style !== "chip"; })[0] || A.state.groups[0];
+              var d = { gid: g && g.id, handled: false }; A.emit("add-item", d);
+              if (!d.handled) A.toast("即将上线");
+            } else if (k === "settings") A.emit("settings", { handled: false });
+          }
+        }
+
+        /* ---- open / close ---- */
+        var isOpen = false, prev = null;
+        function overlayOpen() { return !!document.querySelector(".x-set.is-on, .x-is.is-on, .x-sheet.is-on, .x-menu.is-on, .nc-auth:not([hidden])") || document.documentElement.classList.contains("nc-locked"); }
+        function open(prefill) {
+          if (isOpen) { inp.select(); return; }
+          isOpen = true; prev = document.activeElement;
+          back.hidden = false; pal.hidden = false;
+          inp.value = prefill || ""; build();
+          requestAnimationFrame(function () { back.classList.add("is-on"); pal.classList.add("is-on"); });
+          inp.focus({ preventScroll: true });
+        }
+        function close(keepFocus) {
+          if (!isOpen) return;
+          isOpen = false; back.classList.remove("is-on"); pal.classList.remove("is-on");
+          setTimeout(function () { if (!isOpen) { back.hidden = true; pal.hidden = true; } }, 200);
+          if (!keepFocus && prev && prev.focus && document.contains(prev)) prev.focus({ preventScroll: true });
+        }
+        A.palette = { open: open, close: close };
+
+        inp.addEventListener("input", build);
+        list.addEventListener("mousemove", function (e) { var r = e.target.closest("[data-n]"); if (r && +r.getAttribute("data-n") !== sel) setSel(+r.getAttribute("data-n"), true); });
+        list.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        list.addEventListener("click", function (e) { var r = e.target.closest("[data-n]"); if (r) run(rows[+r.getAttribute("data-n")], e.metaKey || e.ctrlKey); });
+        list.addEventListener("auxclick", function (e) { var r = e.target.closest("[data-n]"); if (r && e.button === 1) run(rows[+r.getAttribute("data-n")], true); });
+        back.addEventListener("click", function () { close(); });
+
+        function typing(t) { return t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)); }
+        window.addEventListener("keydown", function (e) {
+          if (document.documentElement.classList.contains("nc-locked")) return;
+          var k = e.key;
+          if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (k === "k" || k === "K")) {
+            e.preventDefault(); e.stopImmediatePropagation();
+            if (isOpen) close(); else if (!overlayOpen()) open(e.target && e.target.id === "x-q" ? e.target.value.trim() : "");
+            return;
+          }
+          if (!isOpen) {
+            if (k === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !typing(e.target) && !overlayOpen()) { e.preventDefault(); open(""); }
+            return;
+          }
+          if (e.isComposing || e.keyCode === 229) return;
+          if (k === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); close(); }
+          else if (k === "ArrowDown" || (k === "n" && e.ctrlKey)) { e.preventDefault(); e.stopImmediatePropagation(); setSel(sel + 1); }
+          else if (k === "ArrowUp" || (k === "p" && e.ctrlKey)) { e.preventDefault(); e.stopImmediatePropagation(); setSel(sel - 1); }
+          else if (k === "Enter") { e.preventDefault(); e.stopImmediatePropagation(); run(rows[sel], e.metaKey || e.ctrlKey); }
+          else if (k === "Tab") { e.preventDefault(); e.stopImmediatePropagation(); setSel(sel + (e.shiftKey ? -1 : 1)); }
+          else if (e.metaKey || e.ctrlKey) { e.stopImmediatePropagation(); }
+        }, true);
+        A.on("render", function () { if (isOpen) build(); });
+      })();
+    </script>
   </body>
 </html>
