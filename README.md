@@ -7,11 +7,13 @@
 - **配置同步**：配置保存在 NAS 上，手机、电脑登录同一账户自动同步；浏览器里仍保留一份离线缓存。
 - **服务端状态检测**：NAS 每 30 秒从内网检测每个服务，所以你在外面用 4G/5G 打开时，状态点也是准的。
 - **容器状态（可选）**：挂载 docker.sock 后，可以给项目「关联容器」，用容器运行状态当作在线依据。
-- **图标代理与缓存**：Iconify 图标经 NAS 代理并缓存到本地，不怕限流；字体也已自托管，不依赖 Google Fonts。
+- **图标代理与缓存**：Iconify 图标经 NAS 代理并缓存到本地，不怕限流；字体也已自托管（子集化，约 0.8MB），不依赖 Google Fonts。
+- **自定义壁纸存成文件**：从相册选的壁纸上传到 NAS（`data/wallpapers/`），配置里只记一个引用，换设备也在。
+- **多设备冲突提示**：另一台设备刚改过配置时，会提示「已用本机版本覆盖」，并可一键「改用服务器版」。
+- **添加到主屏幕**：带图标与 Web App Manifest，iPhone Safari「添加到主屏幕」后是全屏的「夜曲」。
 - 镜像同时支持 **x86（amd64）** 和 **ARM（arm64）** 群晖。
 
-![截图](docs/screenshot.png)
-<!-- 截图占位：把页面截图保存为 docs/screenshot.png -->
+![夜曲 Nocturne 桌面截图（示例数据）](docs/screenshot.png)
 
 ---
 
@@ -161,6 +163,8 @@ data/
 ├── users.json        账户（密码为 scrypt 哈希）
 ├── sessions.json     登录会话
 ├── config/<用户名>.json  每个用户的配置
+├── wallpapers/<用户名>.jpg|png|webp  自定义壁纸（从相册上传的图片）
+├── backup/<用户名>.json  被另一台设备覆盖前的那一版配置（「改用服务器版」用）
 └── cache/            图标缓存（可随时删除）
 ```
 
@@ -182,13 +186,23 @@ data/
 | `PROBE_TIMEOUT` | `4` | 单次检测超时（秒） |
 | `SESSION_DAYS` | `30` | 登录有效天数 |
 | `DOCKER_SOCK` | `/var/run/docker.sock` | Docker socket 路径 |
+| `PROBE_PRIVATE_ONLY` | 未设置 | 设为 `1` 时状态检测**只访问内网地址**（10/8、172.16/12、192.168/16、100.64/10、fc00::/7、回环；`.local` / `.lan` / `.home.arpa` 也必须解析到这些地址）。外网域名会显示为「未检测」。默认不限制，因为外网地址通常就是公网域名 |
+| `PROBE_TLS_STRICT` | 未设置 | 设为 `1` 时校验 HTTPS 证书；默认不校验（家里的自签名证书也算在线） |
+
+自定义壁纸固定存放在 `DATA_DIR/wallpapers/`（单张上限 15MB，支持 JPEG / PNG / WebP；页面会先把图片缩到长边 2560px 再上传）。
+旧版本把壁纸以 data URL 存在配置里，升级后启动或下次同步时会自动转存成文件并改写配置。
 
 ---
 
 ## 状态检测规则
 
 - 每个项目优先检测**内网地址**，没有则检测外网地址；多个用户里相同的地址只检测一次。
-- 发送 HTTP 请求，4 秒超时，**忽略证书错误**（自签名证书也算在线）；任何 `< 500` 的响应（包括 401/403 登录页）都算在线，并记录响应耗时。
+- 发送 HTTP 请求，4 秒超时，默认**忽略证书错误**（自签名证书也算在线，`PROBE_TLS_STRICT=1` 可改为校验）；任何 `< 500` 的响应都算在线，并记录响应耗时。
+- 返回 **401 / 403** 的服务显示为「在线 · 需登录」（琥珀色状态点），同样计入在线数。
+- 安全边界：主机名会先解析，所有解析结果都要通过检查，且只连接检查过的地址。**永远不探测**链路本地地址
+  （`169.254.0.0/16`、`fe80::/10`，包括云服务器元数据 `169.254.169.254`）、`metadata.google.internal` 等元数据主机名、
+  `0.0.0.0`，以及 Nocturne 自己的端口——这些项目的状态是 `blocked`，页面上显示「未检测」。
+- 全部服务都离线时，状态卡片只显示一句提示（多半是地址还没填，或当前网络到不了）；桌面版的离线芯片可以直接点开对应服务。
 - `example.com` 等保留域名（默认示例数据）直接视为离线，不发请求。
 - 页面每 30 秒从 NAS 拿一次结果；刚添加的项目在 NAS 检测到之前，会先用浏览器自己检测。
 
@@ -199,8 +213,9 @@ data/
 | GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用） |
 | GET | `/api/me` | 当前登录状态 |
 | POST | `/api/setup` · `/api/login` · `/api/logout` | 初始化 / 登录 / 退出 |
-| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`，后写覆盖） |
-| GET | `/api/status` | `{项目ID: {up, ms, checkedAt}}` |
+| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`，后写覆盖）。PUT 带 `baseVersion`；若期间另一台设备改过，返回 `overwrote: true`，被覆盖的版本可用 `GET /api/config?prev=1` 取回。JSON 请求体上限 1MB |
+| GET / PUT(POST) / DELETE | `/api/wallpaper` | 当前用户的自定义壁纸。PUT/POST 请求体为原始图片（`Content-Type` 为 `image/jpeg`、`image/png` 或 `image/webp`，≤15MB）；GET 带 ETag，`?v=` 版本号可长期缓存 |
+| GET | `/api/status` | `{项目ID: {up, status, code, ms, checkedAt}}`，`status` 为 `up` / `auth` / `down` / `blocked` |
 | GET | `/api/docker` | 容器列表（未挂载 docker.sock 时 `available: false`） |
 | GET | `/api/icon/<前缀>/<名称>.svg`、`/api/icon/search?query=…`、`/api/icon?q=…` | Iconify 代理（缓存在 `data/cache`） |
 | POST | `/api/password` | 修改自己的密码 |
@@ -218,8 +233,11 @@ DATA_DIR=./data node server.js
 # 打开 http://localhost:8080
 ```
 
-`public/index.html` 直接双击打开也能用（纯静态模式，配置只存在浏览器里），和旧版行为一致；
+`public/index.html` 直接双击打开也能用（纯静态模式，配置只存在浏览器里，自定义壁纸仍以 data URL 存在本机），和旧版行为一致；
 后端相关逻辑都在 `public/nocturne.js`，只有在由 `server.js` 提供页面时才会启用。
+
+字体是子集化后的 woff2（界面里出现的所有汉字 + 约 3500 个常用字，生僻字回退到系统宋体）。
+需要重新生成时见 `tools/subset-fonts.py` 顶部说明（开发工具，需要 `pip install fonttools brotli`，运行时不需要）。
 
 ## 许可
 
