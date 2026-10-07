@@ -147,11 +147,13 @@ function newSession(name) {
   saveSessions();
   return token;
 }
+/** decodeURIComponent，遇到坏的百分号编码返回 null（调用方回 400，而不是抛 URIError 变成 500） */
+function safeDecode(s) { try { return decodeURIComponent(s); } catch (e) { return null; } }
 function parseCookies(req) {
   const out = {};
   for (const part of String(req.headers.cookie || "").split(";")) {
     const i = part.indexOf("=");
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0) { const v = safeDecode(part.slice(i + 1).trim()); if (v != null) out[part.slice(0, i).trim()] = v; } // 坏的 cookie 值直接忽略
   }
   return out;
 }
@@ -159,11 +161,40 @@ const COOKIE = "nocturne_sid";
 function isHttps(req) {
   return !!req.socket.encrypted || String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase() === "https";
 }
-function setCookie(req, res, token, maxAge) {
-  const parts = [COOKIE + "=" + (token || ""), "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=" + (maxAge == null ? SESSION_DAYS * 86400 : maxAge)];
+/** 追加一条 Set-Cookie（同一响应可以设多个 cookie） */
+function addCookie(req, res, name, value, maxAge) {
+  const parts = [name + "=" + (value || ""), "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=" + maxAge];
   if (isHttps(req)) parts.push("Secure");
-  res.setHeader("Set-Cookie", parts.join("; "));
+  const prev = res.getHeader("Set-Cookie");
+  res.setHeader("Set-Cookie", [...(Array.isArray(prev) ? prev : prev ? [String(prev)] : []), parts.join("; ")]);
 }
+function setCookie(req, res, token, maxAge) {
+  addCookie(req, res, COOKIE, token, maxAge == null ? SESSION_DAYS * 86400 : maxAge);
+}
+
+/* 「已知设备」：登录成功时发一个长效 HttpOnly cookie，服务器只在 users.json 里存它的 sha256（每人最多 DEVICE_MAX 个）。
+ * 带着它的登录请求不受「按用户名封禁」限制（只保留逐步变慢），这样别人反复试你的用户名也锁不住你自己的设备。
+ * 修改 / 重置密码、删除用户时全部作废。 */
+const DEV_COOKIE = "nocturne_dev", DEVICE_DAYS = 365, DEVICE_MAX = 20, DEV_RE = /^[A-Za-z0-9_-]{43}$/;
+function knownDevice(req, u) {
+  if (!u || !Array.isArray(u.devices)) return false;
+  const t = parseCookies(req)[DEV_COOKIE];
+  if (!t || !DEV_RE.test(t)) return false;
+  const h = sha(t), now = Date.now();
+  return u.devices.some((d) => d && d.h === h && d.exp > now);
+}
+/** 登录成功后调用：已是这个用户的已知设备就续期，否则发一个新的 */
+function rememberDevice(req, res, u) {
+  const old = parseCookies(req)[DEV_COOKIE];
+  const t = old && knownDevice(req, u) ? old : crypto.randomBytes(32).toString("base64url");
+  const h = sha(t), now = Date.now();
+  u.devices = (Array.isArray(u.devices) ? u.devices : []).filter((d) => d && d.exp > now && d.h !== h);
+  u.devices.push({ h, exp: now + DEVICE_DAYS * 864e5 });
+  u.devices = u.devices.slice(-DEVICE_MAX);
+  addCookie(req, res, DEV_COOKIE, t, DEVICE_DAYS * 86400);
+  return saveUsers();
+}
+function revokeDevices(u) { if (u && u.devices && u.devices.length) { u.devices = []; return true; } return false; }
 /** 返回当前登录用户 {name, admin}，未登录返回 null */
 function currentUser(req) {
   if (NO_AUTH) return { name: NO_AUTH_USER, admin: true };
@@ -187,7 +218,7 @@ function dropSessionsOf(name, exceptKey) {
 
 /* ------------------------------------------------------------- rate limiting */
 
-const PRIVATE_IP = /^(::1$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|fc|fd|::ffff:(127|10|192\.168|172\.(1[6-9]|2\d|3[01]))\.)/i;
+const PRIVATE_IP = /^(::1$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|f[cd][0-9a-f]{0,2}:|fe[89ab][0-9a-f]:|::ffff:(127|10|192\.168|172\.(1[6-9]|2\d|3[01])|169\.254)\.)/i;
 const cleanIp = (s) => { s = String(s || "").trim().replace(/^\[|\](:\d+)?$/g, ""); return net.isIP(s) ? s : ""; };
 function clientIp(req) {
   const ra = req.socket.remoteAddress || "";
@@ -216,8 +247,20 @@ function failCounter(windowMs, maxKeys) {
     return list;
   };
   setInterval(() => { for (const k of [...m.keys()]) of(k); }, 60000).unref();
-  return { of, add, clear: (k) => m.delete(k) };
+  /** 去掉一次记录（登录成功时只撤回自己占的那个名额） */
+  const drop = (k, t) => { const list = m.get(k); if (!list) return; const i = list.lastIndexOf(t); if (i >= 0) list.splice(i, 1); if (!list.length) m.delete(k); };
+  return { of, add, drop, clear: (k) => m.delete(k) };
 }
+/** 在途请求计数：同一 IP / 同一用户名同时最多 LOGIN_INFLIGHT 个登录在处理（scrypt 校验 + 逐步变慢期间一直占着） */
+const LOGIN_INFLIGHT = 2;
+const loginInflight = new Map();
+function takeSlot(k) {
+  const n = loginInflight.get(k) || 0;
+  if (n >= LOGIN_INFLIGHT) return false;
+  loginInflight.set(k, n + 1);
+  return true;
+}
+function releaseSlot(k) { const n = (loginInflight.get(k) || 1) - 1; if (n > 0) loginInflight.set(k, n); else loginInflight.delete(k); }
 const FAIL_WINDOW = 10 * 60 * 1000, FAIL_MAX = 5; // 按 IP：10 分钟 5 次
 const NAME_WINDOW = 15 * 60 * 1000, NAME_MAX = 10, NAME_SLOW = 5; // 按用户名：15 分钟 10 次封顶，第 5 次起逐步变慢（和 IP 无关）
 const ipFails = failCounter(FAIL_WINDOW, 10000);
@@ -248,9 +291,29 @@ async function addBackup(name, doc) {
   await migrateLegacyBackup(name);
   await fsp.mkdir(backupDir(name), { recursive: true });
   const f = path.join(backupDir(name), String(Date.now()).padStart(15, "0") + "-" + String(++backupSeq % 1e6).padStart(6, "0") + "-v" + (doc.version || 0) + ".json");
-  await writeJSON(f, doc);
+  await writeJSON(f, { version: doc.version, updatedAt: doc.updatedAt, data: doc.data }); // 不带 hist
   const all = await listBackups(name);
   for (const x of all.slice(BACKUP_KEEP)) await fsp.rm(x, { force: true });
+}
+/** 备份 id = 文件名去掉 .json（时间戳-序号-v版本）；只认 listBackups 里真实存在的 */
+const BACKUP_ID = /^\d{15}-[\w-]+$/;
+async function backupSummaries(name) {
+  const out = [];
+  for (const f of await listBackups(name)) {
+    const d = readJSON(f, null);
+    if (!d || !d.data) continue;
+    const id = path.basename(f, ".json"), groups = Array.isArray(d.data.groups) ? d.data.groups : [];
+    const at = +id.slice(0, 15); // 进备份（被替换）的时间
+    out.push({ id, version: d.version || 0, updatedAt: d.updatedAt || null, at: new Date(at).toISOString(), time: Date.parse(d.updatedAt) || at, // time：这个版本保存的时间（毫秒）
+      groups: groups.length, items: allItems(d.data).length });
+  }
+  return out;
+}
+async function readBackup(name, id) {
+  if (!BACKUP_ID.test(id)) return null;
+  const f = (await listBackups(name)).find((x) => path.basename(x, ".json") === id);
+  const d = f && readJSON(f, null);
+  return d && d.data ? { version: d.version || 0, updatedAt: d.updatedAt || null, data: d.data } : null;
 }
 async function latestBackup(name) {
   for (const f of await listBackups(name)) { const d = readJSON(f, null); if (d && d.data) return d; }
@@ -266,9 +329,30 @@ function readConfig(name) {
   configCache.set(f, { mtimeMs: st.mtimeMs, doc });
   return doc;
 }
+/* 内容指纹：sha256(键排序后的 JSON)。配置文档里记最近 HIST_KEEP 个版本的指纹 hist:[{v,h}]，
+ * 用来识别「离线补推的其实是早就被接受过、后来又被别的设备改掉的旧内容」（见 PUT replay）。 */
+const HIST_KEEP = 20;
+function canonical(v) {
+  if (Array.isArray(v)) return "[" + v.map((x) => (x === undefined ? "null" : canonical(x))).join(",") + "]";
+  if (v && typeof v === "object") return "{" + Object.keys(v).sort().filter((k) => v[k] !== undefined && typeof v[k] !== "function").map((k) => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}";
+  return JSON.stringify(v === undefined ? null : v);
+}
+const dataHash = (data) => sha(canonical(data));
+/** 当前版本的指纹（旧文档没有 hist 时现算） */
+function currentHash(doc) {
+  const last = Array.isArray(doc.hist) && doc.hist[doc.hist.length - 1];
+  return last && last.v === doc.version ? last.h : doc.data ? dataHash(doc.data) : null;
+}
+/** 对外返回的配置文档：不带 hist */
+const publicDoc = (d) => ({ version: d.version || 0, updatedAt: d.updatedAt || null, data: d.data || null });
 async function writeConfig(name, data) {
   const cur = readConfig(name);
-  const doc = { version: (cur.version || 0) + 1, updatedAt: new Date().toISOString(), data };
+  const version = (cur.version || 0) + 1;
+  let hist = Array.isArray(cur.hist) ? cur.hist.slice() : [];
+  if (cur.data && !hist.some((x) => x.v === cur.version)) hist.push({ v: cur.version || 0, h: dataHash(cur.data) }); // 旧文档：补上当前版本
+  hist.push({ v: version, h: dataHash(data) });
+  hist = hist.slice(-HIST_KEEP);
+  const doc = { version, updatedAt: new Date().toISOString(), data, hist };
   await writeJSON(configFile(name), doc);
   configCache.delete(configFile(name));
   return doc;
@@ -348,6 +432,7 @@ async function migrateWallpaper(name, data) {
  *  只收位图（PNG / JPEG / WebP，按文件头判断），不收 SVG（可以内嵌脚本）。 */
 const ICON_ID = /^[A-Za-z0-9_-]{16,64}$/;
 const ICON_REF = /^api\/icons\/([A-Za-z0-9_-]{16,64})$/;
+const ICON_MAX_FILES = 500, ICON_MAX_BYTES = 50 * 1024 * 1024; // 每个用户的上传图标上限：500 个或总共 50MB
 const ICON_ORPHAN_GRACE = 24 * 3600 * 1000; // 没被引用满 24 小时才删（撤销、「改用服务器版」还能找回）
 const iconDir = (name) => path.join(ICONS_DIR, name.toLowerCase());
 const newIconId = () => crypto.randomBytes(16).toString("base64url");
@@ -367,6 +452,25 @@ async function storeIcon(name, id, buf) {
   await writeFileAtomic(path.join(iconDir(name), id + "." + ext), buf);
   for (const e of Object.keys(WP_TYPES)) if (e !== ext) await fsp.rm(path.join(iconDir(name), id + "." + e), { force: true });
   return ext;
+}
+/** 当前用户的图标文件数和总大小（replaceId：PUT 覆盖同一个 id 时，旧文件不计入） */
+async function iconUsage(name, replaceId) {
+  let files; try { files = await fsp.readdir(iconDir(name)); } catch (e) { return { count: 0, bytes: 0 }; }
+  let count = 0, bytes = 0;
+  for (const f of files) {
+    const m = /^([A-Za-z0-9_-]{16,64})\.(png|jpg|webp)$/.exec(f);
+    if (!m || m[1] === replaceId) continue;
+    try { bytes += (await fsp.stat(path.join(iconDir(name), f))).size; count++; } catch (e) { /* 刚被删 */ }
+  }
+  return { count, bytes };
+}
+/** 上传前检查配额；超了先试着清理一次没被引用的旧图标（仍受 24 小时宽限期保护），还超就 413。必须在 withUserLock 里调用。 */
+async function checkIconQuota(name, id, size) {
+  const over = (u) => u.count + 1 > ICON_MAX_FILES || u.bytes + size > ICON_MAX_BYTES;
+  if (!over(await iconUsage(name, id))) return;
+  await cleanupIcons(name).catch((e) => log("icon cleanup", name, e.message));
+  const u = await iconUsage(name, id);
+  if (over(u)) throw Object.assign(new Error("上传的图标已达上限（每个账户最多 " + ICON_MAX_FILES + " 个、共 " + Math.round(ICON_MAX_BYTES / 1048576) + "MB），请先删掉一些不用的图标"), { status: 413, usage: u });
 }
 async function removeIcon(name, id) {
   if (!ICON_ID.test(id)) return;
@@ -790,39 +894,60 @@ async function api(req, res, url) {
     if (!validPass(b.password)) return json(res, 400, { error: "密码至少 6 位" });
     const hash = await hashPassword(b.password);
     if (users.users.length) return json(res, 409, { error: "管理员已存在，请直接登录" });
-    users.users.push({ name, admin: true, hash, created: new Date().toISOString() });
-    await saveUsers();
+    const admin = { name, admin: true, hash, created: new Date().toISOString() };
+    users.users.push(admin);
     setCookie(req, res, newSession(name));
+    await rememberDevice(req, res, admin); // 创建管理员的这台设备算「已知设备」（内含 saveUsers()）
     log("setup: admin created", name);
     return json(res, 200, { ok: true, user: { name, admin: true } });
   }
 
   if (p === "/login" && m === "POST") {
     if (NO_AUTH) return json(res, 200, { ok: true, user: currentUser(req) });
-    const ip = clientIp(req);
-    const ipList = ipFails.of(ip);
-    if (ipList.length >= FAIL_MAX) {
-      const wait = Math.ceil((ipList[0] + FAIL_WINDOW - Date.now()) / 60000);
-      return json(res, 429, { error: "尝试次数过多，请 " + wait + " 分钟后再试" });
+    const ip = clientIp(req), ipSlot = "ip:" + ip;
+    // 在途上限：同一 IP 同时最多 2 个登录在处理，多的直接 429（并发爆发不会全部进入校验）
+    if (!takeSlot(ipSlot)) return json(res, 429, { error: "登录请求太频繁，请稍后再试" });
+    let nameSlot = null;
+    try {
+      // 按 IP（硬限制）：先检查、再「占一个名额」，都在进入 scrypt 校验之前同步完成 —— 并发请求也会被一个个计上
+      const ipList = ipFails.of(ip);
+      if (ipList.length >= FAIL_MAX) {
+        const wait = Math.ceil((ipList[0] + FAIL_WINDOW - Date.now()) / 60000);
+        return json(res, 429, { error: "尝试次数过多，请 " + wait + " 分钟后再试" });
+      }
+      ipFails.add(ip); // 先记，成功后再清零
+      const b = await readBody(req);
+      const name = String(b.name || "").trim(), nk = nameKey(name), u = findUser(name);
+      // 按用户名（和 IP 无关，换 IP 也绕不过去）：只影响这一个用户名。
+      // 内网地址、或带着这个账户「已知设备」cookie 的请求不受硬封禁（只保留逐步变慢）—— 别人锁不住账户主人。
+      const trusted = PRIVATE_IP.test(ip) || knownDevice(req, u);
+      const nList = nameFails.of(nk);
+      if (!trusted) {
+        if (nList.length >= NAME_MAX) {
+          const wait = Math.ceil((nList[0] + NAME_WINDOW - Date.now()) / 60000);
+          return json(res, 429, { error: "这个账户尝试次数过多，请 " + wait + " 分钟后再试" });
+        }
+        if (!takeSlot("n:" + nk)) return json(res, 429, { error: "登录请求太频繁，请稍后再试" });
+        nameSlot = "n:" + nk;
+      }
+      const slow = nList.length; // 占名额之前的次数
+      const nameList = nameFails.add(nk), nameMark = nameList[nameList.length - 1];
+      if (slow >= NAME_SLOW) await new Promise((r) => setTimeout(r, Math.min(8000, 1000 * (slow - NAME_SLOW + 1)))); // 逐步变慢
+      const ok = await verifyPassword(String(b.password || ""), u ? u.hash : DUMMY_HASH);
+      if (!u || !ok) {
+        log("login failed", ip, JSON.stringify(name.slice(0, 40)) + (trusted ? " (trusted)" : ""));
+        return json(res, 401, { error: "用户名或密码不正确", left: Math.max(0, FAIL_MAX - ipFails.of(ip).length) });
+      }
+      ipFails.clear(ip);
+      // 受信任的登录（内网 / 已知设备）只撤回自己这一次，不替别人解锁；普通登录成功即清零
+      if (trusted) nameFails.drop(nk, nameMark); else nameFails.clear(nk);
+      setCookie(req, res, newSession(u.name));
+      await rememberDevice(req, res, u);
+      return json(res, 200, { ok: true, user: { name: u.name, admin: !!u.admin } });
+    } finally {
+      releaseSlot(ipSlot);
+      if (nameSlot) releaseSlot(nameSlot);
     }
-    const b = await readBody(req);
-    // 按用户名兜底（和 IP 无关，换 IP 也绕不过去）：只影响这一个用户名，其他账户照常登录
-    const nk = nameKey(b.name), nList = nameFails.of(nk);
-    if (nList.length >= NAME_MAX) {
-      const wait = Math.ceil((nList[0] + NAME_WINDOW - Date.now()) / 60000);
-      return json(res, 429, { error: "这个账户尝试次数过多，请 " + wait + " 分钟后再试" });
-    }
-    if (nList.length >= NAME_SLOW) await new Promise((r) => setTimeout(r, Math.min(8000, 1000 * (nList.length - NAME_SLOW + 1)))); // 逐步变慢
-    const u = findUser(String(b.name || "").trim());
-    const ok = await verifyPassword(String(b.password || ""), u ? u.hash : DUMMY_HASH);
-    if (!u || !ok) {
-      const list = ipFails.add(ip); nameFails.add(nk);
-      log("login failed", ip, JSON.stringify(String(b.name || "").slice(0, 40)));
-      return json(res, 401, { error: "用户名或密码不正确", left: Math.max(0, FAIL_MAX - list.length) });
-    }
-    ipFails.clear(ip); nameFails.clear(nk);
-    setCookie(req, res, newSession(u.name));
-    return json(res, 200, { ok: true, user: { name: u.name, admin: !!u.admin } });
   }
 
   if (p === "/logout" && m === "POST") {
@@ -836,26 +961,43 @@ async function api(req, res, url) {
   const me = currentUser(req);
   if (!me) return json(res, 401, { error: "未登录" });
 
+  if (p === "/config/backups" && m === "GET") { // 环形备份列表（新的在前）：[{id, version, updatedAt, at, groups, items}]
+    return json(res, 200, await withUserLock(me.name, () => backupSummaries(me.name)));
+  }
+
   if (p === "/config") {
     if (m === "GET" && url.searchParams.get("prev") === "1") { // 最近一次被覆盖掉的版本（环形备份里最新的一份）
       const prev = await withUserLock(me.name, () => latestBackup(me.name));
-      return prev ? json(res, 200, prev) : json(res, 404, { error: "没有可恢复的服务器版本" });
+      return prev ? json(res, 200, publicDoc(prev)) : json(res, 404, { error: "没有可恢复的服务器版本" });
+    }
+    if (m === "GET" && url.searchParams.has("backup")) { // 环形备份里的某一份（设置 → 账户 →「恢复较早的版本」）
+      const d = await withUserLock(me.name, () => readBackup(me.name, String(url.searchParams.get("backup"))));
+      return d ? json(res, 200, d) : json(res, 404, { error: "这个版本已经不在了" });
     }
     if (m === "GET") {
       const doc = await withUserLock(me.name, async () => {
         const d = readConfig(me.name);
         return d.data && await migrateData(me.name, d.data) ? writeConfig(me.name, d.data) : d;
       });
-      return json(res, 200, doc);
+      return json(res, 200, publicDoc(doc));
     }
     if (m === "PUT") {
       const b = await readBody(req); // 读请求体不占锁
       if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
       const r = await withUserLock(me.name, async () => {
-        const migrated = await migrateData(me.name, b.data);
         const cur = readConfig(me.name);
+        // replay:true = 页面上次没确认同步成功、这次打开时补推。若这份内容是服务器早先接受过的某个版本（在 hist 里），
+        // 但服务器之后又被别的设备改过 → 说明当时其实已经同步上了（keepalive 成功但没来得及清脏标记），
+        // 不写入、不算冲突，告诉客户端直接拉最新版。真正没推上去的内容不在 hist 里，照常走下面的流程。
+        if (b.replay === true && cur.data && b.baseVersion != null && +b.baseVersion !== (cur.version || 0)) {
+          const h = dataHash(b.data);
+          if (h !== currentHash(cur) && Array.isArray(cur.hist) && cur.hist.some((x) => x.h === h)) {
+            return { stale: true, version: cur.version || 0, updatedAt: cur.updatedAt, unchanged: true };
+          }
+        }
+        const migrated = await migrateData(me.name, b.data);
         // 内容和服务器上的一样：不算冲突、不升版本（同一台设备 keepalive 补发和正常推送前后脚到达时常见）
-        if (cur.data && JSON.stringify(cur.data) === JSON.stringify(b.data)) {
+        if (cur.data && (JSON.stringify(cur.data) === JSON.stringify(b.data) || dataHash(b.data) === currentHash(cur))) {
           return { version: cur.version || 0, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, ...(migrated ? { migrated: true } : {}) };
         }
         // 客户端带上它基于的版本号；对不上说明另一台设备在这之间改过 → 仍以本次为准（后写覆盖），
@@ -902,14 +1044,15 @@ async function api(req, res, url) {
 
   // 上传的图标：POST /api/icons（服务器生成 id）或 PUT /api/icons/<id>；GET / DELETE /api/icons/<id>
   if (p === "/icons" || p.startsWith("/icons/")) {
-    const id = p === "/icons" ? "" : decodeURIComponent(p.slice("/icons/".length));
+    const id = p === "/icons" ? "" : safeDecode(p.slice("/icons/".length));
+    if (id == null) return json(res, 400, { error: "图标 id 编码不正确" });
     if ((m === "POST" && !id) || (m === "PUT" && id)) {
       if (id && !ICON_ID.test(id)) return json(res, 400, { error: "图标 id 不合法" });
       const ct = String(req.headers["content-type"] || "").toLowerCase();
       if (!/^image\/(jpeg|png|webp)\b/.test(ct)) return json(res, 415, { error: "需要 image/jpeg、image/png 或 image/webp（不支持 SVG）" });
       const buf = await readRaw(req, MAX_ICON);
       const nid = id || newIconId();
-      const ext = await withUserLock(me.name, () => storeIcon(me.name, nid, buf));
+      const ext = await withUserLock(me.name, async () => { await checkIconQuota(me.name, nid, buf.length); return storeIcon(me.name, nid, buf); });
       return json(res, 200, { ok: true, id: nid, type: WP_TYPES[ext], size: buf.length, url: "api/icons/" + nid });
     }
     if (!ICON_ID.test(id)) return json(res, id ? 400 : 405, { error: id ? "图标 id 不合法" : "Method Not Allowed" });
@@ -948,7 +1091,8 @@ async function api(req, res, url) {
     if (!(await verifyPassword(String(b.old || ""), u.hash))) return json(res, 400, { error: "当前密码不正确" });
     if (!validPass(b.password)) return json(res, 400, { error: "新密码至少 6 位" });
     u.hash = await hashPassword(b.password);
-    await saveUsers();
+    revokeDevices(u); // 所有「已知设备」作废；当前这台刚验证过密码，重新发一个
+    await rememberDevice(req, res, u); // 内含 saveUsers()
     await dropSessionsOf(u.name, req.sessionKey); // 其他设备需重新登录
     return json(res, 200, { ok: true });
   }
@@ -971,18 +1115,22 @@ async function api(req, res, url) {
     }
     const mm = p.match(/^\/users\/([^/]+)(\/password)?$/);
     if (mm) {
-      const target = findUser(decodeURIComponent(mm[1]));
+      const tn = safeDecode(mm[1]);
+      if (tn == null) return json(res, 400, { error: "用户名编码不正确" });
+      const target = findUser(tn);
       if (!target) return json(res, 404, { error: "用户不存在" });
       if (mm[2] && m === "POST") {
         const b = await readBody(req);
         if (!validPass(b.password)) return json(res, 400, { error: "密码至少 6 位" });
         target.hash = await hashPassword(b.password);
-        await saveUsers();
+        revokeDevices(target);
+        if (target.name === me.name) await rememberDevice(req, res, target); else await saveUsers();
         await dropSessionsOf(target.name, target.name === me.name ? req.sessionKey : undefined);
         return json(res, 200, { ok: true });
       }
       if (!mm[2] && m === "DELETE") {
         if (target.name === me.name) return json(res, 400, { error: "不能删除自己" });
+        revokeDevices(target); // 已知设备随用户一起作废（同名用户以后重建也不会继承）
         users.users = users.users.filter((u) => u !== target);
         await saveUsers();
         await dropSessionsOf(target.name);
