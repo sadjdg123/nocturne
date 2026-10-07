@@ -8,12 +8,18 @@
   var N = window.NOCTURNE, A = window.App;
   if (!N || !N.backend || !A) return;
   var esc = A.util.esc, de = document.documentElement;
-  var KEY = "yeqv.v1", OWNER = "nocturne.owner", VER = "nocturne.ver";
+  var KEY = "yeqv.v1", OWNER = "nocturne.owner", VER = "nocturne.ver", DIRTY = "nocturne.dirty";
+  var KEEPALIVE_MAX = 60000; // 浏览器对 keepalive 请求体的上限约 64KB
 
   function ls(op, k, v) { try { return op === "get" ? localStorage.getItem(k) : op === "del" ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { return null; } }
-  function api(method, p, body) {
+  function bytes(str) { try { return new Blob([str]).size; } catch (e) { return str.length * 3; } }
+  /** opts: {signal, keepalive, raw:已序列化的 body} */
+  function api(method, p, body, opts) {
+    opts = opts || {};
     var o = { method: method, credentials: "same-origin", cache: "no-store", headers: {} };
-    if (body !== undefined) { o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(body); }
+    if (body !== undefined) { o.headers["Content-Type"] = "application/json"; o.body = opts.raw || JSON.stringify(body); }
+    if (opts.signal) o.signal = opts.signal;
+    if (opts.keepalive) o.keepalive = true;
     return fetch("api/" + p, o).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
         if (!r.ok) { var e = new Error(d.error || ("HTTP " + r.status)); e.status = r.status; e.data = d; throw e; }
@@ -31,6 +37,28 @@
         return d.v;
       });
     });
+  };
+  /* ------------------------------------------- 上传的图标（存 NAS 文件） */
+  /** 上传图标 Blob（png/jpeg/webp），成功返回配置里用的地址 "api/icons/<id>" */
+  A.uploadIcon = function (blob) {
+    return fetch("api/icons", { method: "POST", credentials: "same-origin", headers: { "Content-Type": blob.type || "image/png" }, body: blob }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok) { var e = new Error(d.error || ("HTTP " + r.status)); e.status = r.status; throw e; }
+        return d.url;
+      });
+    });
+  };
+  /** 导出时把 NAS 上的图标内嵌成 data URL（导入到别的实例 / 纯静态页也能显示）；壁纸文件太大，不内嵌 */
+  A.exportState = function () {
+    var s = structuredClone(A.state), jobs = [];
+    (s.groups || []).forEach(function (g) { (g.items || []).forEach(function (i) {
+      var ic = i.icon, v = ic && ic.type === "image" && String(ic.value || "");
+      if (!v || !/^api\/icons\//.test(v)) return;
+      jobs.push(fetch(v, { credentials: "same-origin" }).then(function (r) { if (!r.ok) throw 0; return r.blob(); }).then(function (b) {
+        return new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { ic.value = fr.result; res(); }; fr.onerror = function () { res(); }; fr.readAsDataURL(b); });
+      }).then(null, function () {}));
+    }); });
+    return Promise.all(jobs).then(function () { return s; });
   };
   /** 旧配置里的 data URL 壁纸：先传成文件，再改写本机配置（避免把几 MB 的 JSON 推给服务器） */
   var wpMigrating = null;
@@ -71,7 +99,7 @@
     ".nc-mini{height:32px;padding:0 12px;border:1px solid var(--x-line);border-radius:10px;background:rgba(255,255,255,.06);color:var(--x-text);font:500 13px var(--x-ui);cursor:pointer}",
     ".nc-mini.is-red{color:#F29A8A}",
     ".nc-pw{display:flex;gap:8px;width:100%;padding:4px 0 6px}",
-    ".nc-pw input{flex:1;min-width:0;height:36px;padding:0 10px;border:1px solid var(--x-line);border-radius:10px;background:rgba(255,255,255,.06);color:var(--x-text);font:400 15px var(--x-ui);outline:none}",
+    ".nc-pw input{flex:1;min-width:0;height:36px;padding:0 10px;border:1px solid var(--x-line);border-radius:10px;background:rgba(255,255,255,.06);color:var(--x-text);font:400 16px var(--x-ui);outline:none}", /* 16px：iOS 不自动放大 */
     ".nc-form .x-row input[type=password]{flex:1;width:auto;min-width:0;height:36px;padding:0;border:0;background:none;color:var(--x-text);font:400 16px var(--x-ui);text-align:right;outline:none}",
     ".nc-form .x-acts{padding:4px 16px 12px}",
     ".nc-badge{display:inline-block;margin-left:6px;font-size:12px;color:var(--x-mist)}"
@@ -143,14 +171,19 @@
   }
 
   /* -------------------------------------------------------- config sync */
-  var serverVer = N.version || 0, lastSent = null, timer = null, inflight = false, dirty = false, warned = false;
+  var serverVer = N.version || 0, lastSent = null, timer = null, inflight = false, dirty = false, warned = false, bigWarned = false, restoreNext = false;
   function snapshot() { return JSON.stringify(A.state); }
+  /* 持久化的「本机有没推上去的修改」标记：页面被关掉 / NAS 连不上时，下次打开据此补推，而不是当成已同步 */
+  function markDirty() { if (lastSent === null || snapshot() !== lastSent) ls("set", DIRTY, "1"); }
   function markSynced(ver, raw) {
     serverVer = ver; lastSent = raw;
     ls("set", VER, String(ver)); ls("set", OWNER, N.user.name);
+    if (snapshot() === raw) ls("del", DIRTY);
   }
-  function schedule() { if (!N.user) return; clearTimeout(timer); timer = setTimeout(push, 800); }
-  function push() {
+  function schedule() { if (!N.user) return; markDirty(); clearTimeout(timer); timer = setTimeout(push, 800); }
+  /** opts.keepalive：页面切到后台时用，body 不超过 60KB 才带 keepalive（超过会被浏览器直接拒绝） */
+  function push(opts) {
+    opts = opts && opts.keepalive ? opts : {};
     if (inflight) { dirty = true; return; }
     if (wpMigrating) { dirty = true; return; }
     var w = A.state.settings && A.state.settings.wallpaper;
@@ -164,12 +197,18 @@
     var raw = snapshot();
     if (raw === lastSent) return;
     inflight = true; dirty = false;
-    api("PUT", "config", { baseVersion: serverVer, data: JSON.parse(raw) }).then(function (d) {
+    var restore = restoreNext; restoreNext = false;
+    var body = { baseVersion: serverVer, data: JSON.parse(raw) };
+    if (restore) body.restore = true; // 「改用服务器版」：服务器先备份当前版本（被替换掉的本机版本）再覆盖
+    var str = JSON.stringify(body), size = bytes(str);
+    if (size > 800 * 1024 && !bigWarned) { bigWarned = true; A.toast("配置已有 " + Math.round(size / 1024) + "KB，接近上限，可以删掉一些不用的上传图片"); }
+    api("PUT", "config", body, { raw: str, keepalive: opts.keepalive && size < KEEPALIVE_MAX }).then(function (d) {
       markSynced(d.version, raw); warned = false;
-      if (d.migrated) pull(true).then(null, function () {}); // 服务器把旧的 data URL 壁纸转成了文件
+      if (d.migrated) pull(true).then(null, function () {}); // 服务器把旧的 data URL 壁纸 / 图标转成了文件
       else if (d.overwrote === true) conflict();
       setTimeout(pullStatus, 4000); // 新地址由服务器尽快检测
     }, function (e) {
+      if (restore) restoreNext = true;
       if (e.status === 401) return expired();
       if (!warned) { warned = true; A.toast(e.status === 413 ? "配置太大，未能同步到 NAS" : "暂时无法同步到 NAS，已保存在本机，稍后自动重试"); }
       setTimeout(schedule, 15000);
@@ -183,6 +222,7 @@
         var net = A.state.settings && A.state.settings.net; // 内网/外网是每台设备自己的选择
         var s = normalize(d.data);
         if (net) s.settings.net = net;
+        restoreNext = true; // 推回去时带 restore:true：刚被替换掉的本机版本先进服务器备份，可以再找回来
         A.state = s; A.save(); A.render(); // A.save 已接上同步：作为新版本推回服务器
         A.toast("已改用另一台设备的版本");
       }).then(null, function (e) {
@@ -197,8 +237,8 @@
     return s;
   }
   /** 从服务器拉取（启动时缓存过期、或切回页面时其他设备改过） */
-  function pull(force) {
-    return api("GET", "config").then(function (d) {
+  function pull(force, opts) {
+    return api("GET", "config", undefined, opts).then(function (d) {
       if (!d || !d.data) return false;
       if (!force && d.version <= serverVer) return false;
       if (!force && snapshot() !== lastSent && lastSent !== null) return false; // 本机有未同步的修改：以本机为准（后写覆盖）
@@ -270,7 +310,7 @@
       var a = b.getAttribute("data-u"), row = b.closest("[data-name]"), name = row && row.getAttribute("data-name");
       if (a === "logout") {
         api("POST", "logout").then(null, function () {}).then(function () {
-          ls("del", KEY); ls("del", VER); ls("del", OWNER); location.reload();
+          ls("del", KEY); ls("del", VER); ls("del", OWNER); ls("del", DIRTY); location.reload();
         });
       } else if (a === "chpw") {
         var f = pane.querySelector('[data-f="pw"]'), o = f.querySelector('[name="old"]'), p1 = f.querySelector('[name="password"]'), p2 = f.querySelector('[name="password2"]');
@@ -361,11 +401,23 @@
     accountsPane();
     containerField();
 
-    var start;
-    if (N.stale) {
-      start = pull(true).then(unlock, function (e) {
-        unlock();
+    var start, localVer = +ls("get", VER) || 0;
+    if (N.dirty && N.version) {
+      // 本机有上次没推上去的修改：以本机为准推上去，绝不静默用服务器版覆盖。
+      //  - 服务器没变（不 stale）：正常推送
+      //  - 服务器变了（stale）：用本机旧的 ver 作 baseVersion 推，服务器会 overwrote → 备份 → 弹「改用服务器版」
+      unlock();
+      serverVer = N.stale ? localVer : N.version;
+      lastSent = null;
+      push();
+      start = Promise.resolve();
+    } else if (N.stale) {
+      // 信号差时别一直只看到壁纸：5 秒拉不到就先显示本机缓存
+      var ac = window.AbortController ? new AbortController() : null, to = ac && setTimeout(function () { ac.abort(); }, 5000);
+      start = pull(true, ac ? { signal: ac.signal } : null).then(function () { clearTimeout(to); unlock(); }, function (e) {
+        clearTimeout(to); unlock();
         lastSent = snapshot(); // 只推送之后真正的修改，避免用旧缓存覆盖服务器
+        serverVer = localVer; // 本机缓存基于旧版本：之后的推送会被识别为冲突（留备份），切回页面时也会再拉
         if (e.status === 401) return expired();
         A.toast("连不上 NAS，先显示本机缓存");
       });
@@ -373,6 +425,7 @@
       unlock();
       lastSent = snapshot();
       if (N.version) markSynced(N.version, lastSent);
+      else ls("del", DIRTY);
       if (N.migrate) { // 首次登录：服务器为空，把这台浏览器里原有的配置传上去
         lastSent = null;
         push();
@@ -388,11 +441,25 @@
       pullStatus();
       setInterval(function () { if (!document.hidden) pullStatus(); }, 30000);
       document.addEventListener("visibilitychange", function () {
-        if (document.hidden) { if (timer) { clearTimeout(timer); push(); } return; }
+        // 切到后台（iOS 划走）：立刻推，带 keepalive，页面被冻结 / 关掉也能发完
+        if (document.hidden) { if (timer || snapshot() !== lastSent) { clearTimeout(timer); timer = null; push({ keepalive: true }); } return; }
         pull(false).then(null, function () {}); pullStatus();
       });
       window.addEventListener("online", function () { schedule(); pullStatus(); });
-      window.addEventListener("pagehide", function () { if (snapshot() !== lastSent) { try { fetch("api/config", { method: "PUT", keepalive: true, credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ baseVersion: serverVer, data: A.state }) }); } catch (e) {} } });
+      // 从往返缓存（bfcache）恢复：serverVer 可能已过时，先刷新，避免误报冲突
+      window.addEventListener("pageshow", function (e) { if (e.persisted) { pull(false).then(null, function () {}); pullStatus(); } });
+      window.addEventListener("pagehide", function () {
+        if (snapshot() === lastSent) return; // 正在发的那次可能会被页面卸载中断：照样补发（内容相同服务器不会算冲突）
+        var raw = snapshot(), str = JSON.stringify({ baseVersion: serverVer, data: A.state });
+        markDirty();
+        if (bytes(str) >= KEEPALIVE_MAX) return; // 太大发不出 keepalive：留着脏标记，下次打开补推
+        try {
+          fetch("api/config", { method: "PUT", keepalive: true, credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: str })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d && d.version) markSynced(d.version, raw); }) // 页面若进了 bfcache，恢复后这里会接着跑
+            .catch(function () {});
+        } catch (e) { /* 同步抛错（极少数浏览器）：下次打开靠脏标记补推 */ }
+      });
     });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
