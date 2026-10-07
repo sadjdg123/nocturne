@@ -1,0 +1,21 @@
+# 夜曲 Nocturne · 群晖 Container Manager「项目」用的 compose 文件
+services:
+  nocturne:
+    # 方式一：使用 GitHub Actions 构建好的镜像（把 sadjdg123 换成你的用户名，全小写）
+    image: ghcr.io/sadjdg123/nocturne:latest
+    # 方式二：在 NAS 上从源码构建 —— 注释掉上面的 image，打开下面这行
+    # build: .
+    container_name: nocturne
+    restart: unless-stopped
+    ports:
+      - "8088:8080"          # 浏览器访问 http://NAS的IP:8088
+    environment:
+      - TZ=Asia/Shanghai
+      # - NOCTURNE_NO_AUTH=1   # 关闭登录（仅限纯内网使用）
+      # - STATUS_INTERVAL=30   # 状态检测间隔（秒）
+    volumes:
+      - ./data:/data         # 账户、配置、图标缓存都在这里，备份它即可
+      # 可选：读取容器运行状态（只读挂载）。注意安全说明，见 README
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    # 默认 bridge 网络即可：状态检测直接访问你填写的内网 IP（如 192.168.1.20:8096），
+    # 不需要 host 网络。只有当你用 localhost / 127.0.0.1 填写地址时才需要改为 network_mode: host。
