@@ -13,6 +13,8 @@ services:
       - TZ=Asia/Shanghai
       # - NOCTURNE_NO_AUTH=1   # 关闭登录（仅限纯内网使用）
       # - STATUS_INTERVAL=30   # 状态检测间隔（秒）
+      # - PROBE_PRIVATE_ONLY=1 # 状态检测只访问内网地址
+      # - PROBE_TLS_STRICT=1   # 状态检测校验 HTTPS 证书
     volumes:
       - ./data:/data         # 账户、配置、图标缓存都在这里，备份它即可
       # 可选：读取容器运行状态（只读挂载）。注意安全说明，见 README
