@@ -1132,7 +1132,11 @@
               if (!A.uploadIcon || !c.toBlob) return done(dataUrl);
               c.toBlob(function (blob) {
                 if (!blob) return done(dataUrl);
-                A.uploadIcon(blob).then(done, function () { done(dataUrl); });
+                A.uploadIcon(blob).then(done, function (e) {
+                  /* 413：超过每个账户的图标配额（或单个太大）—— 提示原因，不退回 data URL（那样只会把配置撑大） */
+                  if (e && e.status === 413) { A.toast(e.message || "上传的图标太多了", { duration: 8000 }); return; }
+                  done(dataUrl);
+                });
               }, type, 0.9);
             };
             im.onerror = function () { A.toast("图片读取失败"); };
