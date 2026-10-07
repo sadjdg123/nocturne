@@ -38,8 +38,22 @@
 ### 方式一：使用构建好的镜像（推荐）
 
 前提：把这个仓库推到你自己的 GitHub，`main` 分支每次推送都会由 GitHub Actions 自动构建镜像并发布到
-`ghcr.io/sadjdg123/nocturne:latest`。第一次发布后，到 GitHub → 你的头像 → Packages → nocturne →
-Package settings，把可见性改为 **Public**（否则 NAS 拉取需要登录）。
+`ghcr.io/sadjdg123/nocturne:latest`（只改文档不触发构建；连续推送时只构建最新的一次）。
+仓库是私有的话，镜像默认也是私有的，NAS 拉取会报 `denied` / `unauthorized`。两种办法任选：
+
+- **保持私有（推荐）**：
+  1. GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)** → Generate new token，
+     **只勾 `read:packages`**，复制生成的 token。
+  2. 控制面板 → 终端机和 SNMP → 启用 SSH，用 SSH 登录 NAS，执行：
+     ```bash
+     sudo docker login ghcr.io -u sadjdg123
+     # Password 处粘贴上一步的 token（不是 GitHub 密码）
+     ```
+     登录信息保存在 NAS 上，之后 Container Manager 的「项目」创建和「更新」都能正常拉取。
+  3. 也可以在 Container Manager → 注册表 → 设置 → 新增，填 `https://ghcr.io`、用户名和上面的 token
+     （这条路径**未实测**，不行就用 SSH 的方式）。
+- **改成公开**：GitHub → 你的头像 → Packages → nocturne → Package settings，把可见性改为 **Public**
+  （任何人都能拉取镜像，镜像里包含全部代码）。
 
 1. 打开 **File Station**，在 `docker` 共享文件夹里新建文件夹 `nocturne`，再在里面新建 `data` 文件夹。
 2. 把本仓库的 `docker-compose.yml` 上传到 `/docker/nocturne/`，用文本编辑器把
@@ -52,6 +66,14 @@ Package settings，把可见性改为 **Public**（否则 NAS 拉取需要登录
 5. 浏览器打开 `http://NAS的IP:8088`。
 
 > 如果 8088 端口被占用，把 compose 里的 `"8088:8080"` 左边的数字改成别的端口。
+
+> **数据文件的属主**：容器默认以 uid/gid `1000:1000` 写 `data/`（文件权限 0600）。如果你想用 File Station / SMB
+> 直接复制或查看 `data/`，可以在 compose 的 `environment` 里加上你自己的 uid/gid，群晖常见是：
+> ```yaml
+>       - PUID=1026
+>       - PGID=100
+> ```
+> （SSH 执行 `id 你的用户名` 可以查到）。重启容器后会自动把 `data/` 改成这个属主。Hyper Backup 以 root 运行，不受影响。
 
 ### 方式二：在 NAS 上从源码构建
 
@@ -67,6 +89,10 @@ Package settings，把可见性改为 **Public**（否则 NAS 拉取需要登录
 容器能访问到局域网。只有当你用 `localhost` / `127.0.0.1` 来填写服务地址时，才需要改成 `network_mode: host`
 （这时端口映射失效，直接访问 `http://NAS的IP:8080`）。
 
+> 💡 **内网地址建议填 IP**（如 `http://192.168.1.20:5000`），不要填 `xxx.local`：群晖的 `.local` 名字靠 Bonjour（mDNS），
+> Mac / iPhone 的浏览器能解析，但容器里解析不了。遇到解析不了的 `.local` 地址，夜曲会改用浏览器自己检测，不会误报离线，
+> 但只有填 IP 才能由 NAS 统一检测。
+
 ---
 
 ## 首次使用：创建管理员
@@ -80,7 +106,8 @@ Package settings，把可见性改为 **Public**（否则 NAS 拉取需要登录
 - **设置 → 账户**：查看当前账户、修改自己的密码、退出登录。
 - 管理员在同一页可以**添加用户**（可设为管理员）、**重置密码**、**删除用户**（会同时删除该用户的配置）。
 - 修改或重置密码后，该账户在其他设备上的登录会失效，需要重新登录。
-- 连续输错密码 5 次，该 IP 会被锁定 10 分钟。
+- 连续输错密码 5 次，该 IP 会被锁定 10 分钟；另外同一个用户名 15 分钟内输错 10 次（不论来自哪个 IP），
+  这个用户名会暂停登录 15 分钟（第 5 次起每次会逐渐变慢）。只影响这一个用户名，其他账户照常登录；登录成功即清零。
 - 登录状态保存 30 天（使用中会自动续期）。
 
 只在家里内网使用、不想要登录？设置环境变量 `NOCTURNE_NO_AUTH=1`，所有人共用一份配置。**不要在开放外网时这样做。**
@@ -138,8 +165,11 @@ Package settings，把可见性改为 **Public**（否则 NAS 拉取需要登录
 
 **Lucky**：Web 服务 → 添加规则 → 反向代理，目标填 `http://NAS的IP:8088`，开启 TLS 即可。
 
-后端会读取代理传来的 `X-Forwarded-Proto: https`，自动给登录 Cookie 加上 `Secure`；
-登录失败限流会使用 `X-Forwarded-For` 中的真实 IP（仅当请求来自内网代理时才信任该请求头）。
+后端会读取代理传来的 `X-Forwarded-Proto: https`，自动给登录 Cookie 加上 `Secure`。
+
+登录失败限流按真实客户端 IP 计算：只有直连夜曲的是**内网地址**（群晖反代、Lucky、Docker 网关）时才信任代理头，
+优先用 `X-Real-IP`（DSM / Lucky / nginx 设成 `$remote_addr`），没有再取 `X-Forwarded-For` **最右边**的地址
+（离夜曲最近的那一跳代理追加的；最左边的值客户端可以随便伪造）。多层代理时请让最外层代理设置 `X-Real-IP`。
 
 ---
 
@@ -164,13 +194,15 @@ data/
 ├── sessions.json     登录会话
 ├── config/<用户名>.json  每个用户的配置
 ├── wallpapers/<用户名>.jpg|png|webp  自定义壁纸（从相册上传的图片）
-├── backup/<用户名>.json  被另一台设备覆盖前的那一版配置（「改用服务器版」用）
+├── icons/<用户名>/<id>.png|jpg|webp  上传的图标（不再被引用满 24 小时后自动清理）
+├── backup/<用户名>/<时间>.json  被覆盖前的配置，每人保留最近 10 份（「改用服务器版」用）
 └── cache/            图标缓存（可随时删除）
 ```
 
 备份：直接复制整个 `data/` 文件夹（Hyper Backup 勾选 `/docker/nocturne` 即可）。
 恢复：停止容器 → 放回 `data/` → 启动。
-单个用户也可以随时在 设置 → 数据 → 导出配置 做一份 JSON 备份。
+单个用户也可以随时在 设置 → 数据 → 导出配置 做一份 JSON 备份（上传的图标会内嵌进去；**自定义壁纸文件不包含在导出里**，
+换实例后需要重新设置壁纸，找不到壁纸文件时页面会显示默认壁纸）。
 
 ---
 
@@ -180,7 +212,9 @@ data/
 | --- | --- | --- |
 | `PORT` | `8080` | 容器内监听端口 |
 | `DATA_DIR` | `/data` | 数据目录 |
-| `TZ` | `Asia/Shanghai` | 时区（影响日志时间） |
+| `TZ` | `Asia/Shanghai` | 时区：日志按本地时间输出（带时区偏移，如 `+08:00`） |
+| `PUID` / `PGID` | `1000` / `1000` | 容器内运行用户的 uid / gid，并把 `data/` 改成这个属主（群晖常见 `1026` / `100`） |
+| `UV_THREADPOOL_SIZE` | `16` | Node 线程池大小（DNS 解析用），一般不用改 |
 | `NOCTURNE_NO_AUTH` | 未设置 | 设为 `1` 关闭登录，所有人共用一份配置（仅限纯内网） |
 | `STATUS_INTERVAL` | `30` | 服务状态检测间隔（秒，最小 10） |
 | `PROBE_TIMEOUT` | `4` | 单次检测超时（秒） |
@@ -190,7 +224,8 @@ data/
 | `PROBE_TLS_STRICT` | 未设置 | 设为 `1` 时校验 HTTPS 证书；默认不校验（家里的自签名证书也算在线） |
 
 自定义壁纸固定存放在 `DATA_DIR/wallpapers/`（单张上限 15MB，支持 JPEG / PNG / WebP；页面会先把图片缩到长边 2560px 再上传）。
-旧版本把壁纸以 data URL 存在配置里，升级后启动或下次同步时会自动转存成文件并改写配置。
+上传的图标存放在 `DATA_DIR/icons/<用户名>/`（单个上限 512KB，只收 PNG / JPEG / WebP，不收 SVG；没有透明通道的图标会存成 JPEG）。
+旧版本把壁纸和上传的图标以 data URL 存在配置里，升级后启动或下次同步时会自动转存成文件并改写配置。
 
 ---
 
@@ -201,7 +236,9 @@ data/
 - 返回 **401 / 403** 的服务显示为「在线 · 需登录」（琥珀色状态点），同样计入在线数。
 - 安全边界：主机名会先解析，所有解析结果都要通过检查，且只连接检查过的地址。**永远不探测**链路本地地址
   （`169.254.0.0/16`、`fe80::/10`，包括云服务器元数据 `169.254.169.254`）、`metadata.google.internal` 等元数据主机名、
-  `0.0.0.0`，以及 Nocturne 自己的端口——这些项目的状态是 `blocked`，页面上显示「未检测」。
+  `0.0.0.0`，以及 Nocturne 自己的端口；内嵌 IPv4 的 IPv6 地址（`::ffff:a.b.c.d`、`::a.b.c.d`、NAT64 `64:ff9b::/96`）按内嵌的 IPv4 检查。
+  这些项目的状态是 `blocked`，页面上显示灰色状态点「未检测」，不计入在线 / 离线数。
+- `xxx.local` 在容器里解析失败时，NAS 不返回这一项，页面改用浏览器自己检测（见上面「网络说明」，建议填 IP）。
 - 全部服务都离线时，状态卡片只显示一句提示（多半是地址还没填，或当前网络到不了）；桌面版的离线芯片可以直接点开对应服务。
 - `example.com` 等保留域名（默认示例数据）直接视为离线，不发请求。
 - 页面每 30 秒从 NAS 拿一次结果；刚添加的项目在 NAS 检测到之前，会先用浏览器自己检测。
@@ -213,8 +250,9 @@ data/
 | GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用） |
 | GET | `/api/me` | 当前登录状态 |
 | POST | `/api/setup` · `/api/login` · `/api/logout` | 初始化 / 登录 / 退出 |
-| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`，后写覆盖）。PUT 带 `baseVersion`；若期间另一台设备改过，返回 `overwrote: true`，被覆盖的版本可用 `GET /api/config?prev=1` 取回。JSON 请求体上限 1MB |
+| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`，后写覆盖）。PUT 带 `baseVersion`；若期间另一台设备改过，返回 `overwrote: true`，被覆盖的版本进入环形备份（保留 10 份），`GET /api/config?prev=1` 取最新一份；内容和服务器相同时不算冲突、不升版本；带 `restore: true` 时先备份当前版本再覆盖。同一用户的写入串行执行。JSON 请求体上限 2MB（页面在配置超过 800KB 时提示） |
 | GET / PUT(POST) / DELETE | `/api/wallpaper` | 当前用户的自定义壁纸。PUT/POST 请求体为原始图片（`Content-Type` 为 `image/jpeg`、`image/png` 或 `image/webp`，≤15MB）；GET 带 ETag，`?v=` 版本号可长期缓存 |
+| POST / PUT / GET / DELETE | `/api/icons` · `/api/icons/<id>` | 上传的图标：POST（服务器生成 id）或 PUT 指定 id，请求体为原始 PNG / JPEG / WebP（≤512KB）；配置里记 `{type:"image", value:"api/icons/<id>"}` |
 | GET | `/api/status` | `{项目ID: {up, status, code, ms, checkedAt}}`，`status` 为 `up` / `auth` / `down` / `blocked` |
 | GET | `/api/docker` | 容器列表（未挂载 docker.sock 时 `available: false`） |
 | GET | `/api/icon/<前缀>/<名称>.svg`、`/api/icon/search?query=…`、`/api/icon?q=…` | Iconify 代理（缓存在 `data/cache`） |
@@ -233,7 +271,7 @@ DATA_DIR=./data node server.js
 # 打开 http://localhost:8080
 ```
 
-`public/index.html` 直接双击打开也能用（纯静态模式，配置只存在浏览器里，自定义壁纸仍以 data URL 存在本机），和旧版行为一致；
+`public/index.html` 直接双击打开也能用（纯静态模式，配置只存在浏览器里，自定义壁纸和上传的图标仍以 data URL 存在本机），和旧版行为一致；
 后端相关逻辑都在 `public/nocturne.js`，只有在由 `server.js` 提供页面时才会启用。
 
 字体是子集化后的 woff2（界面里出现的所有汉字 + 约 3500 个常用字，生僻字回退到系统宋体）。
