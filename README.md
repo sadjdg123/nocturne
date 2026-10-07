@@ -107,7 +107,11 @@
 - 管理员在同一页可以**添加用户**（可设为管理员）、**重置密码**、**删除用户**（会同时删除该用户的配置）。
 - 修改或重置密码后，该账户在其他设备上的登录会失效，需要重新登录。
 - 连续输错密码 5 次，该 IP 会被锁定 10 分钟；另外同一个用户名 15 分钟内输错 10 次（不论来自哪个 IP），
-  这个用户名会暂停登录 15 分钟（第 5 次起每次会逐渐变慢）。只影响这一个用户名，其他账户照常登录；登录成功即清零。
+  这个用户名会对**陌生的外网设备**暂停登录 15 分钟（第 5 次起每次会逐渐变慢）。只影响这一个用户名，其他账户照常登录。
+  - 计数在校验密码**之前**就记上，同一 IP、同一用户名同时最多 2 个登录请求在处理，并发爆发也绕不过去（多的直接返回 429）。
+  - **别人锁不住你**：从内网地址登录、或这台浏览器以前登录成功过（会留一个 1 年有效的「已知设备」HttpOnly Cookie，
+    服务器只存它的哈希），都不受用户名封禁限制，只会逐渐变慢；按 IP 的锁定照常生效。
+  - 修改 / 重置密码、删除用户后，该账户所有「已知设备」都会作废（改密码的这台设备会重新获得一个）。
 - 登录状态保存 30 天（使用中会自动续期）。
 
 只在家里内网使用、不想要登录？设置环境变量 `NOCTURNE_NO_AUTH=1`，所有人共用一份配置。**不要在开放外网时这样做。**
@@ -170,6 +174,8 @@
 登录失败限流按真实客户端 IP 计算：只有直连夜曲的是**内网地址**（群晖反代、Lucky、Docker 网关）时才信任代理头，
 优先用 `X-Real-IP`（DSM / Lucky / nginx 设成 `$remote_addr`），没有再取 `X-Forwarded-For` **最右边**的地址
 （离夜曲最近的那一跳代理追加的；最左边的值客户端可以随便伪造）。多层代理时请让最外层代理设置 `X-Real-IP`。
+「内网地址不受用户名封禁」也是按这个真实客户端 IP 判断的。**反向代理一定要传 `X-Real-IP` 或 `X-Forwarded-For`**：
+否则所有外网访客在夜曲看来都是代理自己的内网地址，既会被当成内网、也会共用同一个 IP 限流名额。
 
 ---
 
@@ -195,9 +201,12 @@ data/
 ├── config/<用户名>.json  每个用户的配置
 ├── wallpapers/<用户名>.jpg|png|webp  自定义壁纸（从相册上传的图片）
 ├── icons/<用户名>/<id>.png|jpg|webp  上传的图标（不再被引用满 24 小时后自动清理）
-├── backup/<用户名>/<时间>.json  被覆盖前的配置，每人保留最近 10 份（「改用服务器版」用）
+├── backup/<用户名>/<时间>.json  被覆盖 / 被替换前的配置，每人保留最近 10 份（「改用服务器版」「恢复较早的版本」用）
 └── cache/            图标缓存（可随时删除）
 ```
+
+**找回被覆盖的配置**：设置 → 账户 → 数据 →「恢复较早的版本」，列出上面这 10 份，点「恢复」（再点一次确认）即可；
+恢复前当前版本也会先存进备份，可以再换回来。
 
 备份：直接复制整个 `data/` 文件夹（Hyper Backup 勾选 `/docker/nocturne` 即可）。
 恢复：停止容器 → 放回 `data/` → 启动。
@@ -224,7 +233,7 @@ data/
 | `PROBE_TLS_STRICT` | 未设置 | 设为 `1` 时校验 HTTPS 证书；默认不校验（家里的自签名证书也算在线） |
 
 自定义壁纸固定存放在 `DATA_DIR/wallpapers/`（单张上限 15MB，支持 JPEG / PNG / WebP；页面会先把图片缩到长边 2560px 再上传）。
-上传的图标存放在 `DATA_DIR/icons/<用户名>/`（单个上限 512KB，只收 PNG / JPEG / WebP，不收 SVG；没有透明通道的图标会存成 JPEG）。
+上传的图标存放在 `DATA_DIR/icons/<用户名>/`（单个上限 512KB，每个账户最多 500 个、共 50MB，超出返回 413；只收 PNG / JPEG / WebP，不收 SVG；没有透明通道的图标会存成 JPEG）。
 旧版本把壁纸和上传的图标以 data URL 存在配置里，升级后启动或下次同步时会自动转存成文件并改写配置。
 
 ---
@@ -250,8 +259,9 @@ data/
 | GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用） |
 | GET | `/api/me` | 当前登录状态 |
 | POST | `/api/setup` · `/api/login` · `/api/logout` | 初始化 / 登录 / 退出 |
-| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`，后写覆盖）。PUT 带 `baseVersion`；若期间另一台设备改过，返回 `overwrote: true`，被覆盖的版本进入环形备份（保留 10 份），`GET /api/config?prev=1` 取最新一份；内容和服务器相同时不算冲突、不升版本；带 `restore: true` 时先备份当前版本再覆盖。同一用户的写入串行执行。JSON 请求体上限 2MB（页面在配置超过 800KB 时提示） |
+| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`，后写覆盖）。PUT 带 `baseVersion`；若期间另一台设备改过，返回 `overwrote: true`，被覆盖的版本进入环形备份（保留 10 份），`GET /api/config?prev=1` 取最新一份；内容和服务器相同时不算冲突、不升版本；带 `restore: true` 时先备份当前版本再覆盖。带 `replay: true`（页面打开时补推上次没确认同步的内容）且内容是服务器最近 20 个版本里的某个旧版本时，返回 `{stale: true, version}`、不写入。同一用户的写入串行执行。JSON 请求体上限 2MB（页面在配置超过 800KB 时提示） |
 | GET / PUT(POST) / DELETE | `/api/wallpaper` | 当前用户的自定义壁纸。PUT/POST 请求体为原始图片（`Content-Type` 为 `image/jpeg`、`image/png` 或 `image/webp`，≤15MB）；GET 带 ETag，`?v=` 版本号可长期缓存 |
+| GET | `/api/config/backups` · `/api/config?backup=<id>` | 环形备份列表（`id`、`version`、`updatedAt`、分组 / 项目数，新的在前）/ 取其中一份 |
 | POST / PUT / GET / DELETE | `/api/icons` · `/api/icons/<id>` | 上传的图标：POST（服务器生成 id）或 PUT 指定 id，请求体为原始 PNG / JPEG / WebP（≤512KB）；配置里记 `{type:"image", value:"api/icons/<id>"}` |
 | GET | `/api/status` | `{项目ID: {up, status, code, ms, checkedAt}}`，`status` 为 `up` / `auth` / `down` / `blocked` |
 | GET | `/api/docker` | 容器列表（未挂载 docker.sock 时 `available: false`） |
