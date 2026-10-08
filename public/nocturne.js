@@ -12,6 +12,26 @@
   var KEEPALIVE_MAX = 60000; // 浏览器对 keepalive 请求体的上限约 64KB
 
   function ls(op, k, v) { try { return op === "get" ? localStorage.getItem(k) : op === "del" ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { return null; } }
+  /* RC.3：回滚写保护旁路（spaces-guard）写入失败的管理员提示。保存响应里的 guardWarning / 管理员 /api/health 的 guard.issues（kind: write_failed）。
+   * 只给管理员看；每次「发生」只提示一次：以服务器记的 账户 + 这一轮连续失败开始的时间（since）为准，记在本机 localStorage，刷新页面不重复。 */
+  var GUARD_SEEN = "nocturne.guardWarn";
+  function guardText(users) {
+    return "空间保护记录未能保存" + (users ? "（账户 " + users + "）" : "") + "：配置本身已保存，但回滚到旧版本后自动找回空间的保护暂时失效。请检查 NAS 磁盘空间和 data 目录的写入权限，并尽快做一次备份。";
+  }
+  function guardCheck(h, fromSave) {
+    if (!N.user || !N.user.admin) return;
+    var list = h && h.guard && Array.isArray(h.guard.issues) ? h.guard.issues.filter(function (x) { return x && x.kind === "write_failed"; }) : [];
+    if (!list.length) { if (fromSave) guardToast("", ""); return; } // 拿不到诊断（例如旧服务器）：照样提示一次
+    var key = list.map(function (x) { return x.user + "@" + (x.since || x.at); }).sort().join("|");
+    guardToast(key, list.map(function (x) { return x.user; }).join("、"));
+  }
+  var guardShown = false;
+  function guardToast(key, users) {
+    if (key ? ls("get", GUARD_SEEN) === key : guardShown) return;
+    guardShown = true;
+    if (key) ls("set", GUARD_SEEN, key);
+    A.toast(guardText(users), { duration: 15000 });
+  }
   function bytes(str) { try { return new Blob([str]).size; } catch (e) { return str.length * 3; } }
   /** opts: {signal, keepalive, raw:已序列化的 body} */
   function api(method, p, body, opts) {
@@ -305,6 +325,7 @@
       if (d.duplicate && d.current > d.version) pull(false).then(null, function () {}); // 这次修改其实早就同步过，之后服务器又有新版本：拉下来（本机若又改过则保留本机）
       else if (d.migrated) pull(true).then(null, function () {}); // 服务器把旧的 data URL 壁纸 / 图标转成了文件
       if (d.forced) A.toast("已用本机版本覆盖 · 服务器上原来的版本已存入「较早的版本」", { duration: 6000 });
+      if (d.guardWarning && N.user && N.user.admin) api("GET", "health").then(function (h) { guardCheck(h, true); }, function () { guardCheck(null, true); });
       setTimeout(pullStatus, 4000); // 新地址由服务器尽快检测
     }, function (e) {
       if (restore) restoreNext = true;
@@ -527,7 +548,8 @@
         var c = h && h.client; if (!c || !el.isConnected) return;
         el.textContent = "连接诊断：服务器看到的直连地址 " + c.peer + " → 识别为客户端 " + c.ip +
           (c.trustedPeer ? "（经可信代理）" : c.forwardedHeaders ? "（收到了转发头，但 " + c.peer + " 不在 TRUSTED_PROXY_CIDRS 里，已忽略；若它是你的反向代理，请把它填进去）" : "（直连，没有经过反向代理）") +
-          (c.https ? " · HTTPS" : "");
+          (c.https ? " · HTTPS" : "") +
+          (h.guard && !h.guard.ok && Array.isArray(h.guard.issues) && h.guard.issues.length ? " · 空间保护异常：" + h.guard.issues.map(function (x) { return x.user + (x.kind === "write_failed" ? "（记录未能保存：" + (x.error || "") + "，请检查磁盘空间 / 权限并备份）" : "（记录已过期，不会用于自动找回）"); }).join("、") : "");
         el.hidden = false;
       }, function () {});
     }
@@ -684,6 +706,7 @@
         ls("set", "nocturne.recovered", rec.at);
         A.toast("回滚期间被旧版覆盖掉的 " + rec.spaces + " 个空间已自动找回 · 找回前的版本已存入「较早的版本」", { duration: 12000 });
       }
+      if (N.user.admin) api("GET", "health").then(function (h) { guardCheck(h, false); }, function () {}); // 管理员：上次运行以来有没写进去的空间保护记录
       A.on("change", schedule);
       A.on("render", schedule);
       var save = A.save;
