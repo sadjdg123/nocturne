@@ -71,13 +71,14 @@
    * 同一个 item.id 只保留一次（去重）。返回 [{entry, r}]，r 为 score() 结果。
    */
   function rank(entries, q, recent) {
-    var rpos = {}; (recent || []).forEach(function (id, i) { if (rpos[id] == null) rpos[id] = i; });
-    var seen = {}, out = [];
+    /* 按项目 id 建表：用 Map / 无原型对象（id 可以是 constructor、__proto__ 等，普通对象会读到原型上的函数或改掉原型） */
+    var rpos = new Map(); (recent || []).forEach(function (id, i) { if (!rpos.has(String(id))) rpos.set(String(id), i); });
+    var seen = new Set(), out = [];
     (entries || []).forEach(function (e, idx) {
       var it = e && e.item; if (!it) return;
       var key = it.id != null ? "id:" + it.id : "ix:" + idx;
-      if (seen[key]) return; seen[key] = 1;
-      var r = score(it, q, e.urls); if (r) out.push({ entry: e, r: r, idx: idx, rp: rpos[it.id] != null ? rpos[it.id] : Infinity });
+      if (seen.has(key)) return; seen.add(key);
+      var r = score(it, q, e.urls); if (r) out.push({ entry: e, r: r, idx: idx, rp: it.id != null && rpos.has(String(it.id)) ? rpos.get(String(it.id)) : Infinity });
     });
     out.sort(function (a, b) {
       return (b.r.tier - a.r.tier) || (b.r.b - a.r.b) || (a.rp - b.rp) || (b.r.s - a.r.s) || (a.idx - b.idx);
