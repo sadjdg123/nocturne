@@ -433,6 +433,10 @@
         var U = window.NocturneURL; /* urlcheck.js：统一的 URL 白名单校验 */
         var SP = window.NocturneSpaces; /* spaces.js：V2.0 场景空间模型（只引用分组 / 项目 id） */
 
+        /* 按 id / 地址建表一律用无原型对象（dict）或 Map / Set：项目 / 分组 id 可以是 constructor、__proto__、toString 等（手工导入的 JSON），
+         * 普通对象会读到 Object.prototype 上的函数、或被 __proto__ 改掉原型。选择器里的 id 用 sel() 转义。 */
+        function dict() { return Object.create(null); }
+        function sel(v) { v = String(v == null ? "" : v); return window.CSS && CSS.escape ? CSS.escape(v) : v.replace(/["\\\]\[]/g, "\\$&"); }
         function uid() { return Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
         function esc(s) {
           return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -498,7 +502,7 @@
         }
         var state = load();
         var undoStack = [];
-        var handlers = {};
+        var handlers = Object.create(null);
 
         function save() {
           var raw = JSON.stringify(state);
@@ -544,7 +548,7 @@
           if (icon.type === "image" && v) return '<span class="x-ic"' + bg + '><img class="x-full" src="' + esc(v) + '" loading="lazy" alt=""' + fail + "></span>";
           return '<span class="x-ic x-fb">' + letter + "</span>";
         }
-        var failed = {};
+        var failed = dict();
         function iconFail(img) {
           var u = img.getAttribute("src"); if (u && !/^data:/.test(u)) failed[u] = true;
           var s = document.createElement("span");
@@ -576,16 +580,29 @@
             return '<button type="button" class="x-eng" data-eng="' + esc(e.id) + '" aria-pressed="' + (e.id === st.engine) + '">' + esc(e.name) + "</button>";
           }).join("");
           $("x-groups").style.setProperty("--cols", Math.max(2, Math.min(6, +st.cols || 4)));
-          $("x-groups").innerHTML = state.groups.map(function (g) {
-            var items = (g.items || []).map(function (i) { return itemHTML(g, i); }).join("");
-            return '<section class="x-group" data-gid="' + esc(g.id) + '" aria-label="' + esc(g.name) + '">' +
-              '<h2 class="x-gtitle">' + esc(g.name) + "</h2>" +
+          /* V2.0 阶段 2：只渲染当前空间（本机选择）看得见的分组 / 项目；顺序永远是全局顺序。「全部」= 全部分组、全部项目（与 V1.1 相同） */
+          var sid = curSpace(), view = SP ? SP.view(state, sid) : state.groups.map(function (g) { return { group: g, items: g.items || [], whole: true }; });
+          document.body.classList.toggle("has-spaces", !!(SP && SP.list(state).length));
+          document.body.setAttribute("data-space", sid);
+          $("x-groups").setAttribute("data-space", sid);
+          $("x-groups").innerHTML = view.map(function (e) {
+            var g = e.group, items = e.items.map(function (i) { return itemHTML(g, i); }).join("");
+            return '<section class="x-group" data-gid="' + esc(g.id) + '"' + (e.whole ? "" : ' data-part="1"') + ' aria-label="' + esc(g.name) + '">' +
+              '<h2 class="x-gtitle">' + esc(g.name) + (e.whole ? "" : '<small class="x-gpart">单独添加的项目</small>') + "</h2>" +
               '<div class="' + (g.style === "chip" ? "x-chips" : "x-grid") + '" data-gid="' + esc(g.id) + '">' + items + "</div></section>";
-          }).join("");
+          }).join("") || emptyHTML(sid);
           tick();
           emit("render");
         }
 
+        /* 当前空间为空（没选分组 / 引用的分组已被删除）：说明 + 「选择分组」直接打开管理空间。「全部」没有分组时沿用 V1.1（编辑模式里可添加分组） */
+        function emptyHTML(sid) {
+          var s = SP && SP.get(state, sid);
+          if (!s) return "";
+          return '<div class="x-sempty" role="note"><h2>「' + esc(s.name) + '」里还没有内容</h2>' +
+            "<p>空间只引用已有的分组和项目，不会复制它们。选几个分组放进来，它们在「全部」里也照样在。</p>" +
+            '<button type="button" class="x-sempty-cta" data-space-pick="' + esc(s.id) + '">选择分组</button></div>';
+        }
         var WEEK = "日一二三四五六";
         function greeting(h) {
           return h < 5 ? "夜深了" : h < 11 ? "早上好" : h < 13 ? "中午好" : h < 18 ? "下午好" : "晚上好";
@@ -628,7 +645,6 @@
           if (eng) window.open(eng.url.replace("%s", encodeURIComponent(q)), "_blank", "noopener");
           $("x-q").value = "";
         });
-        var SOON = {};
         function emitOrSoon(evt) {
           var d = { handled: false };
           emit(evt, d);
@@ -654,27 +670,66 @@
           defaults: defaults,
           save: save, commit: commit, undo: undo, render: render,
           on: on, emit: emit, toast: toast,
-          util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U },
-          spaces: spacesApi()
+          util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U, dict: dict, sel: sel },
+          spaces: null
         };
+        App.spaces = spacesApi();
         /* V2.0 阶段 1：空间模型的程序接口（暂无界面，首页仍显示「全部」）。修改走 commit（可撤销、会同步）；
          * 当前空间只存本机 localStorage「nocturne.space:<账户>」，不进 state、不进 snapshot、不产生服务器版本。 */
+        function owner() { var N = window.NOCTURNE; return N && N.backend ? (N.user && N.user.name) || "~anon" : null; }
+        var selMem = dict();
+        var selStore = { getItem: function (k) { try { var v = localStorage.getItem(k); return v != null ? v : selMem[k] || null; } catch (e) { return selMem[k] || null; } },
+          setItem: function (k, v) { selMem[k] = v; try { localStorage.setItem(k, v); } catch (e) { /* memory only */ } },
+          removeItem: function (k) { delete selMem[k]; try { localStorage.removeItem(k); } catch (e) { /* memory only */ } } };
+        /** 当前空间（本机、按账户分键；记住的空间不存在 → "all"） */
+        function curSpace() { return SP ? SP.readSel(selStore, owner(), state) : "all"; }
+        /* V2.0 空间的程序接口。修改走 commit（可撤销、会同步）；当前空间只存本机 localStorage「nocturne.space:<账户>」，
+         * 不进 state、不进 snapshot、不产生服务器版本。切换只重新渲染（展示范围 + 该范围的状态统计），从不 commit。 */
         function spacesApi() {
           if (!SP) return null;
-          function owner() { var N = window.NOCTURNE; return N && N.backend ? (N.user && N.user.name) || "~anon" : null; }
-          var mem = {};
-          var store = { getItem: function (k) { try { var v = localStorage.getItem(k); return v != null ? v : mem[k] || null; } catch (e) { return mem[k] || null; } },
-            setItem: function (k, v) { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) { /* memory only */ } },
-            removeItem: function (k) { delete mem[k]; try { localStorage.removeItem(k); } catch (e) { /* memory only */ } } };
           return {
             model: SP, ALL: SP.ALL,
             list: function () { return SP.list(state); },
             view: function (id) { return SP.view(state, id); },
-            selected: function () { return SP.readSel(store, owner(), state); },
-            select: function (id) { var v = SP.resolve(state, id); SP.writeSel(store, owner(), v); emit("space", { id: v }); return v; },
-            selKey: function () { return SP.selKey(owner()); }
+            selected: curSpace,
+            select: function (id) {
+              var v = SP.resolve(state, id), prev = curSpace();
+              SP.writeSel(selStore, owner(), v);
+              if (v !== prev) render();
+              emit("space", { id: v, prev: prev });
+              return v;
+            },
+            selKey: function () { return SP.selKey(owner()); },
+            /** 当前空间看得见的项目 id（Set）；"all" → null（= 全部） */
+            scope: function () {
+              var sid = curSpace(); if (!SP.get(state, sid)) return null;
+              var out = new Set(); SP.view(state, sid).forEach(function (e) { e.items.forEach(function (i) { if (i) out.add(String(i.id)); }); });
+              return out;
+            },
+            /** 新项目 / 新分组默认放进哪个分组：当前空间里第一个图标分组 → 第一个看得见的分组 → 全局第一个图标分组 */
+            defaultGroup: function () {
+              var v = SP.view(state, curSpace()).map(function (e) { return e.group; });
+              var pick = function (l) { return l.filter(function (x) { return x.style !== "chip"; })[0] || l[0]; };
+              return pick(v) || pick(state.groups) || null;
+            },
+            /** 在 commit 里调用：项目在当前空间看不见（加到 / 移到了不在本空间的分组）→ 单独加进本空间（itemIds），返回是否加了 */
+            keepVisible: function (st, itemId) {
+              var sid = curSpace(); if (!SP.get(st, sid) || SP.itemVisible(st, sid, itemId)) return false;
+              SP.pin(st, sid, String(itemId), true); return true;
+            },
+            /** 在 commit 里调用：在某个空间里新建的分组整组加进这个空间 */
+            adoptGroup: function (st, groupId) {
+              var sid = curSpace(), sp = SP.get(st, sid); if (!sp || SP.groupInSpace(st, sid, groupId)) return false;
+              SP.setGroups(st, sid, (sp.groupIds || []).concat([String(groupId)])); return true;
+            },
+            current: function () { return SP.get(state, curSpace()); },
+            manage: function (id) { var d = { id: id || null, handled: false }; emit("spaces-manage", d); return d.handled; }
           };
         }
+        $("x-groups").addEventListener("click", function (e) {
+          var b = e.target.closest && e.target.closest("[data-space-pick]");
+          if (b && App.spaces) App.spaces.manage(b.getAttribute("data-space-pick"));
+        });
 
         render();
         setInterval(tick, 1000);
@@ -686,7 +741,7 @@
          "edit-item" / "add-item" listeners set d.handled = true; otherwise a 即将上线 toast shows. */
       (function () {
         "use strict";
-        var A = window.App, esc = A.util.esc, uid = A.util.uid, body = document.body;
+        var A = window.App, esc = A.util.esc, uid = A.util.uid, body = document.body, SPC = A.spaces;
         var groupsEl = document.getElementById("x-groups");
         var editing = false, depth = 0, lp = null, eatClick = false, sheetOpen = false, closeT = null, acts = [];
 
@@ -726,15 +781,28 @@
           A.commit(function (s) {
             var x = find(s, gid, id); if (!x.item) return;
             var c = structuredClone(x.item); c.id = uid(); x.g.items.splice(x.i + 1, 0, c);
+            if (SPC) SPC.keepVisible(s, c.id); /* 在空间里复制：原项目是单独加进来的 → 副本也单独加进来（否则一复制就看不见） */
           }, "duplicate-item");
           A.toast("已复制「" + f.item.title + "」");
         }
         function moveItem(gid, id, to, name) {
+          var pinned = false;
           A.commit(function (s) {
             var x = find(s, gid, id), t = gr(s, to); if (!x.item || !t) return;
             x.g.items.splice(x.i, 1); t.items.push(x.item);
+            if (SPC) pinned = SPC.keepVisible(s, id); /* 在空间里移到一个不在本空间的分组：单独加进本空间，项目不会凭空消失 */
           }, "move-item");
-          A.toast("已移到「" + name + "」");
+          A.toast("已移到「" + name + "」" + (pinned ? "，仍显示在本空间" : ""));
+        }
+        /* 只改空间关系、不删分组 / 项目：从当前空间里移除整组或单独加进来的项目 */
+        function unlink(kind, id, label) {
+          var cs = SPC && SPC.current(); if (!cs) return;
+          A.commit(function (s) {
+            var sp = SPC.model.get(s, cs.id); if (!sp) return;
+            if (kind === "group") SPC.model.setGroups(s, cs.id, (sp.groupIds || []).filter(function (x) { return x !== String(id); }));
+            else SPC.model.pin(s, cs.id, String(id), false);
+          }, "space-unlink");
+          A.toast("已从「" + cs.name + "」移除「" + label + "」（分组和项目都还在）", { action: "撤销", onAction: A.undo });
         }
         function delGroup(gid) {
           var g = gr(A.state, gid); if (!g) return;
@@ -750,8 +818,8 @@
           if (names.indexOf(def) > -1) { while (names.indexOf("新分组 " + n) > -1) n++; def = "新分组 " + n; }
           prompt("新建分组", "", function (v) {
             var id = uid();
-            A.commit(function (s) { s.groups.push({ id: id, name: v, style: "icon", items: [] }); }, "add-group");
-            var sec = groupsEl.querySelector('.x-group[data-gid="' + id + '"]');
+            A.commit(function (s) { s.groups.push({ id: id, name: v, style: "icon", items: [] }); if (SPC) SPC.adoptGroup(s, id); /* 在空间里新建 → 整组加进当前空间 */ }, "add-group");
+            var sec = groupsEl.querySelector('.x-group[data-gid="' + A.util.sel(id) + '"]');
             if (sec) sec.scrollIntoView({ block: "center", behavior: "smooth" });
           }, "分组名称", def);
         }
@@ -801,15 +869,16 @@
             var h = k[2]; try { h = new URL(k[2]).host; } catch (e) { /* keep */ }
             alt.push({ label: "用" + k[1] + "地址打开 · " + h, fn: function () { window.open(k[2], "_blank", "noopener"); } });
           });
+          var cs = SPC && SPC.current(), pinnedHere = cs && Array.isArray(cs.itemIds) && cs.itemIds.indexOf(String(id)) > -1 && !SPC.model.groupInSpace(A.state, cs.id, gid);
           menu(f.item.title, alt.concat([
             { label: "编辑…", fn: function () { softEmit("edit-item", { gid: gid, id: id }); } },
             { label: "移到分组…", keep: others.length > 0, fn: function () {
               if (!others.length) { A.toast("没有其他分组"); return; }
               menu("移到分组", others.map(function (g) { return { label: g.name, fn: function () { moveItem(gid, id, g.id, g.name); } }; }));
             } },
-            { label: "复制", fn: function () { dupItem(gid, id); } },
-            { label: "删除", red: true, fn: function () { delItem(gid, id); } }
-          ]));
+            { label: "复制", fn: function () { dupItem(gid, id); } }
+          ].concat(pinnedHere ? [{ label: "从「" + cs.name + "」移除", fn: function () { unlink("item", id, f.item.title); } }] : [])
+           .concat([{ label: cs ? "删除项目（所有空间）" : "删除", red: true, fn: function () { delItem(gid, id); } }])));
         }
         function groupSheet(gid) {
           var g = gr(A.state, gid); if (!g) return;
@@ -818,8 +887,8 @@
             { label: g.style === "chip" ? "改为图标" : "改为链接", fn: function () {
               A.commit(function (s) { var x = gr(s, gid); if (x) x.style = x.style === "chip" ? "icon" : "chip"; }, "group-style");
             } },
-            { label: "删除分组", red: true, fn: function () { delGroup(gid); } }
-          ]);
+          ].concat(SPC && SPC.current() && SPC.model.groupInSpace(A.state, SPC.current().id, gid) ? [{ label: "从「" + SPC.current().name + "」移除", fn: function () { unlink("group", gid, g.name); } }] : [])
+           .concat([{ label: SPC && SPC.current() ? "删除分组（所有空间）" : "删除分组", red: true, fn: function () { delGroup(gid); } }]));
         }
 
         /* ---- mode ---- */
@@ -924,14 +993,12 @@
         var insts = [], lastEnd = 0, press = null;
         var BOX = ".x-grid[data-gid], .x-chips[data-gid]";
 
-        function sig(list) { return JSON.stringify(list); }
         function readDOM() {
           return [].map.call(groupsEl.querySelectorAll(".x-group[data-gid]"), function (sec) {
             var box = sec.querySelector(BOX);
             return { gid: sec.getAttribute("data-gid"), ids: box ? [].map.call(box.querySelectorAll("[data-id]"), function (el) { return el.getAttribute("data-id"); }) : [] };
           });
         }
-        function readState(s) { return s.groups.map(function (g) { return { gid: g.id, ids: g.items.map(function (i) { return i.id; }) }; }); }
         function ghostLast() {
           groupsEl.querySelectorAll(BOX).forEach(function (box) {
             var g = box.querySelector(":scope > .x-ghost"); if (g && g !== box.lastElementChild) box.appendChild(g);
@@ -958,21 +1025,13 @@
         function onEnd() {
           body.style.touchAction = prevTA;
           lastEnd = Date.now(); body.classList.remove("x-dragging", "dragging"); ghostLast();
-          var order = readDOM();
-          if (sig(order) === sig(readState(A.state))) return;
+          var order = readDOM(), SP = window.NocturneSpaces;
+          /* 统一的全局顺序（spaces.js reorder）：在某个空间里拖动，只改「看得见的这些」彼此之间的先后，看不见的分组 / 项目原位不动；
+           * 在「全部」里等同于整体重排。先在浅拷贝上试一次：没有实际变化就不提交（不产生撤销步骤、不同步） */
+          var probe = { groups: A.state.groups.map(function (g) { return { id: g.id, items: (g.items || []).slice() }; }) };
+          if (!SP.reorder(probe, order)) return;
           setTimeout(function () {
-            A.commit(function (s) {
-              var gs = {}, its = {};
-              s.groups.forEach(function (g) { gs[g.id] = g; g.items.forEach(function (i) { its[i.id] = i; }); });
-              var seen = {}, next = order.filter(function (o) { return gs[o.gid]; }).map(function (o) {
-                var g = gs[o.gid]; seen[g.id] = 1;
-                g.items = o.ids.filter(function (id) { return its[id]; }).map(function (id) { var i = its[id]; delete its[id]; return i; });
-                return g;
-              });
-              s.groups.forEach(function (g) { if (!seen[g.id]) next.push(g); });
-              Object.keys(its).forEach(function (id) { if (next[0]) next[0].items.push(its[id]); });
-              s.groups = next;
-            }, "reorder");
+            A.commit(function (s) { SP.reorder(s, order); }, "reorder");
           }, 0);
         }
         function destroy() { insts.forEach(function (x) { try { x.destroy(); } catch (e) { /* already gone */ } }); insts = []; }
@@ -1005,7 +1064,7 @@
         /* hand a long-press that entered edit mode straight to Sortable, on the re-rendered tile under the finger */
         function handoff() {
           if (!press || !insts[0] || !insts[0].options.supportPointer || !window.PointerEvent) return;
-          var el = groupsEl.querySelector('[data-id="' + press.id + '"]'); if (!el) return;
+          var el = groupsEl.querySelector('[data-id="' + A.util.sel(press.id) + '"]'); if (!el) return;
           try {
             el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, composed: true, clientX: press.x, clientY: press.y,
               screenX: press.x, screenY: press.y, button: 0, buttons: 1, isPrimary: true, pointerId: press.pid, pointerType: "mouse" }));
@@ -1251,18 +1310,21 @@
           var title = F.nm.value.trim() || s.hint || "未命名", id = s.id, gid0 = s.gid0, gid = s.gid, ng = F.newg.value.trim() || "新分组";
           var data = { title: title, desc: F.desc.value.trim(), lan: lan, wan: wan, icon: curIcon() }, aliases = aliasList();
           if (aliases.length) data.aliases = aliases; /* 没填别名的项目不加这个字段，保持原样 */
+          var SPC = A.spaces, pinned = false;
           A.commit(function (st) {
             var tg = gid === "__new" ? null : st.groups.filter(function (x) { return x.id === gid; })[0];
-            if (!tg) { tg = { id: uid(), name: ng, style: "icon", items: [] }; st.groups.push(tg); }
-            if (!id) { data.id = uid(); tg.items.push(data); return; }
+            if (!tg) { tg = { id: uid(), name: ng, style: "icon", items: [] }; st.groups.push(tg); if (SPC) SPC.adoptGroup(st, tg.id); /* 在空间里新建的分组整组进本空间 */ }
+            /* 在空间里添加 / 改分组：目标分组不在本空间 → 这个项目单独加进本空间（itemIds），保存后仍在眼前；在「全部」里不改任何空间 */
+            var keep = function (x) { if (SPC) pinned = SPC.keepVisible(st, x); };
+            if (!id) { data.id = uid(); tg.items.push(data); keep(data.id); return; }
             var og = st.groups.filter(function (x) { return x.id === gid0; })[0], i = og ? og.items.findIndex(function (x) { return x.id === id; }) : -1;
-            if (i < 0) { data.id = id; tg.items.push(data); return; }
+            if (i < 0) { data.id = id; tg.items.push(data); keep(id); return; }
             var it = Object.assign(og.items[i], data);
             if (!aliases.length) delete it.aliases;
-            if (og !== tg) { og.items.splice(i, 1); tg.items.push(it); }
+            if (og !== tg) { og.items.splice(i, 1); tg.items.push(it); keep(id); }
           }, id ? "edit-item" : "add-item");
           close();
-          A.toast(id ? "已保存" : "已添加「" + title + "」");
+          A.toast((id ? "已保存" : "已添加「" + title + "」") + (pinned ? "（分组「" + (gid === "__new" ? ng : (A.state.groups.filter(function (x) { return x.id === gid; })[0] || {}).name) + "」不在本空间，已单独加入本空间）" : ""));
         }
 
         back.addEventListener("click", function () { if (open) tryClose(); });
@@ -1313,7 +1375,7 @@
           var tx = ((e.clipboardData || window.clipboardData).getData("text") || "").trim();
           if (!tx || /\s/.test(tx) || !(hasScheme(tx) || /^[\w-]+(\.[\w-]+)*(\.[a-z]{2,}|:\d{2,5})(:\d{2,5})?([\/?#]\S*)?$/i.test(tx)) || !parse(tx)) return;
           e.preventDefault();
-          var g = A.state.groups.filter(function (x) { return x.style !== "chip"; })[0] || A.state.groups[0];
+          var g = A.spaces ? A.spaces.defaultGroup() : A.state.groups.filter(function (x) { return x.style !== "chip"; })[0] || A.state.groups[0];
           openSheet({ gid: g && g.id, url: tx });
         });
       })();
@@ -1334,7 +1396,7 @@
         var stat = new Map(), gen = 0, lastCheck = 0;
 
         function all() {
-          var m = {};
+          var m = A.util.dict();
           A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { m[i.id] = { item: i, icon: g.style !== "chip" }; }); });
           return m;
         }
@@ -1387,8 +1449,11 @@
           nw.setAttribute("aria-label", "网络模式：" + (pref() === "auto" ? "自动，当前优先" + NAMES[n] : "优先" + NAMES[n]) + "。点按更改");
           if (netOpen) drawNetMenu();
         }
+        /* 状态检测永远覆盖全部项目（与空间无关）；这里的「在线 x / y」只统计当前空间看得见的图标项目 */
+        function inScope() { var sc = A.spaces ? A.spaces.scope() : null; return function (id) { return !sc || sc.has(String(id)); }; }
         function apply() {
-          var m = all(), ids = [], on = 0, pend = 0, off = [], auth = 0;
+          var m = all(), ids = [], on = 0, pend = 0, off = [], auth = 0, ok = inScope(), cs = A.spaces && A.spaces.current();
+          side.querySelector(".x-card h2").textContent = cs ? "系统状态 · " + cs.name : "系统状态";
           groupsEl.querySelectorAll(".x-tile[data-id], .x-chip[data-id]").forEach(function (el) {
             var e = m[el.getAttribute("data-id")]; if (!e) return;
             el.setAttribute("href", A.url(e.item));
@@ -1399,7 +1464,7 @@
             el.title = (e.item.desc ? e.item.desc + " · " : "") + t;
           });
           Object.keys(m).forEach(function (id) {
-            if (!m[id].icon) return;
+            if (!m[id].icon || !ok(id)) return;
             var r = stat.get(id);
             if (r && r.s === "na") return; // 被服务器拦截不探测的地址：灰点，不计入总数和离线
             ids.push(id);
@@ -1463,8 +1528,8 @@
           if (left) next(); else finish();
         }
         function finish() {
-          var m = all(), on = 0, off = 0;
-          Object.keys(m).forEach(function (id) { if (!m[id].icon) return; var r = stat.get(id); if (r && (r.s === "on" || r.s === "auth")) on++; else off++; });
+          var m = all(), on = 0, off = 0, ok = inScope();
+          Object.keys(m).forEach(function (id) { if (!m[id].icon || !ok(id)) return; var r = stat.get(id); if (r && (r.s === "on" || r.s === "auth")) on++; else off++; });
           live.textContent = "";
           setTimeout(function () { live.textContent = on + " 个服务在线，" + off + " 个离线"; }, 50);
           var w = doneWaiters; doneWaiters = [];
@@ -1536,11 +1601,16 @@
         function track(e) {
           if (e.defaultPrevented || body.classList.contains("editing") || (e.type === "auxclick" && e.button !== 1)) return;
           var a = e.target.closest && e.target.closest("#x-groups [data-id], .x-side [data-rid]"); if (!a || a.tagName !== "A") return;
-          var id = a.getAttribute("data-id") || a.getAttribute("data-rid");
+          remember(a.getAttribute("data-id") || a.getAttribute("data-rid"));
+        }
+        /** 记入「最近使用」（本机）：点图标 / 最近使用 / 离线芯片，或命令面板打开了一个不在当前空间里的项目 */
+        function remember(id) {
+          if (id == null) return;
           var r = (A.state.recent || []).filter(function (x) { return x !== id; }); r.unshift(id);
           A.state.recent = keep.recent = r.slice(0, 8); A.save();
           setTimeout(renderRecent, 0);
         }
+        A.trackRecent = function (id) { if (!body.classList.contains("editing")) remember(String(id)); };
         document.addEventListener("click", track);
         document.addEventListener("auxclick", track);
         /* 没有地址 / 地址无效的项目不可点击：不再打开一个空白的新标签页 */
@@ -1642,7 +1712,7 @@
         var imgs = [].slice.call(document.querySelectorAll(".x-bg")), shade = document.querySelector(".x-shade");
         var layer = document.createElement("div"); layer.className = "x-wp"; layer.hidden = true; shade.before(layer);
         /* 自定义壁纸先预加载：加载成功才替换；文件不见了（404 / 导出导入没带上）就保留默认壁纸，不会整页变黑 */
-        var wpState = {}, wpWarned = false, wpShown = "";
+        var wpState = A.util.dict(), wpWarned = false, wpShown = "";
         function wpReady(src, isFile) {
           if (wpState[src] === "ok") return true;
           if (wpState[src]) return false; // loading / failed
@@ -1691,7 +1761,7 @@
         var scrim = document.createElement("div"); scrim.className = "x-sb"; scrim.hidden = true;
         var menu = document.createElement("div"); menu.className = "x-menu x-glass"; menu.hidden = true;
         menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "菜单");
-        menu.innerHTML = '<button type="button" role="menuitem" data-m="palette">快速打开</button><button type="button" role="menuitem" data-m="edit">编辑主页</button><button type="button" role="menuitem" data-m="add">添加项目</button><button type="button" role="menuitem" data-m="set">设置</button>';
+        menu.innerHTML = '<button type="button" role="menuitem" data-m="palette">快速打开</button><button type="button" role="menuitem" data-m="edit">编辑主页</button><button type="button" role="menuitem" data-m="add">添加项目</button><button type="button" role="menuitem" data-m="spaces">管理空间</button><button type="button" role="menuitem" data-m="set">设置</button>';
         var sp = document.createElement("div"); sp.className = "x-set"; sp.hidden = true;
         sp.setAttribute("role", "dialog"); sp.setAttribute("aria-modal", "true"); sp.setAttribute("aria-labelledby", "x-set-t");
         var TABS = ["外观", "搜索", "数据"];
@@ -1759,7 +1829,8 @@
           close();
           if (m === "palette") { if (A.palette) A.palette.open(""); return; } /* 手机上的命令面板入口：在这次点按里直接聚焦输入框，软键盘才会弹出 */
           if (m === "edit") return A.emit("edit");
-          var g = A.state.groups.filter(function (x) { return x.style !== "chip"; })[0] || A.state.groups[0];
+          if (m === "spaces") { if (A.spaces) A.spaces.manage(); return; }
+          var g = A.spaces ? A.spaces.defaultGroup() : A.state.groups.filter(function (x) { return x.style !== "chip"; })[0] || A.state.groups[0];
           var d = { gid: g && g.id, handled: false }; A.emit("add-item", d);
           if (!d.handled) A.toast("即将上线");
         });
@@ -2158,7 +2229,7 @@
           var drawOff = function () {
             var off = sline.classList.contains("is-off") || sline.classList.contains("is-alloff"), items = [];
             if (off) {
-              var m = {}; A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { m[i.id] = i; }); });
+              var m = A.util.dict(); A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { m[i.id] = i; }); });
               groupsEl.querySelectorAll(".x-tile[data-id] > .dot.off").forEach(function (d) {
                 var i = m[d.parentNode.getAttribute("data-id")]; if (i) items.push(i);
               });
@@ -2225,8 +2296,8 @@
         }
         function mark(text, hits) {
           if (!hits || !hits.length) return esc(text);
-          var set = {}; hits.forEach(function (h) { set[h] = 1; });
-          return Array.from(String(text)).map(function (c, i) { return set[i] ? "<mark>" + esc(c) + "</mark>" : esc(c); }).join("");
+          var set = new Set(hits);
+          return Array.from(String(text)).map(function (c, i) { return set.has(i) ? "<mark>" + esc(c) + "</mark>" : esc(c); }).join("");
         }
         function host(u) { try { return new URL(u).host; } catch (e) { return u || ""; } }
 
@@ -2247,7 +2318,18 @@
             { k: "edit", t: editing ? "退出编辑" : "进入编辑", d: MOD + "E", g: "✎", kw: "编辑 edit 排序 拖动" },
             { k: "settings", t: "打开设置", d: MOD + ",", g: "⚙", kw: "设置 settings 壁纸 外观 preferences" },
             { k: "add", t: "添加项目", d: "新建一个服务或链接", g: "+", kw: "添加 新建 add new item" }
-          ].map(function (a) { a.cur = eff; return a; });
+          ].concat(spaceActions()).map(function (a) { a.cur = eff; return a; });
+        }
+        /* 空间相关的内置动作：「切换到空间：X」（含「全部」）与「管理空间」。只出现在操作里（排在服务 / 分组结果之后），不挤掉搜索结果 */
+        function spaceActions() {
+          var SPC = A.spaces; if (!SPC) return [];
+          var cur = SPC.selected(), M = SPC.model;
+          var out = [{ id: M.ALL, name: M.ALL_NAME }].concat(SPC.list()).map(function (sp) {
+            var n = M.stats(A.state, sp.id).items;
+            return { k: "space:" + sp.id, t: "切换到空间：" + sp.name, d: sp.id === cur ? "当前空间" : n + " 个项目", g: "◫", kw: "空间 切换 space switch " + sp.name };
+          });
+          out.push({ k: "spaces", t: "管理空间", d: "新建、重命名、排序、选择分组", g: "▤", kw: "管理空间 空间 管理 新建 编辑 space spaces manage" });
+          return out;
         }
         var rows = [], base = [], sel = 0, altFor = null;
         /* 备用地址：同时有有效内网 / 外网地址的项目，在它被选中时下面多出「用内网地址打开」「用外网地址打开」 */
@@ -2275,8 +2357,8 @@
         function build() {
           var raw = inp.value.trim(), out = [], R = window.NocturneRank;
           var cmd = raw.charAt(0) === ">" || raw.charAt(0) === "＞", q = R.norm(cmd ? raw.slice(1) : raw);
-          var items = [], seenId = {};
-          A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { if (i && !seenId[i.id]) { seenId[i.id] = 1; items.push({ i: i, g: g }); } }); });
+          var items = [], seenId = new Set();
+          A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { if (i && !seenId.has(String(i.id))) { seenId.add(String(i.id)); items.push({ i: i, g: g }); } }); });
           if (cmd) { /* '>'：只显示内置动作 */
             actions().forEach(function (a) {
               var m = q ? R.match(a.t, q) : { s: 0, hits: [] }, mk = q ? R.match(a.kw, q) : null;
@@ -2284,11 +2366,11 @@
             });
             if (q) out.sort(function (a, b) { return b.s - a.s; });
           } else if (!q) {
-            var byId = {}; items.forEach(function (x) { byId[x.i.id] = x; });
-            var rec = (A.state.recent || []).map(function (id) { return byId[id]; }).filter(Boolean).slice(0, 5);
+            var byId = new Map(); items.forEach(function (x) { byId.set(String(x.i.id), x); });
+            var rec = (A.state.recent || []).map(function (id) { return byId.get(String(id)); }).filter(Boolean).slice(0, 5);
             rec.forEach(function (x) { out.push({ type: "item", sec: "最近使用", x: x, hits: [] }); });
-            var seen = {}; rec.forEach(function (x) { seen[x.i.id] = 1; });
-            items.filter(function (x) { return !seen[x.i.id]; }).slice(0, Math.max(0, 6 - rec.length)).forEach(function (x) { out.push({ type: "item", sec: rec.length ? "最近使用" : "服务", x: x, hits: [] }); });
+            var seen = new Set(); rec.forEach(function (x) { seen.add(String(x.i.id)); });
+            items.filter(function (x) { return !seen.has(String(x.i.id)); }).slice(0, Math.max(0, 6 - rec.length)).forEach(function (x) { out.push({ type: "item", sec: rec.length ? "最近使用" : "服务", x: x, hits: [] }); });
             /* 空输入：常用动作（和以前一样：切到另一种网络、编辑、添加、设置）；输入 > 看全部动作 */
             var other = A.net && A.net.effective() === "lan" ? "net:wan" : "net:lan", order = [other, "edit", "add", "settings"], acts = actions();
             order.forEach(function (k) { acts.forEach(function (a) { if (a.k === k) out.push({ type: "action", sec: "操作", a: a, hits: [] }); }); });
@@ -2360,7 +2442,8 @@
         document.addEventListener("click", function (e) { if (suppress) e.preventDefault(); });
         function record(id) {
           if (body.classList.contains("editing")) return;
-          var a = groupsEl.querySelector('a[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]'); if (!a) return;
+          var a = groupsEl.querySelector('a[data-id="' + A.util.sel(id) + '"]');
+          if (!a) { if (A.trackRecent) A.trackRecent(id); return; } /* 项目不在当前空间（命令面板搜的是全部空间）：直接记入最近使用 */
           suppress = true;
           try { a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } finally { suppress = false; }
         }
@@ -2376,7 +2459,11 @@
           else if (r.type === "alt") { record(r.x.i.id); go(r.url, newTab); } // 只是按用户选的地址打开；能不能打开由浏览器决定，不记为「可访问」
           else if (r.type === "search") go(r.e.url.replace("%s", encodeURIComponent(r.q)), newTab);
           else if (r.type === "group") {
-            var sec = groupsEl.querySelector('.x-group[data-gid="' + r.g.id + '"]');
+            var sec = groupsEl.querySelector('.x-group[data-gid="' + A.util.sel(r.g.id) + '"]');
+            if (!sec && A.spaces && A.spaces.selected() !== A.spaces.ALL) { /* 分组不在当前空间：先回到「全部」再定位 */
+              A.spaces.select(A.spaces.ALL); A.toast("这个分组不在当前空间，已切换到「全部」");
+              sec = groupsEl.querySelector('.x-group[data-gid="' + A.util.sel(r.g.id) + '"]');
+            }
             if (sec) {
               sec.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
               sec.classList.remove("x-flash"); void sec.offsetWidth; sec.classList.add("x-flash");
@@ -2390,12 +2477,16 @@
               if (!A.net) A.toast("网络模式不可用");
               else if (A.net.mode() === want) A.toast("已经是「" + (want === "auto" ? "自动（当前优先" + A.net.names[A.net.effective()] + "）" : "优先" + A.net.names[want]) + "」");
               else A.net.set(want);
-            } else if (k === "recheck") recheck();
+            } else if (k.indexOf("space:") === 0) {
+              var want2 = k.slice(6), was = A.spaces.selected(), got = A.spaces.select(want2), sp2 = A.spaces.model.get(A.state, got);
+              A.toast(got === was ? "已经在「" + (sp2 ? sp2.name : "全部") + "」" : "已切换到「" + (sp2 ? sp2.name : "全部") + "」");
+            } else if (k === "spaces") { if (A.spaces) A.spaces.manage(); }
+            else if (k === "recheck") recheck();
             else if (k === "edit") {
               if (body.classList.contains("editing")) { var dn = document.querySelector('.x-ebar [data-e="done"]'); if (dn) dn.click(); }
               else A.emit("edit", { handled: false });
             } else if (k === "add") {
-              var g = A.state.groups.filter(function (x) { return x.style !== "chip"; })[0] || A.state.groups[0];
+              var g = A.spaces ? A.spaces.defaultGroup() : A.state.groups.filter(function (x) { return x.style !== "chip"; })[0] || A.state.groups[0];
               var d = { gid: g && g.id, handled: false }; A.emit("add-item", d);
               if (!d.handled) A.toast("即将上线");
             } else if (k === "settings") A.emit("settings", { handled: false });
@@ -2421,7 +2512,7 @@
 
         /* ---- open / close ---- */
         var isOpen = false, prev = null;
-        function overlayOpen() { return !!document.querySelector(".x-set.is-on, .x-is.is-on, .x-sheet.is-on, .x-menu.is-on, .x-netm.is-on, .nc-auth:not([hidden])") || document.documentElement.classList.contains("nc-locked"); }
+        function overlayOpen() { return !!document.querySelector(".x-set.is-on, .x-is.is-on, .x-spm.is-on, .x-sheet.is-on, .x-menu.is-on, .x-netm.is-on, .nc-auth:not([hidden])") || document.documentElement.classList.contains("nc-locked"); }
         function open(prefill) {
           if (isOpen) { inp.select(); return; }
           isOpen = true; prev = document.activeElement;
@@ -2467,6 +2558,364 @@
           else if (e.metaKey || e.ctrlKey) { e.stopImmediatePropagation(); }
         }, true);
         A.on("render", function () { if (isOpen) build(); });
+      })();
+    </script>
+    <style>
+      /* V2.0 阶段 2 · 空间切换器 + 管理空间（沿用 V1.1 视觉语言；阶段 3 的 Midnight 视觉只改样式，DOM / 逻辑共用） */
+      .x-spaces { display: none; align-items: center; gap: 8px; min-width: 0; }
+      body.has-spaces .x-spaces { display: flex; }
+      .x-sp-track { flex: 1 1 auto; min-width: 0; display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; scroll-snap-type: x proximity; padding: 2px; -webkit-overflow-scrolling: touch; }
+      .x-sp-track::-webkit-scrollbar { display: none; }
+      .x-sp { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 40px; max-width: 220px; padding: 0 14px; border-radius: 20px; border: 1px solid var(--x-line); background: rgba(14, 18, 28, .35);
+        color: var(--x-mist); font: 500 14px var(--x-ui); white-space: nowrap; cursor: pointer; scroll-snap-align: start; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; }
+      .x-sp > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .x-sp > small { flex: none; font-size: 12px; opacity: .8; font-variant-numeric: tabular-nums; }
+      .x-sp:hover { color: var(--x-text); border-color: rgba(255, 240, 220, .22); }
+      .x-sp[aria-current="true"] { color: #1a1206; background: var(--x-amber); border-color: var(--x-amber); }
+      .x-sp-manage { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 20px; border: 1px solid var(--x-line); background: rgba(14, 18, 28, .35); color: var(--x-text); font: 500 18px/1 var(--x-ui); cursor: pointer; display: grid; place-items: center; }
+      .x-sp-manage svg { width: 18px; height: 18px; }
+      body.dragging .x-spaces, body.x-dragging .x-spaces { pointer-events: none; opacity: .55; }
+      .x-gpart { margin-left: -4px; font: 400 12px/1.3 var(--x-ui); color: var(--x-mist); letter-spacing: .04em; }
+      .x-sempty { display: grid; justify-items: center; gap: 10px; padding: 28px 20px; border-radius: 22px; text-align: center; background: rgba(10, 13, 20, .32); border: 1px dashed rgba(255, 240, 220, .16); }
+      .x-sempty h2 { font: 500 17px/1.4 var(--x-serif); letter-spacing: .06em; }
+      .x-sempty p { max-width: 30em; font-size: 14px; color: var(--x-mist); }
+      .x-sempty-cta { min-height: 44px; padding: 0 22px; border: 0; border-radius: 22px; background: var(--x-amber); color: #1a1206; font: 600 15px var(--x-ui); cursor: pointer; }
+      @media (max-width: 767px) {
+        /* 手机：拇指区，紧贴底部快捷栏上方；横向滑动 */
+        .x-spaces { position: fixed; z-index: 19; left: 50%; transform: translateX(-50%); bottom: calc(10px + var(--x-dock) + 8px + env(safe-area-inset-bottom));
+          width: min(calc(100% - 32px), 360px); padding: 4px; border-radius: 26px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); background: rgba(14, 18, 28, .82); }
+        .x-sp, .x-sp-manage { height: 44px; }
+        .x-sp { border-radius: 22px; background: none; border-color: transparent; }
+        .x-sp-manage { width: 44px; border-radius: 22px; background: rgba(255, 255, 255, .06); border-color: transparent; }
+        body.x-body.has-spaces, body.x-body.has-spaces.editing { padding-bottom: calc(var(--x-dock) + 10px + 24px + 60px + env(safe-area-inset-bottom)); }
+        body.has-spaces .x-toast { bottom: calc(10px + var(--x-dock) + 12px + 60px + env(safe-area-inset-bottom)); }
+      }
+      @media (min-width: 768px) {
+        .x-spaces { justify-content: center; width: min(100%, 860px); margin: -6px auto 0; background: none; border: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+        .x-sp-track { flex: 0 1 auto; }
+      }
+      @media (min-width: 900px) { .x-wrap > .x-spaces { grid-column: 1 / -1; } }
+
+      /* 管理空间（底部抽屉 / 桌面居中对话框） */
+      .x-spm-back { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, .5); opacity: 0; transition: opacity .25s ease; }
+      .x-spm-back.is-on { opacity: 1; }
+      .x-spm { position: fixed; z-index: 51; left: 50%; bottom: 0; width: min(100%, 520px); max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain; color: var(--x-text);
+        transform: translate(-50%, 100%); transition: transform .3s cubic-bezier(.2, .7, .2, 1), opacity .25s ease; border-radius: 22px 22px 0 0; border: 1px solid var(--x-line); border-bottom: 0;
+        background: rgba(14, 18, 28, .94); padding: 0 16px calc(20px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 30px rgba(0, 0, 0, .4); }
+      .x-spm.is-on { transform: translate(-50%, 0); }
+      body.x-spm-open .x-toast { z-index: 52; }
+      /* 管理空间开着时发生 409：冲突面板必须在它上面 */
+      .x-sback.nc-cfb { z-index: 55; } .x-sheet.nc-cfs { z-index: 56; }
+      .x-spm-h { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 56px; margin: 0 -16px; padding: 0 4px; background: rgba(16, 20, 30, .97); border-bottom: 1px solid var(--x-line); }
+      .x-spm-h h3 { grid-column: 2; margin: 0; font: 500 17px/1.3 var(--x-serif); letter-spacing: .06em; }
+      .x-spm-h button { height: 48px; padding: 0 14px; border: 0; background: none; color: var(--x-mist); font: 500 16px var(--x-ui); cursor: pointer; }
+      .x-spm-h .x-spm-done { grid-column: 3; justify-self: end; color: var(--x-amber); font-weight: 600; }
+      .x-spm .x-note { margin-top: 14px; }
+      .x-spm-list { list-style: none; margin: 14px 0 0; padding: 0; border-radius: 14px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .04); overflow: hidden; }
+      .x-spm-row { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px 4px 4px; }
+      .x-spm-list > li + li { border-top: 1px solid var(--x-line); }
+      .x-spm-drag { flex: none; display: grid; place-items: center; width: 32px; height: 44px; color: var(--x-mist); font-size: 18px; cursor: grab; touch-action: none; }
+      .x-spm-row.is-all { padding-left: 14px; }
+      .x-spm-open { flex: 1; min-width: 0; display: grid; gap: 1px; min-height: 48px; padding: 4px 8px; border: 0; border-radius: 10px; background: none; color: var(--x-text); text-align: left; font: 500 16px/1.3 var(--x-ui); cursor: pointer; }
+      .x-spm-open > span, .x-spm-row.is-all > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .x-spm-row small, .x-spm-open small { font: 400 12.5px/1.35 var(--x-ui); color: var(--x-mist); }
+      .x-spm-row.is-all { display: grid; align-content: center; gap: 1px; }
+      .x-spm-row.is-cur .x-spm-open > span::after, .x-spm-row.is-all.is-cur > span::after { content: " · 当前"; color: var(--x-amber); font-size: 13px; }
+      .x-spm-ib { flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 12px; background: none; color: var(--x-text); font: 500 17px/1 var(--x-ui); cursor: pointer; }
+      .x-spm-ib:hover { background: rgba(255, 255, 255, .07); }
+      .x-spm-ib:disabled { opacity: .3; cursor: default; background: none; }
+      .x-spm-open[aria-expanded="true"] { color: var(--x-amber); }
+      .x-spm-ed { padding: 4px 14px 16px; background: rgba(255, 255, 255, .03); }
+      .x-spm-f { display: flex; gap: 8px; align-items: stretch; margin-top: 8px; }
+      .x-spm input[type=text] { flex: 1; min-width: 0; height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .06); color: var(--x-text); font: 400 16px var(--x-ui); outline: none; -webkit-appearance: none; appearance: none; }
+      .x-spm input[type=text]:focus { border-color: rgba(233, 178, 106, .55); }
+      .x-spm input[type=text].is-bad { border-color: #E26D5A; }
+      .x-spm-btn { flex: none; min-height: 46px; padding: 0 16px; border: 0; border-radius: 12px; background: rgba(255, 255, 255, .09); color: var(--x-text); font: 600 15px var(--x-ui); cursor: pointer; }
+      .x-spm-btn.is-pri { background: var(--x-amber); color: #1a1206; }
+      .x-spm-btn:disabled { opacity: .4; cursor: default; }
+      .x-spm-btn.is-red { color: #E26D5A; background: rgba(226, 109, 90, .1); }
+      .x-spm-cnt { align-self: center; flex: none; min-width: 42px; text-align: right; font: 400 12.5px var(--x-ui); color: var(--x-mist); font-variant-numeric: tabular-nums; }
+      .x-spm .x-err { margin: 6px 0 0; }
+      .x-spm-lab { margin: 16px 0 6px; font: 500 13px/1.4 var(--x-ui); color: var(--x-mist); letter-spacing: .04em; }
+      .x-spm-gl { display: grid; gap: 2px; }
+      .x-spm-ck { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 4px 8px; border-radius: 10px; cursor: pointer; }
+      .x-spm-ck:hover { background: rgba(255, 255, 255, .05); }
+      .x-spm-ck input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--x-amber); }
+      .x-spm-ck > span { flex: 1; min-width: 0; display: grid; }
+      .x-spm-ck b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .x-spm-ck small { font-size: 12px; color: var(--x-mist); }
+      .x-spm-ck.is-dis { opacity: .55; cursor: default; }
+      .x-spm details { margin-top: 10px; border-top: 1px solid var(--x-line); }
+      .x-spm summary { display: flex; align-items: center; min-height: 46px; color: var(--x-mist); font: 500 14px var(--x-ui); cursor: pointer; list-style: none; }
+      .x-spm summary::-webkit-details-marker { display: none; }
+      .x-spm summary::after { content: "▾"; margin-left: 6px; }
+      .x-spm details[open] summary::after { content: "▴"; }
+      .x-spm-ig { margin: 6px 0 2px 8px; font: 500 12.5px var(--x-ui); color: var(--x-mist); }
+      .x-spm-cf { display: grid; gap: 10px; margin-top: 10px; padding: 12px; border-radius: 12px; background: rgba(60, 34, 30, .6); font-size: 14px; }
+      .x-spm-cf > div { display: flex; gap: 8px; }
+      .x-spm-new { margin-top: 18px; padding: 14px; border-radius: 14px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .03); }
+      .x-spm-new h4 { margin: 0; font: 500 15px/1.3 var(--x-serif); letter-spacing: .06em; }
+      .x-spm-tpl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+      .x-spm-tpl button { min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .05); color: var(--x-text); font: 500 14px var(--x-ui); cursor: pointer; }
+      .x-spm-tpl button:hover { border-color: rgba(233, 178, 106, .45); }
+      @media (min-width: 768px) {
+        .x-spm { top: 50%; bottom: auto; max-height: min(88dvh, 820px); border-radius: 22px; border-bottom: 1px solid var(--x-line); padding-bottom: 20px; transform: translate(-50%, -46%); opacity: 0; box-shadow: 0 20px 50px rgba(0, 0, 0, .5); }
+        .x-spm.is-on { transform: translate(-50%, -50%); opacity: 1; }
+        .x-spm-h { border-radius: 22px 22px 0 0; }
+      }
+      @media (prefers-reduced-motion: reduce) { .x-spm, .x-spm-back { transition: none; } }
+    </style>
+    <script>
+      /* V2.0 阶段 2 · 空间切换器（桌面：搜索栏下方的轻量导航；手机：底部快捷栏上方的拇指区横滑条）+ 管理空间。只用 App 接口。
+       * 切换只改本机选择（App.spaces.select → 重新渲染展示范围与该范围的状态统计），从不 commit、不同步、不产生版本；
+       * 管理空间里的每个修改都走 App.commit（可撤销、走现有同步 / 409 冲突 / opId / bad_spaces 处理）。 */
+      (function () {
+        "use strict";
+        var A = window.App; if (!A || !A.spaces) return;
+        var SPC = A.spaces, M = SPC.model, esc = A.util.esc, body = document.body;
+        var TEMPLATES = ["日常", "娱乐", "NAS"]; /* 只填名称，不按名称猜测、不自动放入任何分组 */
+        var GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>';
+        function typing(t) { return t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)); }
+        function allSpaces() { return [{ id: M.ALL, name: M.ALL_NAME }].concat(SPC.list()); }
+
+        /* ------------------------------------------------ 切换器 */
+        var nav = document.createElement("nav");
+        nav.className = "x-spaces x-glass"; nav.setAttribute("aria-label", "空间");
+        nav.innerHTML = '<div class="x-sp-track" role="toolbar" aria-label="切换空间" aria-orientation="horizontal"></div>' +
+          '<button type="button" class="x-sp-manage" data-space-manage aria-label="管理空间" title="管理空间">' + GEAR + "</button>";
+        var track = nav.querySelector(".x-sp-track");
+        document.getElementById("x-groups").before(nav);
+        function drawNav() {
+          var cur = SPC.selected(), had = nav.contains(document.activeElement) && document.activeElement.getAttribute("data-space");
+          track.innerHTML = allSpaces().map(function (s) {
+            var on = s.id === cur, n = M.stats(A.state, s.id).items;
+            return '<button type="button" class="x-sp" data-space="' + esc(s.id) + '"' + (on ? ' aria-current="true"' : "") + ' tabindex="' + (on ? 0 : -1) + '"' +
+              ' aria-label="' + esc(s.name) + "，" + n + ' 个项目"><span>' + esc(s.name) + "</span><small aria-hidden=\"true\">" + n + "</small></button>";
+          }).join("");
+          if (had) { var b = track.querySelector('[data-space="' + A.util.sel(had) + '"]') || track.querySelector('[aria-current="true"]'); if (b) { roving(b); b.focus({ preventScroll: true }); } }
+          var c = track.querySelector('[aria-current="true"]'); if (c && c.scrollIntoView) try { c.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch (e) { /* old engines */ }
+        }
+        function roving(b) { track.querySelectorAll(".x-sp").forEach(function (x) { x.tabIndex = x === b ? 0 : -1; }); }
+        track.addEventListener("click", function (e) {
+          var b = e.target.closest("[data-space]"); if (!b) return;
+          roving(b); SPC.select(b.getAttribute("data-space"));
+        });
+        track.addEventListener("keydown", function (e) {
+          var bs = [].slice.call(track.querySelectorAll(".x-sp")), i = bs.indexOf(document.activeElement); if (i < 0) return;
+          var k = e.key, n = k === "ArrowRight" || k === "ArrowDown" ? i + 1 : k === "ArrowLeft" || k === "ArrowUp" ? i - 1 : k === "Home" ? 0 : k === "End" ? bs.length - 1 : null;
+          if (n == null) return;
+          e.preventDefault(); n = (n + bs.length) % bs.length; roving(bs[n]); bs[n].focus();
+        });
+        nav.querySelector("[data-space-manage]").addEventListener("click", function () { open(SPC.selected() !== M.ALL ? SPC.selected() : null); });
+        /* Alt+1 =「全部」，Alt+2… = 自定义空间（按顺序）。输入框里、浮层打开时不响应 */
+        document.addEventListener("keydown", function (e) {
+          if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || typing(e.target) || isOpen) return;
+          var m = /^Digit([1-9])$/.exec(e.code || ""); if (!m) return;
+          if (document.querySelector(".x-set.is-on, .x-is.is-on, .x-sheet.is-on, .x-cmdk.is-on, .x-menu.is-on") || document.documentElement.classList.contains("nc-locked")) return;
+          var s = allSpaces()[+m[1] - 1]; if (!s) return;
+          e.preventDefault(); SPC.select(s.id);
+        });
+
+        /* ------------------------------------------------ 管理空间 */
+        var back = document.createElement("div"); back.className = "x-spm-back"; back.hidden = true;
+        var sh = document.createElement("div");
+        sh.className = "x-spm"; sh.hidden = true; sh.setAttribute("role", "dialog"); sh.setAttribute("aria-modal", "true"); sh.setAttribute("aria-labelledby", "x-spm-t");
+        body.append(back, sh);
+        var isOpen = false, expanded = null, confirmDel = null, newName = "", lastFocus = null, closeT = null, sortable = null;
+
+        function groupsLine(s) {
+          var g = (s.groupIds || []).length, it = (s.itemIds || []).length;
+          return g || it ? [g ? g + " 个分组" : "", it ? it + " 个单独项目" : ""].filter(Boolean).join(" · ") : "还没有选分组";
+        }
+        function editorHTML(s) {
+          var st = A.state, mem = M.membership(st), gset = new Set(s.groupIds || []), iset = new Set(s.itemIds || []);
+          var groups = st.groups.map(function (g) {
+            var others = (mem[g.id] || []).filter(function (x) { return x !== s.id; }).length;
+            return '<label class="x-spm-ck"><input type="checkbox" data-sp-group="' + esc(g.id) + '"' + (gset.has(String(g.id)) ? " checked" : "") + ">" +
+              "<span><b>" + esc(g.name) + "</b><small>" + (g.items || []).length + " 个项目" + (others ? " · 也在 " + others + " 个其他空间" : "") + "</small></span></label>";
+          }).join("") || '<p class="x-note">还没有分组。先在「全部」里新建分组和项目。</p>';
+          var pins = st.groups.map(function (g) {
+            var whole = gset.has(String(g.id)), items = g.items || [];
+            if (!items.length) return "";
+            return '<p class="x-spm-ig">' + esc(g.name) + (whole ? " · 已整组包含" : "") + "</p>" + items.map(function (i) {
+              return '<label class="x-spm-ck' + (whole ? " is-dis" : "") + '"><input type="checkbox" data-sp-item="' + esc(i.id) + '"' + (whole || iset.has(String(i.id)) ? " checked" : "") + (whole ? " disabled" : "") + ">" +
+                "<span><b>" + esc(i.title || "未命名") + "</b></span></label>";
+            }).join("");
+          }).join("");
+          return '<div class="x-spm-ed" data-ed="' + esc(s.id) + '">' +
+            '<form class="x-spm-f" data-spm-rename="' + esc(s.id) + '" novalidate><input type="text" data-sp-name="' + esc(s.id) + '" value="' + esc(s.name) + '" maxlength="60" aria-label="空间名称" autocomplete="off" enterkeyhint="done">' +
+            '<span class="x-spm-cnt" data-cnt-for="' + esc(s.id) + '">' + Array.from(s.name).length + "/" + M.NAME_MAX + '</span><button type="submit" class="x-spm-btn">改名</button></form>' +
+            '<p class="x-err" data-err-for="' + esc(s.id) + '" role="alert" hidden></p>' +
+            '<p class="x-spm-lab" id="x-spm-gl-' + esc(s.id) + '">包含的分组（整组：以后加进这些分组的项目也会出现）</p><div class="x-spm-gl" role="group" aria-labelledby="x-spm-gl-' + esc(s.id) + '">' + groups + "</div>" +
+            (pins ? "<details" + ((s.itemIds || []).length ? " open" : "") + "><summary>单独添加项目（可选）</summary><div class=\"x-spm-gl\">" + pins + "</div></details>" : "") +
+            (confirmDel === s.id
+              ? '<div class="x-spm-cf" role="alert"><span>删除空间「' + esc(s.name) + '」？只删除这个空间，分组、项目、图标和壁纸都不会删。</span><div><button type="button" class="x-spm-btn is-red" data-spm="del-yes" data-sid="' + esc(s.id) + '">删除空间</button><button type="button" class="x-spm-btn" data-spm="del-no">取消</button></div></div>'
+              : '<div class="x-spm-f"><button type="button" class="x-spm-btn is-red" data-spm="del" data-sid="' + esc(s.id) + '">删除这个空间</button></div>') + "</div>";
+        }
+        function draw() {
+          var cur = SPC.selected(), list = SPC.list(), full = list.length >= M.MAX_SPACES;
+          if (expanded && !M.get(A.state, expanded)) expanded = null;
+          var fk = document.activeElement && sh.contains(document.activeElement) ? focusKey(document.activeElement) : null, sc = sh.scrollTop;
+          var nb = 0; A.state.groups.forEach(function (g) { nb += (g.items || []).length; });
+          sh.innerHTML = '<div class="x-spm-h"><button type="button" data-spm="close">关闭</button><h3 id="x-spm-t">管理空间</h3><button type="button" class="x-spm-done" data-spm="close">完成</button></div>' +
+            '<p class="x-note">空间只引用已有的分组和项目，不复制。项目在哪个空间里改，所有空间都同步变化；删除空间不会删除分组或项目。顺序永远按「全部」里的全局顺序。</p>' +
+            '<ol class="x-spm-list" aria-label="空间列表">' +
+            '<li class="x-spm-row is-all' + (cur === M.ALL ? " is-cur" : "") + '"><span>' + M.ALL_NAME + "</span><small>固定在最前，不可删除 · " + A.state.groups.length + " 个分组、" + nb + " 个项目</small></li>" +
+            list.map(function (s, i) {
+              var ex = expanded === s.id;
+              return '<li data-sid="' + esc(s.id) + '"><div class="x-spm-row' + (cur === s.id ? " is-cur" : "") + '"><span class="x-spm-drag" aria-hidden="true" title="拖动排序">⠿</span>' +
+                '<button type="button" class="x-spm-open" data-spm="open" data-sid="' + esc(s.id) + '" aria-expanded="' + ex + '"><span>' + esc(s.name) + "</span><small>" + groupsLine(s) + "</small></button>" +
+                '<button type="button" class="x-spm-ib" data-spm="up" data-sid="' + esc(s.id) + '" aria-label="上移「' + esc(s.name) + '」"' + (i ? "" : " disabled") + ">↑</button>" +
+                '<button type="button" class="x-spm-ib" data-spm="down" data-sid="' + esc(s.id) + '" aria-label="下移「' + esc(s.name) + '」"' + (i < list.length - 1 ? "" : " disabled") + ">↓</button></div>" +
+                (ex ? editorHTML(s) : "") + "</li>";
+            }).join("") + "</ol>" +
+            '<form class="x-spm-new" data-spm-new novalidate><h4>新建空间</h4>' +
+            '<div class="x-spm-tpl" role="group" aria-label="名称模板">' + TEMPLATES.map(function (t) { return '<button type="button" data-tpl="' + t + '">' + t + "</button>"; }).join("") + "</div>" +
+            '<div class="x-spm-f"><input type="text" name="name" maxlength="60" placeholder="空间名称，如 日常" aria-label="新空间名称" autocomplete="off" enterkeyhint="done" value="' + esc(newName) + '"' + (full ? " disabled" : "") + '>' +
+            '<span class="x-spm-cnt" data-cnt-for="__new">' + Array.from(newName).length + "/" + M.NAME_MAX + '</span><button type="submit" class="x-spm-btn is-pri"' + (full ? " disabled" : "") + ">新建</button></div>" +
+            '<p class="x-err" data-err-for="__new" role="alert"' + (full ? "" : " hidden") + ">" + (full ? "最多 " + M.MAX_SPACES + " 个空间，先删掉不用的再新建" : "") + "</p>" +
+            '<p class="x-note">模板只帮你填名称，不会自动放入任何分组；新建后勾选要包含的分组。</p></form>';
+          sh.scrollTop = sc;
+          if (fk) { var el = sh.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
+          setupSort();
+          if (newName) validateName("__new", newName);
+        }
+        function focusKey(el) {
+          var attrs = ["data-sp-name", "data-sp-group", "data-sp-item", "data-tpl"];
+          for (var i = 0; i < attrs.length; i++) if (el.hasAttribute(attrs[i])) return "[" + attrs[i] + '="' + A.util.sel(el.getAttribute(attrs[i])) + '"]';
+          if (el.getAttribute("data-spm")) return '[data-spm="' + el.getAttribute("data-spm") + '"]' + (el.getAttribute("data-sid") ? '[data-sid="' + A.util.sel(el.getAttribute("data-sid")) + '"]' : "");
+          if (el.name === "name") return "[data-spm-new] input[name=name]";
+          return null;
+        }
+        /** 名称校验（与服务器同一套规则：spaces.js nameProblem / MAX_SPACES） */
+        function validateName(key, v) {
+          var msg = M.nameProblem(A.state, v, key === "__new" ? undefined : key);
+          if (!msg && key === "__new" && SPC.list().length >= M.MAX_SPACES) msg = "最多 " + M.MAX_SPACES + " 个空间";
+          var err = sh.querySelector('[data-err-for="' + A.util.sel(key) + '"]'), cnt = sh.querySelector('[data-cnt-for="' + A.util.sel(key) + '"]');
+          var inp = key === "__new" ? sh.querySelector("[data-spm-new] input[name=name]") : sh.querySelector('[data-sp-name="' + A.util.sel(key) + '"]');
+          var empty = !String(v).trim();
+          if (err) { err.textContent = msg && !(empty && key === "__new") ? msg : ""; err.hidden = !err.textContent; }
+          if (cnt) { var n = Array.from(String(v).trim()).length; cnt.textContent = n + "/" + M.NAME_MAX; cnt.style.color = n > M.NAME_MAX ? "#E26D5A" : ""; }
+          if (inp) { inp.classList.toggle("is-bad", !!msg && !empty); inp.setAttribute("aria-invalid", String(!!msg && !empty)); }
+          return msg;
+        }
+        function setupSort() {
+          if (sortable) { try { sortable.destroy(); } catch (e) { /* gone */ } sortable = null; }
+          var S = window.Sortable, ol = sh.querySelector(".x-spm-list"); if (!S || !ol) return;
+          sortable = S.create(ol, { draggable: "li[data-sid]", handle: ".x-spm-drag", animation: 160, forceFallback: true, fallbackOnBody: true, onEnd: function () {
+            var ids = [].map.call(ol.querySelectorAll("li[data-sid]"), function (li) { return li.getAttribute("data-sid"); });
+            var now = SPC.list().map(function (s) { return s.id; });
+            if (ids.join("\u0000") === now.join("\u0000")) return;
+            setTimeout(function () { A.commit(function (st) { ids.forEach(function (id, i) { M.move(st, id, i); }); }, "space-order"); }, 0);
+          } });
+        }
+        function open(id) {
+          clearTimeout(closeT);
+          if (id && M.get(A.state, id)) expanded = id;
+          confirmDel = null;
+          if (!isOpen) { lastFocus = document.activeElement; newName = ""; }
+          isOpen = true; body.classList.add("x-spm-open");
+          back.hidden = sh.hidden = false; draw();
+          void sh.offsetWidth; back.classList.add("is-on"); sh.classList.add("is-on");
+          var target = expanded ? sh.querySelector('[data-ed="' + A.util.sel(expanded) + '"] input[type=checkbox], [data-sp-name="' + A.util.sel(expanded) + '"]') : sh.querySelector("[data-spm-new] input[name=name]:not(:disabled)") || sh.querySelector('[data-spm="close"]');
+          if (target) { target.focus({ preventScroll: true }); if (target.scrollIntoView && expanded) try { target.scrollIntoView({ block: "center" }); } catch (e) { /* ok */ } }
+        }
+        function close() {
+          if (!isOpen) return;
+          isOpen = false; confirmDel = null; body.classList.remove("x-spm-open");
+          back.classList.remove("is-on"); sh.classList.remove("is-on");
+          closeT = setTimeout(function () { if (!isOpen) { back.hidden = sh.hidden = true; sh.innerHTML = ""; } }, 300);
+          if (sortable) { try { sortable.destroy(); } catch (e) { /* gone */ } sortable = null; }
+          if (lastFocus && lastFocus.focus && document.contains(lastFocus)) lastFocus.focus({ preventScroll: true });
+        }
+        function create() {
+          var inp = sh.querySelector("[data-spm-new] input[name=name]"), v = inp ? inp.value : "";
+          var msg = validateName("__new", v) || (v.trim() ? "" : "名称不能为空");
+          if (msg) { var err = sh.querySelector('[data-err-for="__new"]'); err.textContent = msg; err.hidden = false; if (inp) inp.focus(); return; }
+          var id = null;
+          A.commit(function (st) { id = M.add(st, { name: v }); }, "space-add");
+          newName = ""; expanded = id; confirmDel = null;
+          SPC.select(id); /* 新建后直接切到它（本机），并展开它来勾选分组 */
+          draw();
+          var first = sh.querySelector('[data-ed="' + A.util.sel(id) + '"] input[type=checkbox]') || sh.querySelector('[data-sp-name="' + A.util.sel(id) + '"]');
+          if (first) { first.focus({ preventScroll: true }); try { first.scrollIntoView({ block: "center" }); } catch (e) { /* ok */ } }
+          A.toast("已新建「" + M.get(A.state, id).name + "」，勾选要包含的分组");
+        }
+        function rename(id) {
+          var inp = sh.querySelector('[data-sp-name="' + A.util.sel(id) + '"]'), s = M.get(A.state, id); if (!inp || !s) return;
+          var v = inp.value, msg = validateName(id, v);
+          if (msg) { inp.focus(); return; }
+          if (v.trim() === s.name) return;
+          A.commit(function (st) { M.rename(st, id, v); }, "space-rename");
+          A.toast("已改名为「" + M.get(A.state, id).name + "」");
+        }
+
+        sh.addEventListener("click", function (e) {
+          var b = e.target.closest("[data-spm],[data-tpl]"); if (!b) return;
+          if (b.hasAttribute("data-tpl")) {
+            var inp = sh.querySelector("[data-spm-new] input[name=name]"); if (!inp || inp.disabled) return;
+            inp.value = newName = b.getAttribute("data-tpl"); validateName("__new", newName); inp.focus(); return;
+          }
+          var a = b.getAttribute("data-spm"), id = b.getAttribute("data-sid");
+          if (a === "close") return close();
+          if (a === "open") { expanded = expanded === id ? null : id; confirmDel = null; draw(); var ob = sh.querySelector('[data-spm="open"][data-sid="' + A.util.sel(id) + '"]'); if (ob) ob.focus({ preventScroll: true }); return; }
+          if (a === "up" || a === "down") {
+            var l = SPC.list(), i = l.findIndex(function (s) { return s.id === id; }), to = a === "up" ? i - 1 : i + 1;
+            if (i < 0 || to < 0 || to >= l.length) return;
+            A.commit(function (st) { M.move(st, id, to); }, "space-order");
+            var nb = sh.querySelector('[data-spm="' + a + '"][data-sid="' + A.util.sel(id) + '"]:not(:disabled)') || sh.querySelector('[data-spm="open"][data-sid="' + A.util.sel(id) + '"]');
+            if (nb) nb.focus({ preventScroll: true });
+            return;
+          }
+          if (a === "del") { confirmDel = id; draw(); var y = sh.querySelector('[data-spm="del-no"]'); if (y) y.focus({ preventScroll: true }); return; }
+          if (a === "del-no") { var was = confirmDel; confirmDel = null; draw(); var d = sh.querySelector('[data-spm="del"][data-sid="' + A.util.sel(was) + '"]'); if (d) d.focus({ preventScroll: true }); return; }
+          if (a === "del-yes") {
+            var s = M.get(A.state, id); if (!s) return;
+            confirmDel = null; expanded = null;
+            A.commit(function (st) { M.remove(st, id); }, "space-delete"); /* 只删这条空间记录：分组、项目、图标、壁纸都不动 */
+            A.toast("已删除空间「" + s.name + "」（分组和项目都还在）", { action: "撤销", onAction: A.undo, duration: 6000 });
+            var o = sh.querySelector('[data-spm="open"]') || sh.querySelector('[data-spm="close"]'); if (o) o.focus({ preventScroll: true });
+          }
+        });
+        sh.addEventListener("change", function (e) {
+          var t = e.target, gid = t.getAttribute("data-sp-group"), iid = t.getAttribute("data-sp-item");
+          var ed = t.closest("[data-ed]"), sid = ed && ed.getAttribute("data-ed"); if (!sid || (gid == null && iid == null)) return;
+          var on = t.checked;
+          if (gid != null) A.commit(function (st) {
+            var s = M.get(st, sid); if (!s) return;
+            var l = (s.groupIds || []).filter(function (x) { return x !== gid; }); if (on) l.push(gid);
+            M.setGroups(st, sid, l);
+          }, "space-groups");
+          else A.commit(function (st) { if (M.get(st, sid)) M.pin(st, sid, iid, on); }, "space-pin");
+        });
+        sh.addEventListener("input", function (e) {
+          var t = e.target;
+          if (t.name === "name" && t.closest("[data-spm-new]")) { newName = t.value; validateName("__new", t.value); }
+          else if (t.hasAttribute("data-sp-name")) validateName(t.getAttribute("data-sp-name"), t.value);
+        });
+        sh.addEventListener("submit", function (e) {
+          e.preventDefault();
+          var f = e.target;
+          if (f.hasAttribute("data-spm-new")) create();
+          else if (f.hasAttribute("data-spm-rename")) rename(f.getAttribute("data-spm-rename"));
+        });
+        back.addEventListener("click", close);
+        window.addEventListener("keydown", function (e) {
+          if (!isOpen || document.querySelector(".nc-cfs")) return; /* 冲突面板在上面：键盘归它 */
+          if (e.key === "Escape") {
+            e.preventDefault(); e.stopImmediatePropagation();
+            if (confirmDel) { confirmDel = null; draw(); } else close();
+          } else if (e.key === "Tab") { /* 焦点留在面板里 */
+            var f = [].filter.call(sh.querySelectorAll("button, input, summary, [tabindex]"), function (x) { return !x.disabled && x.offsetParent !== null || x === document.activeElement; });
+            if (!f.length) return;
+            var i = f.indexOf(document.activeElement);
+            if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+          } else if ((e.metaKey || e.ctrlKey) && /^[ek]$/i.test(e.key)) e.stopImmediatePropagation();
+        }, true);
+
+        A.on("spaces-manage", function (d) { if (d) d.handled = true; open(d && d.id); });
+        A.on("render", function () { drawNav(); if (isOpen) draw(); });
+        drawNav();
       })();
     </script>
   </body>
