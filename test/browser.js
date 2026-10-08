@@ -104,7 +104,7 @@ function importFile(page, obj) {
 
 /**
  * 纯静态模式（没有 window.NOCTURNE）：opts.url = "file:///…/public/index.html"（直接读磁盘）或 "http://127.0.0.1:<port>/index.html"（python http.server）。
- * opts.storage：这台设备的 localStorage；返回值与 openPage 相同（reqs 里只会有浏览器端状态探测，测试里一律当作连不上）。
+ * opts.storage：这台设备的 localStorage；opts.probe(url) → true 时浏览器探测得到 no-cors 不透明响应（模拟「请求没报错」）；返回值与 openPage 相同（reqs 里只会有浏览器端状态探测，测试里一律当作连不上）。
  */
 async function openStatic(opts = {}) {
   const fs = require("node:fs");
@@ -151,6 +151,7 @@ async function openStatic(opts = {}) {
       win.fetch = async (x, o = {}) => { // 静态页只会探测项目地址：一律当作连不上，不真的发出去
         reqs.push({ method: (o && o.method) || "GET", path: String(x) });
         await sleep(5); if (closed) return new Promise(() => {});
+        if (opts.probe && opts.probe(String(x))) return { ok: false, status: 0, type: "opaque" }; // no-cors 成功 = 不透明响应（拿不到状态码）
         throw new TypeError("Failed to fetch (blocked in test)");
       };
     },
