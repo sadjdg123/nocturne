@@ -424,12 +424,14 @@
     <script src="urlcheck.js?v=3"></script>
     <script src="netmode.js?v=1"></script>
     <script src="cmdrank.js?v=2"></script>
+    <script src="spaces.js?v=1"></script>
     <script>
       (function () {
         "use strict";
         var KEY = "yeqv.v1";
         var $ = function (id) { return document.getElementById(id); };
         var U = window.NocturneURL; /* urlcheck.js：统一的 URL 白名单校验 */
+        var SP = window.NocturneSpaces; /* spaces.js：V2.0 场景空间模型（只引用分组 / 项目 id） */
 
         function uid() { return Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
         function esc(s) {
@@ -487,6 +489,7 @@
               var s = JSON.parse(raw);
               if (s && s.settings && Array.isArray(s.groups)) {
                 s.settings = Object.assign(structuredClone(defaults.settings), s.settings);
+                if (SP) SP.normalize(s); /* 本机缓存里的空间：清悬空引用 / 修复畸形条目（没有 spaces 字段时不动） */
                 return s;
               }
             }
@@ -512,6 +515,7 @@
           undoStack.push(structuredClone(state));
           if (undoStack.length > 50) undoStack.shift();
           fn(state);
+          if (SP) SP.prune(state); /* 删项目 / 删分组后清掉空间里的悬空引用（同一次提交，可一起撤销） */
           save(); render();
           emit("change", { label: label || "" });
         }
@@ -650,8 +654,27 @@
           defaults: defaults,
           save: save, commit: commit, undo: undo, render: render,
           on: on, emit: emit, toast: toast,
-          util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U }
+          util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U },
+          spaces: spacesApi()
         };
+        /* V2.0 阶段 1：空间模型的程序接口（暂无界面，首页仍显示「全部」）。修改走 commit（可撤销、会同步）；
+         * 当前空间只存本机 localStorage「nocturne.space:<账户>」，不进 state、不进 snapshot、不产生服务器版本。 */
+        function spacesApi() {
+          if (!SP) return null;
+          function owner() { var N = window.NOCTURNE; return N && N.backend ? (N.user && N.user.name) || "~anon" : null; }
+          var mem = {};
+          var store = { getItem: function (k) { try { var v = localStorage.getItem(k); return v != null ? v : mem[k] || null; } catch (e) { return mem[k] || null; } },
+            setItem: function (k, v) { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) { /* memory only */ } },
+            removeItem: function (k) { delete mem[k]; try { localStorage.removeItem(k); } catch (e) { /* memory only */ } } };
+          return {
+            model: SP, ALL: SP.ALL,
+            list: function () { return SP.list(state); },
+            view: function (id) { return SP.view(state, id); },
+            selected: function () { return SP.readSel(store, owner(), state); },
+            select: function (id) { var v = SP.resolve(state, id); SP.writeSel(store, owner(), v); emit("space", { id: v }); return v; },
+            selKey: function () { return SP.selKey(owner()); }
+          };
+        }
 
         render();
         setInterval(tick, 1000);
@@ -1946,6 +1969,8 @@
           f.text().then(function (txt) {
             var data; try { data = JSON.parse(txt); } catch (x) { data = null; }
             if (!valid(data)) return showErr("文件不是有效的夜曲配置");
+            var SPm = window.NocturneSpaces, badS = SPm ? SPm.check(data, { lenient: true }) : [];
+            if (badS.length) return showErr("文件里的空间定义不合法，未导入：" + badS.slice(0, 2).map(function (x) { return x.where + "（" + x.problem + "）"; }).join("；"));
             var badA = A.util.url.checkAliases(data);
             if (badA.length) return showErr("文件里有 " + badA.length + " 个项目的别名不合法，未导入：" + badA.slice(0, 2).map(function (x) { return x.where + "（" + x.problem + "）"; }).join("；"));
             var bad = A.util.url.checkConfig(data);
@@ -1955,6 +1980,7 @@
             var base = structuredClone(A.defaults), merged = Object.assign(base, data);
             merged.settings = Object.assign(structuredClone(A.defaults.settings), data.settings && typeof data.settings === "object" ? data.settings : {});
             merged.groups.forEach(function (g) { g.items = g.items || []; g.id = g.id || A.util.uid(); g.items.forEach(function (i) { i.id = i.id || A.util.uid(); }); });
+            if (SPm) SPm.normalize(merged); /* 重名加序号、清悬空引用（文件里没有 spaces = 只有「全部」） */
             A.commit(function (s) { Object.keys(s).forEach(function (k) { delete s[k]; }); Object.assign(s, merged); }, "import");
             undoToast("已导入");
           }, function () { showErr("文件不是有效的夜曲配置"); });
