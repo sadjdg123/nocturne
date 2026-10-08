@@ -396,7 +396,7 @@
       @media (prefers-reduced-motion: no-preference) { .x-tile > .dot.checking { animation: x-pulse 1.2s ease-in-out infinite; } }
       @media (prefers-reduced-motion: reduce) { .x-ring .fg, .x-rt { transition: none; } }
     </style>
-    <link rel="stylesheet" href="midnight.css?v=1" />
+    <link rel="stylesheet" href="midnight.css?v=2" />
   </head>
   <body class="x-body">
     <img class="x-bg x-bg--m" src="bg-mobile.jpg" alt="" />
@@ -2768,11 +2768,33 @@
           track.innerHTML = allSpaces().map(function (s) {
             var on = s.id === cur, n = M.stats(A.state, s.id).items;
             return '<button type="button" class="x-sp" data-space="' + esc(s.id) + '"' + (on ? ' aria-current="true"' : "") + ' tabindex="' + (on ? 0 : -1) + '"' +
-              ' aria-label="' + esc(s.name) + "，" + n + ' 个项目"><span>' + esc(s.name) + "</span><small aria-hidden=\"true\">" + n + "</small></button>";
+              ' aria-label="' + esc(s.name) + "，" + n + ' 个项目" title="' + esc(s.name) + '"><span>' + esc(s.name) + "</span><small aria-hidden=\"true\">" + n + "</small></button>";
           }).join("");
           if (had) { var b = track.querySelector('[data-space="' + A.util.sel(had) + '"]') || track.querySelector('[aria-current="true"]'); if (b) { roving(b); b.focus({ preventScroll: true }); } }
-          var c = track.querySelector('[aria-current="true"]'); if (c && c.scrollIntoView) try { c.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch (e) { /* old engines */ }
+          /* 读布局放到下一帧：切换空间时不在同步路径里多算一次整页布局 */
+          if (!revealQ) { revealQ = true; (window.requestAnimationFrame || setTimeout)(function () { revealQ = false; reveal(false); }); }
         }
+        var revealQ = false;
+        /* 让当前空间出现在横向滚动区里：只改 track.scrollLeft（不用 scrollIntoView，避免页面跟着纵向跳）。
+           已经完整可见（留出 pad）就不动；否则居中；名称比可视区还宽时左对齐 */
+        function revealLeft(sl, vw, sw, cl, cw, pad) {
+          pad = pad || 0;
+          var max = Math.max(0, sw - vw), want = sl;
+          if (cw + 2 * pad >= vw) want = cl - pad;
+          else if (cl - pad < sl || cl + cw + pad > sl + vw) want = cl - (vw - cw) / 2;
+          return Math.round(Math.max(0, Math.min(max, want)));
+        }
+        function reveal(smooth) {
+          var c = track.querySelector('[aria-current="true"]');
+          if (!c || !track.clientWidth || track.scrollWidth <= track.clientWidth) return;
+          var tr = track.getBoundingClientRect(), cr = c.getBoundingClientRect();
+          var cs = getComputedStyle(track), pad = (parseFloat(cs.scrollPaddingLeft) || 0) || 12;
+          var left = revealLeft(track.scrollLeft, track.clientWidth, track.scrollWidth, cr.left - tr.left + track.scrollLeft, cr.width, pad);
+          if (left === Math.round(track.scrollLeft)) return;
+          var still = !smooth || matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (track.scrollTo) track.scrollTo({ left: left, behavior: still ? "auto" : "smooth" }); else track.scrollLeft = left;
+        }
+        SPC.reveal = reveal; SPC.revealLeft = revealLeft;
         function roving(b) { track.querySelectorAll(".x-sp").forEach(function (x) { x.tabIndex = x === b ? 0 : -1; }); }
         track.addEventListener("click", function (e) {
           var b = e.target.closest("[data-space]"); if (!b) return;
@@ -3018,6 +3040,6 @@
         drawNav();
       })();
     </script>
-    <script src="midnight.js?v=1"></script>
+    <script src="midnight.js?v=2"></script>
   </body>
 </html>
