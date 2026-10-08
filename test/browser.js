@@ -47,7 +47,7 @@ async function openPage(base, c, opts = {}) {
       }
       win.structuredClone = (v) => structuredClone(v);
       win.TextEncoder = TextEncoder;
-      win.matchMedia = win.matchMedia || ((q) => ({ matches: false, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
+      win.matchMedia = win.matchMedia || ((q) => ({ matches: opts.media ? !!opts.media(q) : false, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
       win.ResizeObserver = win.ResizeObserver || class { observe() {} unobserve() {} disconnect() {} };
       win.IntersectionObserver = win.IntersectionObserver || class { observe() {} unobserve() {} disconnect() {} };
       win.scrollTo = () => {};
@@ -139,7 +139,7 @@ async function openStatic(opts = {}) {
       for (const [k, v] of Object.entries(opts.storage || {})) win.localStorage.setItem(k, v);
       win.structuredClone = (v) => structuredClone(v);
       win.TextEncoder = TextEncoder;
-      win.matchMedia = win.matchMedia || ((q) => ({ matches: false, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
+      win.matchMedia = win.matchMedia || ((q) => ({ matches: opts.media ? !!opts.media(q) : false, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
       win.ResizeObserver = win.ResizeObserver || class { observe() {} unobserve() {} disconnect() {} };
       win.IntersectionObserver = win.IntersectionObserver || class { observe() {} unobserve() {} disconnect() {} };
       win.scrollTo = () => {};
