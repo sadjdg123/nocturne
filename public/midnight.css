@@ -9,7 +9,7 @@
  */
 
 /* 经典外观里这些新版元素不出现 */
-.mn-sky, .mn-sp, .mn-ind, .mn-setui { display: none; }
+.mn-sky, .mn-sp, .mn-ind, .mn-setui, .mn-dockscrim { display: none; }
 
 /* ============================================================ 1 · tokens */
 html[data-ui="v2"] {
@@ -412,7 +412,7 @@ html[data-ui="classic"] .mn-v2only { display: none; }
 /* ============================================================ 4c · 手机（<768）：独立精修 */
 @media (max-width: 767px) {
   html[data-ui="v2"] body.x-body, html[data-ui="v2"] body.x-body.has-spaces, html[data-ui="v2"] body.x-body.editing, html[data-ui="v2"] body.x-body.has-spaces.editing {
-    padding-bottom: calc(var(--mn-bar) + 10px + 20px + env(safe-area-inset-bottom)); }
+    padding-bottom: calc(var(--mn-bar) + 10px + 36px + env(safe-area-inset-bottom)); }
   html[data-ui="v2"] .page { padding-inline: 16px; padding-top: 4px; }
   html[data-ui="v2"] .x-wrap { gap: 16px; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   html[data-ui="v2"] .x-head { min-height: 46px; gap: 8px; }
@@ -463,12 +463,23 @@ html[data-ui="classic"] .mn-v2only { display: none; }
   html[data-ui="v2"] .x-sempty { padding: 28px 22px; }
   html[data-ui="v2"] .x-spaces { position: static; transform: none; width: auto; box-shadow: none; }
 
-  /* ---- 一条悬浮底栏（毛玻璃 #2）：快速打开 ｜ 空间（可横滑）｜ 更多 ---- */
-  html[data-ui="v2"] .x-dock { display: flex; align-items: center; gap: 4px; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom));
+  /* ---- 一条悬浮底栏（毛玻璃 #2）：快速打开 ｜ 空间（可横滑）｜ 更多 ----
+     结构：三个独立的 flex 子项。左右按钮固定 44px，中间的 .x-spaces 是自己的滚动区（min-width:0 + 自己的内边距 + overflow:hidden），
+     横向滚动发生在它里面的 .x-sp-track；渐隐只作用在 track 上、只在有被藏住的一侧出现，所以按钮永远不会压到空间名称。
+     材质：较不透明的午夜蓝渐变打底（模糊只是锦上添花，模糊失效或亮色壁纸时也不透字）+ 细描边 + 顶部内高光 + 外侧暗描边；
+     另有一层 .mn-dockscrim 在视口底部把经过底栏下面的正文先压暗。 */
+  html[data-ui="v2"] .mn-dockscrim { display: block; position: fixed; z-index: 19; left: 0; right: 0; bottom: 0; pointer-events: none;
+    height: calc(var(--mn-bar) + 10px + 40px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(6, 8, 13, 0) 0%, rgba(6, 8, 13, .55) 42%, rgba(6, 8, 13, .82) 100%);
+    transition: opacity var(--mn-fast) ease; }
+  html[data-ui="v2"] .x-dock { display: flex; align-items: center; gap: 6px; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom));
     width: min(calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)), 520px); height: var(--mn-bar); padding: 6px; border-radius: 22px;
-    background: rgba(14, 19, 31, .74); -webkit-backdrop-filter: var(--mn-blur); backdrop-filter: var(--mn-blur); border: 1px solid var(--mn-line-2);
-    box-shadow: 0 22px 44px -18px rgba(0, 0, 0, .9), var(--mn-hi); transition: transform var(--mn-mid) var(--mn-ease), opacity var(--mn-fast) ease; }
-  html[data-ui="v2"] .x-dock > button { flex: 1 1 0; min-width: 0; height: 48px; border-radius: 16px; color: var(--mn-paper); font: 500 11.5px var(--mn-ui); gap: 2px; }
+    background: linear-gradient(180deg, rgba(27, 37, 58, .93) 0%, rgba(13, 18, 30, .96) 100%);
+    -webkit-backdrop-filter: blur(18px) saturate(130%); backdrop-filter: blur(18px) saturate(130%);
+    border: 1px solid rgba(236, 230, 218, .13);
+    box-shadow: 0 0 0 1px rgba(3, 5, 9, .55), 0 22px 44px -16px rgba(0, 0, 0, .95), inset 0 1px 0 rgba(236, 230, 218, .09), inset 0 -1px 0 rgba(0, 0, 0, .3);
+    transition: transform var(--mn-mid) var(--mn-ease), opacity var(--mn-fast) ease; }
+  html[data-ui="v2"] .x-dock > button { flex: 1 1 0; min-width: 44px; height: 48px; border-radius: 16px; color: var(--mn-paper); font: 500 11.5px var(--mn-ui); gap: 2px; }
   html[data-ui="v2"] .x-dock > button svg { width: 21px; height: 21px; color: var(--mn-paper); }
   html[data-ui="v2"] .x-dock > button:active { background: rgba(236, 230, 218, .08); }
   html[data-ui="v2"] .x-dock > [data-act="search"] { display: none; }
@@ -476,26 +487,39 @@ html[data-ui="classic"] .mn-v2only { display: none; }
   html[data-ui="v2"] .x-dock > .x-dk-pal svg { color: var(--mn-amber); }
   /* 有自定义空间：快速打开（图标）｜ 空间分段 ｜ 更多（图标）；编辑 / 设置收进「更多」 */
   html[data-ui="v2"] body.mn-merged .x-dock > [data-act="edit"], html[data-ui="v2"] body.mn-merged .x-dock > [data-act="settings"] { display: none; }
-  html[data-ui="v2"] body.mn-merged .x-dock > .x-dk-pal, html[data-ui="v2"] body.mn-merged .x-dock > .x-dk-more { display: grid; flex: none; width: 48px; border-radius: 16px; background: rgba(236, 230, 218, .06); }
+  html[data-ui="v2"] body.mn-merged .x-dock > .x-dk-pal, html[data-ui="v2"] body.mn-merged .x-dock > .x-dk-more { display: grid; flex: none; width: 44px; min-width: 44px; border-radius: 16px; background: rgba(236, 230, 218, .065); box-shadow: inset 0 1px 0 rgba(236, 230, 218, .05); }
   html[data-ui="v2"] body.mn-merged .x-dock > .x-dk-pal span, html[data-ui="v2"] body.mn-merged .x-dock > .x-dk-more span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  html[data-ui="v2"] .x-dock > .x-spaces { flex: 1 1 auto; min-width: 0; height: 48px; display: none; padding: 0; margin: 0; background: none; border: 0; }
-  html[data-ui="v2"] body.mn-merged .x-dock > .x-spaces { display: flex; }
+  html[data-ui="v2"] .x-dock > .x-spaces { position: relative; inset: auto; z-index: auto; transform: none; width: auto; flex: 1 1 auto; min-width: 0; height: 48px; display: none; padding: 0; margin: 0; overflow: hidden; overflow: clip; border-radius: 16px;
+    background: rgba(3, 5, 10, .22); border: 0; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35); }
+  html[data-ui="v2"] body.mn-merged .x-dock > .x-spaces { display: flex; align-items: center; }
   html[data-ui="v2"] .x-dock > .x-spaces .x-sp-manage { display: none; }
-  html[data-ui="v2"] .x-dock > .x-spaces .x-sp-track { flex: 1 1 auto; height: 48px; padding: 0 2px; align-items: center; gap: 0; scroll-snap-type: x proximity;
-    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 14px), transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 14px), transparent 100%); }
-  html[data-ui="v2"] .x-dock > .x-spaces .x-sp { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; min-height: 0; height: 44px; padding: 0 13px; border-radius: 14px; font: 500 15px var(--mn-serif); color: var(--mn-mist); }
+  html[data-ui="v2"] .x-dock > .x-spaces .x-sp-track { flex: 1 1 auto; min-width: 0; height: 48px; padding: 0 2px; align-items: center; gap: 0; overflow-x: auto; overflow-y: hidden;
+    scroll-snap-type: x proximity; scroll-padding-inline: 14px; overscroll-behavior-x: contain; --fl: 0px; --fr: 0px;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 var(--fl), #000 calc(100% - var(--fr)), transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 var(--fl), #000 calc(100% - var(--fr)), transparent 100%); }
+  html[data-ui="v2"] .x-dock > .x-spaces .x-sp-track.is-ovl { --fl: 22px; }
+  html[data-ui="v2"] .x-dock > .x-spaces .x-sp-track.is-ovr { --fr: 22px; }
+  html[data-ui="v2"] .x-dock > .x-spaces .x-sp { flex: none; display: inline-flex; flex-direction: row; align-items: center; justify-content: center; gap: 5px; min-width: 44px; max-width: 10.5em; min-height: 0; height: 44px; padding: 0 10px;
+    border-radius: 14px; font: 500 15px var(--mn-serif); letter-spacing: .04em; color: var(--mn-mist); scroll-snap-align: center; }
+  html[data-ui="v2"] .x-dock > .x-spaces .x-sp > span { min-width: 0; max-width: 7.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   html[data-ui="v2"] .x-dock > .x-spaces .x-sp[aria-current="true"] { color: var(--mn-paper); }
+  /* 数量只在当前空间上显示：让 375 起 4 个空间不用横滑，当前空间也更好认 */
   html[data-ui="v2"] .x-dock > .x-spaces .x-sp > small { font-size: 11px; }
-  html[data-ui="v2"] .x-dock > .x-spaces .mn-ind { border-radius: 14px; }
+  html[data-ui="v2"] .x-dock > .x-spaces .x-sp:not([aria-current="true"]) > small { display: none; }
+  html[data-ui="v2"] .x-dock > .x-spaces .mn-ind { border-radius: 14px; background: linear-gradient(180deg, rgba(236, 230, 218, .13), rgba(236, 230, 218, .06)); box-shadow: inset 0 0 0 1px rgba(236, 230, 218, .12); }
   html[data-ui="v2"] .x-dock .x-dk-more { display: none; }
   /* 软键盘弹出：收起底栏，不挡输入框和命令面板 */
   html[data-ui="v2"].mn-kb .x-dock, html[data-ui="v2"].mn-kb .x-ebar { transform: translate(-50%, calc(100% + 24px)); opacity: 0; pointer-events: none; }
+  html[data-ui="v2"].mn-kb .mn-dockscrim { opacity: 0; }
   html[data-ui="v2"] .x-toast, html[data-ui="v2"] body.has-spaces .x-toast, html[data-ui="v2"] body.editing .x-toast { bottom: calc(10px + var(--mn-bar) + 12px + env(safe-area-inset-bottom)); }
   html[data-ui="v2"].mn-kb .x-toast { bottom: calc(12px + env(safe-area-inset-bottom)); }
   /* 底部抽屉开着时，提示条移到顶部，不盖住抽屉里的选项 */
   html[data-ui="v2"] body:has(.x-sheet.is-on, .x-spm.is-on, .x-is.is-on) .x-toast { top: calc(10px + env(safe-area-inset-top)); bottom: auto; transform: translate(-50%, -8px); }
   html[data-ui="v2"] body:has(.x-sheet.is-on, .x-spm.is-on, .x-is.is-on) .x-toast.is-on { transform: translate(-50%, 0); }
-  html[data-ui="v2"] .x-ebar { height: var(--mn-bar); width: min(calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)), 520px); border-radius: 22px; padding: 7px; }
+  html[data-ui="v2"] .x-ebar { height: var(--mn-bar); width: min(calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)), 520px); border-radius: 22px; padding: 7px;
+    background: linear-gradient(180deg, rgba(27, 37, 58, .93) 0%, rgba(13, 18, 30, .96) 100%); border: 1px solid rgba(236, 230, 218, .13);
+    box-shadow: 0 0 0 1px rgba(3, 5, 9, .55), 0 22px 44px -16px rgba(0, 0, 0, .95), inset 0 1px 0 rgba(236, 230, 218, .09); }
+  /* 编辑模式：编辑栏替换底栏（不是叠在上面），否则底栏的空间名会从编辑栏后面透出来 */
+  html[data-ui="v2"] body.editing .x-dock { display: none; }
   html[data-ui="v2"] .x-cmdk { border-radius: 18px; }
 }
 /* 手机横屏（宽 ≥768 的 iPhone 横屏走上面的平板 / 矮窗口规则；这里补安全区：灵动岛那一侧） */
