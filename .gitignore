@@ -4,3 +4,4 @@ data/
 .DS_Store
 *.tmp
 tools/__pycache__/
+tools/e2e/__pycache__/
