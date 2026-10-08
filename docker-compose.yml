@@ -2,7 +2,7 @@
 services:
   nocturne:
     # 方式一：使用 GitHub Actions 构建好的镜像（把 sadjdg123 换成你的用户名，全小写）
-    image: ghcr.io/sadjdg123/nocturne:latest
+    image: ghcr.io/sadjdg123/nocturne:latest   # 生产建议固定版本，例如 :sha-1a2b3c4 或 :1.2.3（见 README「版本与回滚」）
     # 方式二：在 NAS 上从源码构建 —— 注释掉上面的 image，打开下面这行
     # build: .
     container_name: nocturne
@@ -17,6 +17,9 @@ services:
       # - PROBE_TLS_STRICT=1   # 状态检测校验 HTTPS 证书
       # - PUID=1026            # data/ 的属主 uid（群晖用户常见 1026，SSH 执行 id 查看）
       # - PGID=100             # data/ 的属主 gid（群晖 users 组常见 100）
+      # - TRUSTED_PROXY_CIDRS=172.17.0.1  # 反向代理连到夜曲的地址（设置 → 账户 →「连接诊断」里能看到），默认不信任转发头
+      # - PROBE_ALLOW=192.168.1.0/24      # 普通（非管理员）账户的项目允许由 NAS 探测的目标，默认空 = 交给浏览器检测
+      # - CACHE_MAX_MB=50                 # 图标缓存上限
     volumes:
       - ./data:/data         # 账户、配置、图标缓存都在这里，备份它即可
       # 可选：读取容器运行状态（只读挂载）。注意安全说明，见 README
