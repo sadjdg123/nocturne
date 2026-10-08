@@ -2,7 +2,7 @@ name: Docker
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2] # v2：V2.0 开发分支，只产出 sha-<commit> 镜像（不打 latest / 分支名标签）
     tags: ["v*"] # 打 tag 时 paths-ignore 不生效，总会构建
     paths-ignore: ["**.md", "docs/**", "tools/**", "LICENSE", "docker-compose.yml"]
   pull_request:
@@ -30,9 +30,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 回滚兼容测试按 blob SHA 取 V1.1 基线（main@3e6da3c）的 server.js / 前端
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: jsdom（只给测试用，不进镜像、不进 package.json）
+        run: npm install --no-save --no-package-lock jsdom@24
       - name: npm run check && npm test
         run: npm run check && npm test
 
@@ -63,7 +67,7 @@ jobs:
           tags: |
             # :latest 只跟 main；生产部署建议固定到 sha-xxxxxxx 或 vX.Y.Z（见 README「版本与回滚」）
             type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
+            type=ref,event=branch,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-,format=short
