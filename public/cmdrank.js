@@ -84,5 +84,26 @@
     });
     return out;
   }
-  return { norm: norm, match: match, score: score, rank: rank };
+  /* 「状态」动作的文案。NAS 模式只是读取服务端最近一次后台检测（约每 30 秒一轮）的结果，
+   * 不触发新的检测，所以叫「刷新状态」，也不说「已重新检测」；纯静态模式才是浏览器里真的重新检测。 */
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function hms(iso) { var d = iso ? new Date(iso) : null; return d && !isNaN(d) ? pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) : ""; }
+  /** 状态表里最新的 checkedAt（ISO 字符串，没有就是 null） */
+  function latestCheck(map) {
+    var best = null, bt = -Infinity;
+    Object.keys(map || {}).forEach(function (k) { var c = map[k] && map[k].checkedAt, t = c ? Date.parse(c) : NaN; if (!isNaN(t) && t > bt) { bt = t; best = c; } });
+    return best;
+  }
+  function statusAction(nas) {
+    return nas
+      ? { t: "刷新状态", d: "读取 NAS 最近一次检测结果", busy: "正在读取 NAS 检测结果…" }
+      : { t: "重新检测状态", d: "在这个浏览器里重新检测", busy: "正在重新检测…" };
+  }
+  function statusReport(nas, d, checkedAt) {
+    var n = d.on + " 个在线，" + d.off + " 个离线";
+    if (!nas) return "检测完成：" + n + "（浏览器检测，仅供参考）";
+    var at = hms(checkedAt);
+    return "已刷新：" + n + "（NAS " + (at ? at + " 的" : "最近一次") + "检测结果）";
+  }
+  return { norm: norm, match: match, score: score, rank: rank, latestCheck: latestCheck, statusAction: statusAction, statusReport: statusReport };
 });
