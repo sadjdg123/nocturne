@@ -24,7 +24,7 @@ async function startServer(opts = {}) {
   const port = await freePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "nocturne-test-"));
   if (opts.seed) await opts.seed(dataDir);
-  const env = Object.assign({}, process.env, { PORT: String(port), HOST: "127.0.0.1", DATA_DIR: dataDir, STATUS_INTERVAL: "3600", TZ: "UTC" }, opts.env || {});
+  const env = Object.assign({}, process.env, { PORT: String(port), HOST: "127.0.0.1", DATA_DIR: dataDir, STATUS_INTERVAL: "3600", TZ: "UTC", DOCKER_SOCK: path.join(dataDir, "no-docker.sock") }, opts.env || {});
   for (const k of ["TRUSTED_PROXY_CIDRS", "PROBE_ALLOW", "NOCTURNE_NO_AUTH"]) if (!opts.env || !(k in opts.env)) delete env[k];
   const child = spawn(process.execPath, [path.join(ROOT, "server.js")], { env, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
