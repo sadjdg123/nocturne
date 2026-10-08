@@ -309,6 +309,7 @@ services:
       - TZ=Asia/Shanghai
       - PUID=$PUID
       - PGID=$PGID
+      - NOCTURNE_COOKIE_PREFIX=nocturne_v2test_
     volumes:
       - "$TEST_DATA:/data"
     labels:
@@ -400,8 +401,9 @@ REPORT="$TEST_ROOT/v2test-report-$TS.txt"
   say ""
   say "== 打开测试站（务必与生产站用不同的主机名 + 单独的浏览器会话）"
   say "  推荐：$URL_MAIN    备选：$URL_ALT"
-  say "  原因：两个站点的 cookie 名相同（nocturne_sid / nocturne_dev），cookie 不按端口区分；"
-  say "  同一主机名下打开测试站会覆盖生产站的登录与「已知设备」cookie。请用 Safari 无痕窗口打开测试站。"
+  say "  原因：cookie 不按端口区分。测试站设置了 NOCTURNE_COOKIE_PREFIX=nocturne_v2test_（2.0.0-rc.2 起生效：cookie 名为"
+  say "  nocturne_v2test_sid / nocturne_v2test_dev，与生产的 nocturne_sid / nocturne_dev 互不覆盖）；镜像是 rc.1 时这个变量不起作用，"
+  say "  同一主机名下打开测试站会覆盖生产站的登录与「已知设备」cookie。稳妥起见仍请换主机名，并用 Safari 无痕窗口打开测试站。"
   say "下一步：在测试站登录、改一处配置，然后运行 sudo sh tools/v2test/check-persist.sh"
 } > "$REPORT"
 chmod 600 "$REPORT"
