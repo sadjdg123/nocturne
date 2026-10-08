@@ -19,14 +19,15 @@ function freePort() {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** 启动服务器。opts.env 额外环境变量；opts.seed(dataDir) 在启动前往 DATA_DIR 里放文件 */
+/** 启动服务器。opts.env 额外环境变量；opts.seed(dataDir) 在启动前往 DATA_DIR 里放文件；
+ *  opts.port 固定端口（模拟原地升级：同一地址换一个版本）；opts.root 用另一份代码目录里的 server.js（回滚测试：V1.1 基线）；opts.dataDir 复用已有的数据目录（stop 时不删） */
 async function startServer(opts = {}) {
-  const port = await freePort();
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "nocturne-test-"));
+  const port = opts.port || await freePort();
+  const dataDir = opts.dataDir || fs.mkdtempSync(path.join(os.tmpdir(), "nocturne-test-"));
   if (opts.seed) await opts.seed(dataDir);
   const env = Object.assign({}, process.env, { PORT: String(port), HOST: "127.0.0.1", DATA_DIR: dataDir, STATUS_INTERVAL: "3600", TZ: "UTC", DOCKER_SOCK: path.join(dataDir, "no-docker.sock") }, opts.env || {});
   for (const k of ["TRUSTED_PROXY_CIDRS", "PROBE_ALLOW", "NOCTURNE_NO_AUTH"]) if (!opts.env || !(k in opts.env)) delete env[k];
-  const child = spawn(process.execPath, [path.join(ROOT, "server.js")], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [path.join(opts.root || ROOT, "server.js")], { env, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   child.stdout.on("data", (c) => { out += c; });
   child.stderr.on("data", (c) => { out += c; });
@@ -41,7 +42,7 @@ async function startServer(opts = {}) {
     log: () => out,
     async stop() {
       if (child.exitCode == null) { child.kill("SIGKILL"); await new Promise((r) => child.once("exit", r)); }
-      fs.rmSync(dataDir, { recursive: true, force: true });
+      if (!opts.dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
     },
   };
 }
