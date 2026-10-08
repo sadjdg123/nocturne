@@ -343,8 +343,12 @@ data/
 ├── wallpapers/<用户名>.jpg|png|webp  自定义壁纸（从相册上传的图片）
 ├── icons/<用户名>/<id>.png|jpg|webp  上传的图标（不再被引用满 24 小时后自动清理）
 ├── backup/<用户名>/<时间>-v<版本>-<类型>.json  配置快照，每人最多 30 份 / 共 20MB（「恢复较早的版本」用）
+├── spaces-guard/<用户名>.json  V2：回滚写保护旁路文件（最后一次 V2 写入的空间定义）
+├── pre-v2-snapshot-<时间>/  V2：首次以 V2 启动时写的固定升级前快照（永不轮换）
 └── cache/            图标缓存（可随时删除）
 ```
+
+也可以用 `tools/backup.sh` / `verify-backup.sh` / `restore.sh` 做带 sha256 校验的备份与恢复（见文末「V2 的备份、升级与回滚」）。
 
 **配置快照**：以下时刻会把**被替换掉的那个版本**存一份快照（`BACKUP_KEEP`、`BACKUP_MAX_MB` 可调，超出从最旧的删，最新一份永远保留）：
 
@@ -483,7 +487,39 @@ npm run check && npm test
 
 MIT
 
-## V2.0 · Midnight Edition（v2 分支，开发中）
+## V2.0 · Midnight Edition（v2 分支，RC：2.0.0-rc.1）
 
-- 新版外观默认开启；设置 → 外观 → 界面 可以随时切回「经典」（只影响这台设备，数据和功能完全相同）。
-- 场景空间、删除语义、可信状态、手机合并底栏等说明见 `docs/v2.0-stage1-report.md`、`docs/v2.0-stage2-report.md`、`docs/v2.0-stage3-report.md`。
+> 当前是**候选版（RC）**，只在 `v2` 分支构建 `:sha-<提交>` 镜像，`:latest` 仍是 V1.1。真机 Safari / 群晖 NAS / 真实 HTTPS 尚待人工验收，
+> 建议先用**另一个端口 + 数据副本**的并行容器试用（见 `docs/v2.0-manual-acceptance.md` 第 6 节）。
+
+主要变化：
+
+- **新版外观（Midnight）**默认开启；设置 → 外观 → 界面 可随时切回「经典」（只影响这台设备，数据和功能完全相同）。
+- **场景空间**：左侧（手机为底栏）切换「全部 / 日常 / 娱乐 / NAS …」，「管理空间」新建、排序、删除；切换空间不写服务器。
+- **删除语义**：「从当前空间移除」只影响该空间；「从所有空间删除」两步确认并点名受影响的空间；都可撤销。
+- **可信状态**：在线 · 延迟 / 离线 / 需登录，系统状态卡汇总；三态网络（自动 / 优先内网 / 优先外网）。
+- **手机合并底栏**：空间、快速打开、更多合在一条底栏里；快捷键 `⌘K` / `/` 命令面板、`⌘E` 编辑、`⌘,` 设置、`⌥1…9` 切空间。
+- **回滚写保护**：回滚到 V1.1 期间被旧版覆盖掉的空间，再升级时自动找回（先存 `-guard` 快照，页面提示一次）；首次以 V2 启动时写一份固定的升级前快照 `data/pre-v2-snapshot-<时间>/`。
+- **独立备份工具**：`tools/backup.sh` / `tools/verify-backup.sh` / `tools/restore.sh`（POSIX sh，群晖 SSH 可直接运行）。
+
+### V2 的备份、升级与回滚
+
+```sh
+# 备份（停容器 → 打包 + sha256 → 自动重新启动）并校验
+sudo sh tools/backup.sh --stop nocturne -o /volume1/backup/nocturne /volume1/docker/nocturne/data
+sh tools/verify-backup.sh /volume1/backup/nocturne/nocturne-backup-<时间>.tar.gz
+# 恢复（目标非空会拒绝；--force 把原目录改名保留后再恢复）
+sh tools/restore.sh [--force] <备份.tar.gz> <目标 data 目录>
+```
+
+升级 / 回滚请把镜像固定到 `标签@digest`：V1.1 为
+`ghcr.io/sadjdg123/nocturne:sha-3e6da3c@sha256:58a4c8349242ca80ca4a46681410eafcbbb41e0411c3567e3cbef9abff19e861`，
+V2 RC 的标签与 digest 见 `docs/v2.0-rc-report.md` 第 1 节。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
+回滚到 V1.1 一般不需要替换 `data/`。
+
+文档：
+
+- `docs/v2.0-rc-report.md` —— RC 报告：版本 / 镜像、测试、验证矩阵、数据清单、演练结果、性能、Blocking / Non-blocking
+- `docs/v2.0-upgrade-rollback.md` —— V1.1 → V2 升级 / 回滚 / 再升级操作手册（群晖 Container Manager）
+- `docs/v2.0-manual-acceptance.md` —— 人工验收清单（iPhone / Mac Safari、群晖 NAS、HTTPS）+ 并行测试部署提议
+- `docs/v2.0-visual-acceptance.md`、`docs/v2.0-stage1-report.md`、`docs/v2.0-stage2-report.md`、`docs/v2.0-stage3-report.md` —— 各阶段设计与验收
