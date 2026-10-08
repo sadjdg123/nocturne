@@ -455,6 +455,12 @@ async function writeConfig(name, data, opId, opHash) {
   configCache.delete(configFile(name));
   return doc;
 }
+/** 项目搜索别名 item.aliases（V1.1）：字符串数组、≤10 个、每个 ≤32 字。不合法 → 400（只是搜索文本，服务器不解释它） */
+function aliasesError(d) {
+  const bad = URLCHECK.checkAliases(d);
+  if (!bad.length) return null;
+  return { error: "有 " + bad.length + " 个项目的别名不合法（" + bad[0].where + "：" + bad[0].problem + "），未保存", code: "bad_aliases", aliases: bad.slice(0, 20) };
+}
 function validConfig(d) {
   return d && typeof d === "object" && !Array.isArray(d) && d.settings && typeof d.settings === "object" && Array.isArray(d.groups) &&
     d.groups.every((g) => g && typeof g === "object" && (g.items == null || Array.isArray(g.items)));
@@ -1269,6 +1275,8 @@ async function api(req, res, url) {
   if (p === "/config/stash" && m === "POST") { // 冲突时选「使用服务器版」：先把本机版本存成一份快照（不改当前配置），随时能从「恢复较早的版本」找回
     const b = await readBody(req);
     if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
+    const ae = aliasesError(b.data);
+    if (ae) return json(res, 400, ae);
     const r = await withUserLock(me.name, async () => {
       assertAlive(me, req);
       const cur = readConfig(me.name);
@@ -1310,6 +1318,8 @@ async function api(req, res, url) {
        *  - 内容与服务器当前版本相同：不算冲突、不升版本。 */
       const b = await readBody(req); // 读请求体不占锁
       if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
+      const ae = aliasesError(b.data);
+      if (ae) return json(res, 400, ae);
       // baseVersion 必填：非负整数。缺失 / 不合法 → 400（不能靠省略它绕过冲突检测）
       if (!Number.isSafeInteger(b.baseVersion) || b.baseVersion < 0) return json(res, 400, { error: "缺少或不合法的 baseVersion", code: "bad_base_version" });
       const opId = typeof b.opId === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(b.opId) ? b.opId : null;
