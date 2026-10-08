@@ -7,14 +7,21 @@
  *   partial  同上但抛 EIO（写到一半出错）
  *   open     open 直接抛 ENOSPC（连临时文件都建不出来）
  *   rename   rename 抛 ENOSPC（临时文件完整写好了，但换不上去）
+ *   read_eacces / read_eio / read_enoent  readFileSync 抛读取错误
+ *   stat_eacces / stat_eio  statSync / lstatSync 抛读取错误
+ *   corrupt_before_sync 临时文件写完后、sync 前损坏对应目标，验证提交前复核
+ *   corrupt_auth_before_sync 同一时机损坏配置所属目录的 users.json
+ *   delay_rename_result rename 已成功后延迟 Promise 返回，放大自写入基准更新窗口
  * 空文件 / 文件不存在 = 不注入。 */
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
+const path = require("node:path");
 const CTL = process.env.FSFAIL_CTL;
+const origRead = fs.readFileSync, origStat = fs.statSync, origLstat = fs.lstatSync, origRenameSync = fs.renameSync;
 
 function rules() {
   if (!CTL) return [];
-  let txt; try { txt = fs.readFileSync(CTL, "utf8"); } catch (e) { return []; }
+  let txt; try { txt = origRead.call(fs, CTL, "utf8"); } catch (e) { return []; }
   return txt.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf(" "); return { mode: l.slice(0, i), re: new RegExp(l.slice(i + 1)) }; });
 }
 const hit = (p, modes) => rules().find((r) => modes.includes(r.mode) && r.re.test(String(p)));
@@ -25,14 +32,30 @@ function err(code, syscall, p) {
 }
 
 const origOpen = fsp.open, origRename = fsp.rename;
+fs.readFileSync = function (p, ...args) {
+  const r = hit(p, ["read_eacces", "read_eio", "read_enoent"]);
+  if (r) throw err(r.mode === "read_eacces" ? "EACCES" : r.mode === "read_enoent" ? "ENOENT" : "EIO", "read", p);
+  return origRead.call(this, p, ...args);
+};
+for (const [key, original] of [["statSync", origStat], ["lstatSync", origLstat]]) fs[key] = function (p, ...args) {
+  const r = hit(p, ["stat_eacces", "stat_eio"]);
+  if (r) throw err(r.mode === "stat_eacces" ? "EACCES" : "EIO", "stat", p);
+  return original.call(this, p, ...args);
+};
 fsp.open = async function (p, flags, mode) {
-  const r = hit(p, ["enospc", "partial", "open"]);
+  const r = hit(p, ["enospc", "partial", "open", "corrupt_before_sync", "corrupt_auth_before_sync"]);
   if (r && r.mode === "open") throw err("ENOSPC", "open", p);
   const fh = await origOpen.call(this, p, flags, mode);
   if (!r) return fh;
   return new Proxy(fh, {
     get(t, k) {
-      if (k === "writeFile") {
+      if (k === "sync" && ["corrupt_before_sync", "corrupt_auth_before_sync"].includes(r.mode)) return async () => {
+        const target = String(p).replace(/\.\d{1,10}\.[0-9a-f]{8}\.tmp$/, "");
+        if (target === String(p)) throw new Error("sync corruption must target an atomic temporary file");
+        fs.writeFileSync(r.mode === "corrupt_auth_before_sync" ? path.join(path.dirname(path.dirname(target)), "users.json") : target, "{injected-corrupt");
+        return t.sync();
+      };
+      if (k === "writeFile" && !["corrupt_before_sync", "corrupt_auth_before_sync"].includes(r.mode)) {
         return async (data) => {
           const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
           await t.write(buf.subarray(0, Math.floor(buf.length / 2)));
@@ -46,5 +69,11 @@ fsp.open = async function (p, flags, mode) {
 };
 fsp.rename = async function (a, b) {
   if (hit(a, ["rename"])) throw err("ENOSPC", "rename", a);
-  return origRename.call(this, a, b);
+  const out = await origRename.call(this, a, b);
+  if (hit(a, ["delay_rename_result"])) await new Promise(r => setTimeout(r, 200));
+  return out;
+};
+fs.renameSync = function (a, b) {
+  if (hit(a, ["rename"])) throw err("ENOSPC", "rename", a);
+  return origRenameSync.call(this, a, b);
 };

@@ -7,7 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
 const crypto = require("node:crypto");
-const { startServer, client, cfg, sleep } = require("./helpers");
+const { seedAccount, startServer, client, cfg, sleep } = require("./helpers");
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 const rawConfig = (srv, name = "admin") => JSON.parse(fs.readFileSync(path.join(srv.dataDir, "config", name + ".json"), "utf8"));
@@ -57,13 +57,14 @@ test("legacy ops entries without a stored hash are verified against hist, otherw
   const canon = (v) => Array.isArray(v) ? "[" + v.map(canon).join(",") + "]" : v && typeof v === "object" ? "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canon(v[k])).join(",") + "}" : JSON.stringify(v);
   const hA = crypto.createHash("sha256").update(canon(A)).digest("hex");
   const srv = await startServer({ seed: (dir) => {
+    seedAccount(dir);
     fs.mkdirSync(path.join(dir, "config"), { recursive: true });
     fs.writeFileSync(path.join(dir, "config", "admin.json"), JSON.stringify({ version: 2, updatedAt: "2026-10-01T00:00:00Z", data: A,
       hist: [{ v: 2, h: hA }], ops: [{ id: "op-legacy-0001", v: 2 }, { id: "op-legacy-0002", v: 1 }] }));
   } });
   t.after(() => srv.stop());
   const a = client(srv.base);
-  await a.post("/api/setup", { name: "admin", password: "admin-pass-1" });
+  await a.post("/api/login", { name: "admin", password: "admin-pass-1" });
   assert.equal((await a.put("/api/config", { baseVersion: 1, opId: "op-legacy-0001", data: A })).json.duplicate, true, "hash recovered from hist");
   assert.equal((await a.put("/api/config", { baseVersion: 1, opId: "op-legacy-0001", data: B })).status, 422);
   assert.equal((await a.put("/api/config", { baseVersion: 0, opId: "op-legacy-0002", data: A })).status, 422, "unverifiable legacy entry is not trusted");
@@ -96,6 +97,7 @@ test("baseVersion is required for every PUT /api/config", async (t) => {
 test("legacy unsafe-URL exemption is bound to item id + field + exact original value", async (t) => {
   const BAD = "javascript:alert(1)";
   const srv = await startServer({ seed: (dir) => {
+    seedAccount(dir);
     fs.mkdirSync(path.join(dir, "config"), { recursive: true });
     fs.writeFileSync(path.join(dir, "config", "admin.json"), JSON.stringify({ version: 3, updatedAt: "2026-01-01T00:00:00Z", data: cfg("旧配置", [
       { id: "itemA", title: "A", lan: BAD, wan: "" },
@@ -104,7 +106,7 @@ test("legacy unsafe-URL exemption is bound to item id + field + exact original v
   } });
   t.after(() => srv.stop());
   const a = client(srv.base);
-  await a.post("/api/setup", { name: "admin", password: "admin-pass-1" });
+  await a.post("/api/login", { name: "admin", password: "admin-pass-1" });
   let cur = (await a.get("/api/config")).json;
   const put = (d) => a.put("/api/config", { baseVersion: cur.version, data: d });
 

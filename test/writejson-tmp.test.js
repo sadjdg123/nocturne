@@ -7,7 +7,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { startServer, client, cfg, waitFor } = require("./helpers");
+const { seedAccount, startServer, client, cfg, waitFor } = require("./helpers");
 
 const FSFAIL = path.join(__dirname, "fsfail.js");
 const tmpsIn = (dir) => { try { return fs.readdirSync(dir).filter((f) => f.endsWith(".tmp")); } catch (e) { return []; } };
@@ -73,6 +73,7 @@ test("启动清理：只删符合 <名字>.<pid>.<8 位十六进制>.tmp、超�
   };
   const srv = await startServer({
     seed: (d) => {
+      seedAccount(d);
       for (const sub of ["config", "spaces-guard", "backup/admin", "cache"]) fs.mkdirSync(path.join(d, sub), { recursive: true });
       fs.writeFileSync(path.join(d, "config", "admin.json"), JSON.stringify({ version: 3, data: cfg("目标") }));
       for (const f of [...files.gone, ...files.kept]) {

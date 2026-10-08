@@ -8,7 +8,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { startServer, client } = require("./helpers");
+const { seedAccount, startServer, client } = require("./helpers");
 const { openPage, SKIP, sleep } = require("./browser");
 
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
@@ -22,12 +22,13 @@ function data(cols) {
 }
 async function boot(t, d) {
   const srv = await startServer({ seed: (dir) => {
+    seedAccount(dir);
     fs.mkdirSync(path.join(dir, "config"), { recursive: true });
     fs.writeFileSync(path.join(dir, "config", "admin.json"), JSON.stringify({ version: 3, updatedAt: "Thu 2026-10-01 8:00 AM CST (UTC+08:00)", data: d }));
   } });
   t.after(() => srv.stop());
   const c = client(srv.base);
-  assert.equal((await c.post("/api/setup", { name: "admin", password: "admin-pass-1" })).status, 200);
+  assert.equal((await c.post("/api/login", { name: "admin", password: "admin-pass-1" })).status, 200);
   return { srv, c };
 }
 const opt = { skip: SKIP, timeout: 90000 };

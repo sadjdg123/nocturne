@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const net = require("node:net");
 const http = require("node:http");
+const crypto = require("node:crypto");
 
 const ROOT = path.join(__dirname, "..");
 
@@ -41,7 +42,7 @@ async function startServer(opts = {}) {
     base, port, dataDir, child,
     log: () => out,
     async stop() {
-      if (child.exitCode == null) { child.kill("SIGKILL"); await new Promise((r) => child.once("exit", r)); }
+      if (child.exitCode == null && child.signalCode == null) { child.kill("SIGKILL"); await new Promise((r) => child.once("exit", r)); }
       if (!opts.dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
     },
   };
@@ -99,4 +100,11 @@ async function waitFor(fn, ms = 6000, step = 100) {
   }
 }
 
-module.exports = { startServer, client, mockServer, freePort, sleep, cfg, waitFor, ROOT };
+/** 旧配置夹具必须配套合法账户，不能通过在孤立配置上重新 setup 冒充已安装站点。 */
+function seedAccount(dataDir, name = "admin", password = "admin-pass-1") {
+  const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 });
+  fs.writeFileSync(path.join(dataDir, "users.json"), JSON.stringify({ users: [{ name, admin: true, hash: "scrypt$" + salt.toString("base64") + "$" + key.toString("base64") }] }));
+}
+
+module.exports = { seedAccount, startServer, client, mockServer, freePort, sleep, cfg, waitFor, ROOT };

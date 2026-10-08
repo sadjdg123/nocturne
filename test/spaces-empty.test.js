@@ -5,7 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { startServer, client } = require("./helpers");
+const { seedAccount, startServer, client } = require("./helpers");
 const { openPage, SKIP } = require("./browser");
 
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
@@ -104,12 +104,13 @@ test("backups keep [] vs absent: ring files, list (0 vs null), 409 body, restore
 
 test("frontend: [] is never treated as missing — adopt, local cache reload, push, and UI restore of a [] backup", { skip: SKIP, timeout: 60000 }, async (t) => {
   const srv = await startServer({ seed: (dir) => {
+    seedAccount(dir);
     fs.mkdirSync(path.join(dir, "config"), { recursive: true });
     fs.writeFileSync(path.join(dir, "config", "admin.json"), JSON.stringify({ version: 5, updatedAt: "2026-10-01T00:00:00.000Z", data: Object.assign(serverData(), { spaces: [] }) }));
   } });
   t.after(() => srv.stop());
   const a = client(srv.base);
-  assert.equal((await a.post("/api/setup", { name: "admin", password: "admin-pass-1" })).status, 200);
+  assert.equal((await a.post("/api/login", { name: "admin", password: "admin-pass-1" })).status, 200);
   const p = await openPage(srv.base, a, {});
   t.after(() => p.close());
   await p.idle(1000);

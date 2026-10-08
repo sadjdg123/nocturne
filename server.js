@@ -73,13 +73,88 @@ function ensureDirs() {
 function readJSON(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; }
 }
+/* 关键存储与可再生缓存分开：读异常不能变成空站点/空配置。故障在本进程锁存，
+ * 修复文件后需重启复核；日志只含类别/错误码，不含 JSON、凭据或指纹。 */
+const storageFaults = new Map(), seenCriticalFiles = new Set(), authBaselines = new Map();
+let storageLoaded = false;
+const object = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const fingerprint = (v) => crypto.createHash("sha256").update(v).digest("hex");
+function storageError(file, kind, reason) {
+  if (!storageFaults.has(file)) {
+    const issue = { kind, reason, at: new Date().toISOString() };
+    if (kind === "config") issue.user = path.basename(file, ".json");
+    storageFaults.set(file, issue);
+    log("storage blocked", kind, issue.user || "", reason);
+  }
+  return Object.assign(new Error("持久化数据异常，已停止相关读写；请保留原文件并在修复后重启"), { status: 503, code: "storage_unavailable", storage: true });
+}
+function readCritical(file, kind, validate, missing) {
+  if (storageFaults.has(file)) throw storageError(file, kind, storageFaults.get(file).reason);
+  let raw, found = false;
+  try {
+    if (!fs.lstatSync(file).isFile()) throw Object.assign(new Error(), { code: "NOT_REGULAR" });
+    found = true;
+    raw = fs.readFileSync(file);
+  } catch (e) {
+    if (e.code === "ENOENT" && !found && !seenCriticalFiles.has(file)) return { data: missing(), raw: null };
+    throw storageError(file, kind, e.code || "READ_FAILED");
+  }
+  let data;
+  try { data = JSON.parse(raw.toString("utf8")); } catch (e) { throw storageError(file, kind, "INVALID_JSON"); }
+  if (!validate(data)) throw storageError(file, kind, "INVALID_STRUCTURE");
+  seenCriticalFiles.add(file);
+  return { data, raw };
+}
+function usersShape(d) {
+  if (!object(d) || !Array.isArray(d.users)) return false;
+  const names = new Set();
+  return d.users.every((u) => {
+    if (!object(u) || !validName(u.name) || (u.admin !== undefined && typeof u.admin !== "boolean") || typeof u.hash !== "string") return false;
+    const parts = u.hash.split("$");
+    if (parts.length !== 3 || parts[0] !== "scrypt" || !parts.slice(1).every((s) => /^[A-Za-z0-9+/]+={0,2}$/.test(s)) || Buffer.from(parts[1], "base64").length !== 16 || Buffer.from(parts[2], "base64").length !== 64) return false;
+    const k = u.name.toLowerCase(); if (names.has(k)) return false; names.add(k);
+    return u.devices === undefined || (Array.isArray(u.devices) && u.devices.every((v) => object(v) && /^[0-9a-f]{64}$/.test(v.h) && Number.isFinite(v.exp)));
+  });
+}
+function sessionsShape(d) {
+  return object(d) && Object.entries(d).every(([k, s]) => /^[0-9a-f]{64}$/.test(k) && object(s) && validName(s.user) && Number.isFinite(s.expires) && (s.created === undefined || Number.isFinite(s.created)));
+}
+function configShape(d) {
+  return object(d) && Number.isSafeInteger(d.version) && d.version >= 0 && validConfig(d.data) &&
+    !Array.isArray(d.data.settings) && (d.hist === undefined || (Array.isArray(d.hist) && d.hist.every((h) => object(h) && Number.isSafeInteger(h.v) && h.v >= 0 && typeof h.h === "string"))) &&
+    (d.ops === undefined || (Array.isArray(d.ops) && d.ops.every((o) => object(o) && typeof o.id === "string" && Number.isSafeInteger(o.v) && o.v >= 0)));
+}
+function entriesStrict(dir, kind) {
+  if (storageFaults.has(dir)) throw storageError(dir, kind, storageFaults.get(dir).reason);
+  try { return fs.readdirSync(dir).filter((n) => !n.endsWith(".tmp")); }
+  catch (e) { if (e.code === "ENOENT") return []; throw storageError(dir, kind, e.code || "READ_FAILED"); }
+}
+function bootstrapEvidence() {
+  // 连空 sessions.json 也说明曾有认证状态；不能让丢失 users.json 开放管理员注册。
+  try { fs.lstatSync(SESSIONS_FILE); return true; } catch (e) { if (e.code !== "ENOENT") throw storageError(SESSIONS_FILE, "sessions", e.code || "READ_FAILED"); }
+  return [CONFIG_DIR, BACKUP_DIR, GUARD_DIR, ICONS_DIR, WALLPAPER_DIR].some((d) => entriesStrict(d, "bootstrap").length) || entriesStrict(DATA_DIR, "bootstrap").some((n) => n.startsWith(SNAPSHOT_PREFIX));
+}
+function assertAuthStorage() {
+  if (NO_AUTH || !storageLoaded) return;
+  for (const [file, kind, check, missing] of [[USERS_FILE, "users", usersShape, () => ({ users: [] })], [SESSIONS_FILE, "sessions", sessionsShape, () => ({})]]) {
+    const r = readCritical(file, kind, check, missing), h = r.raw === null ? null : fingerprint(r.raw);
+    if (h !== authBaselines.get(file)) throw storageError(file, kind, "CHANGED_OUTSIDE_PROCESS");
+  }
+  if (!users.users.length && bootstrapEvidence()) throw storageError(USERS_FILE, "users", "ORPHANED_DATA");
+}
+function checkCriticalWrite(file) {
+  if (!storageLoaded) return;
+  if (file === USERS_FILE || file === SESSIONS_FILE) assertAuthStorage();
+  else if (path.dirname(file) === CONFIG_DIR && file.endsWith(".json")) { assertAuthStorage(); readConfig(path.basename(file, ".json")); }
+}
 /* 原子写入：先写同目录下的临时文件 <目标>.<pid>.<8 位随机十六进制>.tmp，fsync 后 rename 覆盖目标。
  * 任何一步失败（磁盘满 ENOSPC、只写了一半、rename 失败……）：只删除**这一次自己创建的**临时文件，绝不动目标文件（保持写入前的完整内容）。
  * 正在写的临时文件记在 ownTmps 里，启动时的残留清理（sweepStaleTmp）不会碰它们。 */
 const TMP_RE = /^(.+)\.(\d{1,10})\.([0-9a-f]{8})\.tmp$/;
 const ownTmps = new Set();
 const tmpName = (file) => file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-async function atomicWrite(file, body) {
+async function atomicWrite(file, body, check) {
+  if (check) check();
   const tmp = tmpName(file);
   let created = false, done = false;
   try {
@@ -89,7 +164,14 @@ async function atomicWrite(file, body) {
     created = true;
     ownTmps.add(tmp);
     try { await fh.writeFile(body); await fh.sync(); } finally { await fh.close(); }
-    await fsp.rename(tmp, file);
+    if (check) check(); // 排队/临时文件写入期间发现损坏，也不能覆盖目标。
+    if (check && (file === USERS_FILE || file === SESSIONS_FILE)) {
+      // 关键认证替换与指纹更新同一 JS 步骤完成；异步 rename 已落盘但 Promise
+      // 尚未返回时，其他请求不能把本程序自己的新文件误判为外部替换。
+      fs.renameSync(tmp, file);
+      authBaselines.set(file, fingerprint(body));
+    } else await fsp.rename(tmp, file);
+    if (check && (file === USERS_FILE || file === SESSIONS_FILE || path.dirname(file) === CONFIG_DIR)) seenCriticalFiles.add(file);
     done = true;
   } finally {
     if (created && !done) await fsp.rm(tmp, { force: true }).catch(() => {}); // 只删这一次自己创建的临时文件
@@ -101,7 +183,7 @@ const writeQueues = new Map();
 function writeJSON(file, data) {
   const body = JSON.stringify(data, null, 2);
   const prev = writeQueues.get(file) || Promise.resolve();
-  const next = prev.catch(() => {}).then(() => atomicWrite(file, body));
+  const next = prev.catch(() => {}).then(() => atomicWrite(file, body, () => checkCriticalWrite(file)));
   writeQueues.set(file, next);
   next.finally(() => { if (writeQueues.get(file) === next) writeQueues.delete(file); }).catch(() => {});
   return next;
@@ -151,7 +233,7 @@ function withUserLock(name, fn) {
  * 持有用户锁的代码（配置 / 壁纸 / 图标）绝不再去拿账户锁，所以不会死锁。 */
 let accountsChain = Promise.resolve();
 function withAccountsLock(fn) {
-  const run = accountsChain.catch(() => {}).then(fn);
+  const run = accountsChain.catch(() => {}).then(() => { assertAuthStorage(); return fn(); });
   accountsChain = run.catch(() => {});
   return run;
 }
@@ -162,9 +244,17 @@ let users = { users: [] };
 let sessions = {};
 
 function loadState() {
-  users = readJSON(USERS_FILE, { users: [] });
-  if (!Array.isArray(users.users)) users.users = [];
-  sessions = readJSON(SESSIONS_FILE, {});
+  if (NO_AUTH) { // 正常旧账户只作既有探测/迁移名单；坏认证文件不参与认证，也绝不重写。
+    const old = readJSON(USERS_FILE, null);
+    users = usersShape(old) ? old : { users: [] }; sessions = {}; storageLoaded = true; return;
+  }
+  const u = readCritical(USERS_FILE, "users", usersShape, () => ({ users: [] }));
+  const s = readCritical(SESSIONS_FILE, "sessions", sessionsShape, () => ({}));
+  users = u.data; sessions = s.data;
+  authBaselines.set(USERS_FILE, u.raw === null ? null : fingerprint(u.raw));
+  authBaselines.set(SESSIONS_FILE, s.raw === null ? null : fingerprint(s.raw));
+  if (!users.users.length && bootstrapEvidence()) throw storageError(USERS_FILE, "users", "ORPHANED_DATA");
+  storageLoaded = true;
   const now = Date.now();
   for (const [k, s] of Object.entries(sessions)) if (!s || s.expires < now) delete sessions[k];
 }
@@ -172,6 +262,7 @@ const saveUsers = () => writeJSON(USERS_FILE, users);
 let sessTimer = null;
 function saveSessions(now) {
   clearTimeout(sessTimer);
+  if (NO_AUTH) return Promise.resolve();
   if (now) return writeJSON(SESSIONS_FILE, sessions);
   sessTimer = setTimeout(() => writeJSON(SESSIONS_FILE, sessions).catch((e) => log("save sessions", e.message)), 2000);
 }
@@ -284,6 +375,7 @@ function revokeDevices(u) { if (u && u.devices && u.devices.length) { u.devices 
 /** 返回当前登录用户 {name, admin}，未登录返回 null */
 function currentUser(req) {
   if (NO_AUTH) return { name: NO_AUTH_USER, admin: true };
+  assertAuthStorage();
   const t = parseCookies(req)[COOKIE];
   if (!t) return null;
   const key = sha(t), s = sessions[key];
@@ -473,15 +565,32 @@ async function latestBackup(name) {
   for (const f of await listBackups(name)) { const d = readJSON(f, null); if (d && d.data) return d; }
   return null;
 }
-const configCache = new Map(); // lname -> {mtimeMs, doc}
 function readConfig(name) {
   const f = configFile(name);
-  let st; try { st = fs.statSync(f); } catch (e) { return { version: 0, updatedAt: null, data: null }; }
-  const c = configCache.get(f);
-  if (c && c.mtimeMs === st.mtimeMs) return c.doc;
-  const doc = readJSON(f, { version: 0, updatedAt: null, data: null });
-  configCache.set(f, { mtimeMs: st.mtimeMs, doc });
-  return doc;
+  if (storageFaults.has(CONFIG_DIR)) throw storageError(CONFIG_DIR, "config", storageFaults.get(CONFIG_DIR).reason);
+  const r = readCritical(f, "config", configShape, () => ({ version: 0, updatedAt: null, data: null }));
+  if (r.raw === null) {
+    // 真实新账户可以首次保存；旁路/快照已有记录的账户不是空配置。
+    if (hasConfigHistory(name, f)) throw storageError(f, "config", "MISSING_WITH_HISTORY");
+  }
+  return r.data; // 不以 mtime 命中代替关键文件读取；同大小/同时间替换也必须检测。
+}
+function hasConfigHistory(name, target) {
+  const present = (f) => { try { fs.lstatSync(f); return true; } catch (e) { if (e.code === "ENOENT") return false; throw storageError(target, "config", e.code || "READ_FAILED"); } };
+  if (present(guardFile(name)) || present(legacyBackupFile(name))) return true;
+  try { if (entriesStrict(backupDir(name), "config").length) return true; } catch (e) { throw storageError(target, "config", "HISTORY_UNREADABLE"); }
+  for (const dir of entriesStrict(DATA_DIR, "config").filter((n) => n.startsWith(SNAPSHOT_PREFIX))) {
+    const root = path.join(DATA_DIR, dir);
+    if (!present(path.join(root, "config", name.toLowerCase() + ".json"))) continue;
+    // 固定快照永不删除；已明确重建的同名新账户不能继承它。created 是 RC 原有字段。
+    let old;
+    try { const d = JSON.parse(fs.readFileSync(path.join(root, "users.json"), "utf8")); old = object(d) && Array.isArray(d.users) && d.users.find((u) => object(u) && typeof u.name === "string" && u.name.toLowerCase() === name.toLowerCase()); }
+    catch (e) { return true; } // 快照身份无法判定：保守阻断，绝不覆盖。
+    const current = findUser(name);
+    if (current && old && typeof current.created === "string" && typeof old.created === "string" && Number.isFinite(Date.parse(current.created)) && Number.isFinite(Date.parse(old.created)) && current.created !== old.created) continue;
+    return true;
+  }
+  return false;
 }
 /* 内容指纹：sha256(键排序后的 JSON)。配置文档里记最近 HIST_KEEP 个版本的指纹 hist:[{v,h}]，
  * 用来识别「离线补推的其实是早就被接受过、后来又被别的设备改掉的旧内容」（见 PUT replay）。 */
@@ -510,7 +619,6 @@ async function writeConfig(name, data, opId, opHash) {
   if (opId) ops = ops.filter((o) => o.id !== opId).concat({ id: opId, v: version, h: opHash || dataHash(data) }).slice(-OPS_KEEP); // h：这次推送收到的内容指纹（迁移前）
   const doc = { version, updatedAt: new Date().toISOString(), data, hist, ...(ops.length ? { ops } : {}), writer: WRITER };
   await writeJSON(configFile(name), doc);
-  configCache.delete(configFile(name));
   // 旁路写入失败不影响这次保存（配置已经写好），但绝不静默：作废旧旁路（删掉，作废不了时由版本 + 指纹校验兜底）、记错误日志、
   // 管理员 /api/health 里能看到，这次保存的响应带 guardWarning。
   const gw = await writeGuard(name, doc).then(() => { guardIssues.delete(name.toLowerCase()); return null; }, (e) => guardWriteFailed(name, e));
@@ -776,6 +884,8 @@ function unsafeError(list) {
 }
 /** 拿到用户锁之后再确认一次：账户还在、这个会话还有效（请求开始后账户可能被删 / 密码被改导致会话作废）。否则 401，什么都不写。 */
 function assertAlive(me, req) {
+  assertAuthStorage();
+  readConfig(me.name);
   if (NO_AUTH) return;
   if (!findUser(me.name) || (req && req.sessionKey && !sessions[req.sessionKey])) throw Object.assign(new Error("账户已不存在或登录已失效"), { status: 401 });
 }
@@ -946,7 +1056,7 @@ async function migrateAll() {
       await guardRecover(name).catch((e) => log("spaces guard", name, e.message));
       const cur = readConfig(name);
       if (cur.data && await migrateData(name, cur.data)) await writeConfig(name, cur.data);
-    });
+    }).catch((e) => { if (!e.storage) log("migrate", name, e.message); }); // 坏账户配置不阻止其他账户，不对坏文件自愈。
   }
 }
 
@@ -1167,7 +1277,8 @@ async function runProbes(onlyNew) {
     const urls = new Map(); // url -> 是否有管理员在用（有 = 不受 PROBE_ALLOW 限制）
     for (const name of allUserNames()) {
       const admin = isAdminName(name), mine = new Set();
-      for (const it of itemsOf(readConfig(name))) {
+      let doc; try { assertAuthStorage(); doc = readConfig(name); } catch (e) { if (e.storage) continue; throw e; }
+      for (const it of itemsOf(doc)) {
         const t = probeTarget(it);
         if (!t || t.reserved || mine.has(t.url)) continue;
         if (mine.size >= PROBE_MAX_PER_USER) break; // 每个账户每轮的上限：多出来的地址前端自己探测
@@ -1292,6 +1403,7 @@ function serveStatic(req, res, pathname) {
 
 let indexCache = null;
 function serveIndex(req, res) {
+  assertAuthStorage();
   const file = path.join(PUBLIC_DIR, "index.html"), st = fs.statSync(file);
   if (!indexCache || indexCache.mtimeMs !== st.mtimeMs) indexCache = { mtimeMs: st.mtimeMs, html: fs.readFileSync(file, "utf8") };
   const u = currentUser(req);
@@ -1465,8 +1577,11 @@ async function api(req, res, url) {
   const p = url.pathname.replace(/^\/api/, "") || "/", m = req.method;
 
   if (p === "/health") {
-    const out = { ok: true, app: "nocturne", version: VERSION, auth: !NO_AUTH, uptime: Math.round(process.uptime()) };
-    const u = currentUser(req);
+    try { assertAuthStorage(); } catch (e) { if (!e.storage) throw e; }
+    for (const name of allUserNames()) { try { readConfig(name); } catch (e) { if (!e.storage) throw e; } }
+    const out = { ok: storageFaults.size === 0, app: "nocturne", version: VERSION, auth: !NO_AUTH, uptime: Math.round(process.uptime()) };
+    if (!out.ok) out.storage = { ok: false }; // 匿名健康检查不泄露账户名/路径。
+    let u; try { u = currentUser(req); } catch (e) { if (!e.storage) throw e; }
     if (u && u.admin) { // 只给管理员看：帮你确认 TRUSTED_PROXY_CIDRS 该填什么
       const c = clientInfo(req);
       out.client = { peer: c.peer, ip: c.ip, https: c.https, forwardedHeaders: c.forwarded, trustedPeer: c.trustedPeer, lan: lanClient(req),
@@ -1474,9 +1589,11 @@ async function api(req, res, url) {
         trustedProxies: trustedProxies().list };
       // 回滚写保护旁路的状态（RC.2）：ok = 本次运行以来没有未解决的旁路写入失败 / 过期
       out.guard = { ok: guardIssues.size === 0, issues: [...guardIssues.values()].slice(0, 20) };
+      if (!out.ok) out.storage.issues = [...storageFaults.values()].slice(0, 20);
     }
-    return json(res, 200, out);
+    return json(res, out.ok ? 200 : 503, out);
   }
+  assertAuthStorage();
 
   if (p === "/me" && m === "GET") {
     return json(res, 200, { auth: !NO_AUTH, setup: !NO_AUTH && users.users.length === 0, user: currentUser(req) });
@@ -1566,6 +1683,7 @@ async function api(req, res, url) {
   /* ---- 以下需要登录 ---- */
   const me = currentUser(req);
   if (!me) return json(res, 401, { error: "未登录" });
+  readConfig(me.name); // 含 stash/restore、上传等入口：坏配置不能通过另一条写路径绕过。
 
   if (p === "/config/stash" && m === "POST") { // 冲突时选「使用服务器版」：先把本机版本存成一份快照（不改当前配置），随时能从「恢复较早的版本」找回
     const b = await readBody(req);
@@ -1815,7 +1933,7 @@ async function api(req, res, url) {
           await fsp.rm(iconDir(target.name), { recursive: true, force: true });
           await fsp.rm(guardFile(target.name), { force: true }); // 回滚写保护旁路文件随用户删除（固定的升级前快照不动）
           guardIssues.delete(target.name.toLowerCase());
-          configCache.delete(configFile(target.name));
+          seenCriticalFiles.delete(configFile(target.name));
         });
         return json(res, 200, { ok: true });
       });
@@ -1840,7 +1958,7 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     if (!e.status) log("error", req.method, url.pathname, e.stack || e.message);
     if (e.close) res.setHeader("Connection", "close"); // 没读完的请求体不再接收
-    if (!res.headersSent) json(res, e.status || 500, { error: e.status ? e.message : "服务器内部错误", ...(e.status && e.invalid ? { invalid: e.invalid } : {}) });
+    if (!res.headersSent) json(res, e.status || 500, { error: e.status ? e.message : "服务器内部错误", ...(e.storage ? { code: e.code } : {}), ...(e.status && e.invalid ? { invalid: e.invalid } : {}) });
     else res.destroy();
   }
 });
@@ -1849,7 +1967,10 @@ function main() {
   if (COOKIE_CFG.error) { console.error(stamp(), "配置错误：" + COOKIE_CFG.error); process.exit(2); }
   ensureDirs();
   loadState();
-  preV2Snapshot();
+  for (const n of entriesStrict(CONFIG_DIR, "config")) {
+    if (n.endsWith(".json") && validName(n.slice(0, -5))) { try { readConfig(n.slice(0, -5)); } catch (e) { if (!e.storage) throw e; } }
+  }
+  if (!storageFaults.size) preV2Snapshot(); // 不能在坏配置上开始快照/迁移并误报升级完成。
   sweepStaleTmp().catch((e) => log("tmp sweep", e.message));
   migrateAll().catch((e) => log("migrate", e.message));
   server.listen(PORT, HOST, () => {
@@ -1860,11 +1981,11 @@ function main() {
   setInterval(() => runProbes(false), STATUS_INTERVAL).unref();
   setTimeout(sweepCache, 5000).unref();
   setInterval(sweepCache, 6 * 3600e3).unref();
-  const stop = () => { log("shutting down"); saveSessions(true).finally(() => server.close(() => process.exit(0))); setTimeout(() => process.exit(0), 3000).unref(); };
+  const stop = () => { log("shutting down"); saveSessions(true).catch((e) => log("save sessions stopped", e.storage ? "storage_unavailable" : e.code || "WRITE_FAILED")).finally(() => server.close(() => process.exit(0))); setTimeout(() => process.exit(0), 3000).unref(); };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
 }
-if (require.main === module) main();
+if (require.main === module) { try { main(); } catch (e) { if (!e.storage) throw e; console.error(stamp(), "启动已停止：关键持久化数据异常；原文件保留"); process.exitCode = 2; } }
 else module.exports = { // 供 test/ 下的单元测试使用；作为程序运行时不导出
   cookieNames, normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo, forwardedProto, legacyKey,
   atomicWrite,

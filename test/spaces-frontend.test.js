@@ -5,7 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { startServer, client, sleep } = require("./helpers");
+const { seedAccount, startServer, client, sleep } = require("./helpers");
 const { openPage, importFile, SKIP } = require("./browser");
 
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
@@ -17,12 +17,13 @@ const deq = (a, b, m) => assert.deepEqual(plain(a), plain(b), m);
 
 async function seeded(t, data, version = 7) {
   const srv = await startServer({ seed: (dir) => {
+    seedAccount(dir);
     fs.mkdirSync(path.join(dir, "config"), { recursive: true });
     fs.writeFileSync(path.join(dir, "config", "admin.json"), JSON.stringify({ version, updatedAt: "2026-10-01T00:00:00.000Z", data }));
   } });
   t.after(() => srv.stop());
   const c = client(srv.base);
-  assert.equal((await c.post("/api/setup", { name: "admin", password: "admin-pass-1" })).status, 200);
+  assert.equal((await c.post("/api/login", { name: "admin", password: "admin-pass-1" })).status, 200);
   return { srv, c };
 }
 /** 这台设备上 V1.1 留下的本机缓存（与服务器同版本） */

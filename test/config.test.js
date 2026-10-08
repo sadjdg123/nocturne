@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { startServer, client, cfg } = require("./helpers");
+const { seedAccount, startServer, client, cfg } = require("./helpers");
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
@@ -15,12 +15,13 @@ test("PUT /api/config rejects unsafe URLs; legacy configs keep loading and synci
   ]) };
   legacy.data.settings.wallpaper = { id: "custom", url: "data:image/png;base64," + PNG.toString("base64") };
   const srv = await startServer({ seed: (dir) => {
+    seedAccount(dir);
     fs.mkdirSync(path.join(dir, "config"), { recursive: true });
     fs.writeFileSync(path.join(dir, "config", "admin.json"), JSON.stringify(legacy));
   } });
   t.after(() => srv.stop());
   const c = client(srv.base);
-  await c.post("/api/setup", { name: "admin", password: "admin-pass-1" });
+  await c.post("/api/login", { name: "admin", password: "admin-pass-1" });
 
   const g = await c.get("/api/config");
   assert.equal(g.status, 200, "old config with a bad URL still loads");

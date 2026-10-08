@@ -7,7 +7,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { startServer, client } = require("./helpers");
+const { seedAccount, startServer, client } = require("./helpers");
 const { openPage, SKIP, sleep } = require("./browser");
 
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
@@ -22,12 +22,13 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 
 async function seeded(t, data, version = 7) {
   const srv = await startServer({ seed: (dir) => {
+    seedAccount(dir);
     fs.mkdirSync(path.join(dir, "config"), { recursive: true });
     fs.writeFileSync(path.join(dir, "config", "admin.json"), JSON.stringify({ version, updatedAt: "Thu 2026-10-01 8:00 AM CST (UTC+08:00)", data }));
   } });
   t.after(() => srv.stop());
   const c = client(srv.base);
-  assert.equal((await c.post("/api/setup", { name: "admin", password: "admin-pass-1" })).status, 200);
+  assert.equal((await c.post("/api/login", { name: "admin", password: "admin-pass-1" })).status, 200);
   return { srv, c };
 }
 const groupsShown = (doc) => [...doc.querySelectorAll("#x-groups .x-group")].map((s) => s.getAttribute("data-gid"));
