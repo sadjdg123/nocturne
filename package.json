@@ -5,10 +5,13 @@
   "main": "server.js",
   "private": true,
   "license": "MIT",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "DATA_DIR=./data node server.js",
-    "check": "node --check server.js && node --check public/nocturne.js"
+    "check": "node --check server.js && node --check public/nocturne.js && node --check public/urlcheck.js && node --check test/helpers.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   }
 }
