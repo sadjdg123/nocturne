@@ -107,7 +107,9 @@ test("RC.1 写的数据 → RC.2 原样可用（会话 / 已知设备 / 登录 /
   assert.doesNotMatch(srv.log(), /error|TypeError/i);
   await srv.stop();
 
-  // 4. RC.1 → V1.1（「用本机版覆盖」丢掉空间）→ 直接升到 RC.2：用 RC.1 写的旧格式旁路找回 RC.1 最后的空间
+  // 4. RC.1 → V1.1（「用本机版覆盖」丢掉空间）→ 直接升到新版：RC.1 写的旧格式旁路不用于自动找回（RC.3）；
+  //    快照环里最后一个 g:2 版本（v1+1，SPACES_2）比 RC.1 后来写的旧格式旁路（v1+2，SPACES_3）旧 → 也不用它（不换回旧空间）→ 不找回，
+  //    V1.1 的修改保留，被替换的版本在「较早的版本」里可手动恢复
   srv = await boot("v11", dir);
   c = await login(srv.base, "admin", "admin-pass-1");
   cur = (await c.get("/api/config")).json;
@@ -118,16 +120,24 @@ test("RC.1 写的数据 → RC.2 原样可用（会话 / 已知设备 / 登录 /
   srv = await boot("rc2", dir);
   c = await login(srv.base, "admin", "admin-pass-1");
   const back = (await c.get("/api/config")).json;
-  assert.deepEqual(plain(back.data.spaces), plain(SPACES_3), "找回的是 RC.1 最后写的空间");
+  assert.equal(back.data.spaces, undefined, "不用旧格式旁路、也不换回 RC.2 时期的 SPACES_2");
   assert.equal(back.data.settings.title, "V1.1 旧设备覆盖");
-  assert.match(srv.log(), /spaces guard: restored admin 2 spaces .*source: guard v\d+/);
+  assert.doesNotMatch(srv.log(), /spaces guard: restored/);
+  assert.match(srv.log(), /spaces guard: stale admin guard v\d+ has an old or invalid format/);
+  assert.match(srv.log(), /spaces guard: skipped admin old-format guard v\d+ is newer than the last V2 version v\d+/);
+  const bk = (await c.get("/api/config/backups")).json;
+  const rc1Last = bk.find((b) => b.version === v1 + 2);
+  assert.ok(rc1Last && rc1Last.spaces === 2, "RC.1 最后写的版本（2 个空间）在「较早的版本」里，可手动恢复");
+  const old = (await c.get("/api/config?backup=" + encodeURIComponent(rc1Last.id))).json; // 「恢复较早的版本」：取出那份 → restore:true 推上去
+  assert.equal((await c.put("/api/config", { baseVersion: back.version, data: old.data, restore: true, caps: CAPS })).status, 200, "手动恢复");
+  assert.deepEqual(plain((await c.get("/api/config")).json.data.spaces), plain(SPACES_3));
   await srv.stop();
 
-  // 5. 找回之后再回滚到 RC.1：照常读，页面提示数据可读
+  // 5. 手动恢复之后再回滚到 RC.1：照常读
   srv = await boot("rc1", dir);
   c = await login(srv.base, "admin", "admin-pass-1");
   const g5 = (await c.get("/api/config")).json;
-  assert.deepEqual(plain(g5.data.spaces), plain(SPACES_3));
-  assert.equal(g5.recovered && g5.recovered.spaces, 2, "RC.1 能读 RC.2 写的 recovered 提示");
+  assert.deepEqual(plain(g5.data.spaces), plain(SPACES_3), "RC.1 读到手动恢复后的空间");
+  assert.equal(g5.recovered, undefined, "这次没有自动找回，也就没有找回提示");
   await srv.stop();
 });
