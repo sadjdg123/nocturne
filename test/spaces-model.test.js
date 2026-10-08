@@ -90,7 +90,7 @@ test("delete space removes only the relation; 全部 cannot be deleted; move reo
 test("names: required, ≤24 chars, unique (case-insensitive), 「全部」 reserved; cap 24 spaces", () => {
   const d = fresh();
   assert.throws(() => S.add(d, { name: "  " }), /不能为空/);
-  assert.throws(() => S.add(d, { name: "全部" }), /已经有/);
+  assert.throws(() => S.add(d, { name: "全部" }), /保留名称/);
   assert.throws(() => S.add(d, { name: "x".repeat(25) }), /最多 24/);
   S.add(d, { name: "😀".repeat(24) }); // 24 code points OK
   const id = S.add(d, { name: "Daily" });
@@ -135,7 +135,18 @@ test("check(): rejects malformed structures (server + import)", () => {
   bad((d) => { d.spaces[0].itemIds = [{}]; }, /itemIds/);
   bad((d) => { d.spaces[0].theme = "<script>"; }, /theme/);
   bad((d) => { d.spaces[0].density = 3; }, /density/);
-  bad((d) => { d.spaces[0].items = [{ title: "copy" }]; }, /未知字段/);
+  bad((d) => { d.spaces[0].items = [{ title: "copy" }]; }, /未知字段 items（保留字段名/); // 空间不能变成第二套项目集合（阶段 2 扩展字段规则）
+  /* 阶段 2：不认识的字段 = 扩展字段，限制内放行（向前兼容），畸形的照样拒绝 */
+  bad((d) => { d.spaces[0]["bad-key"] = 1; }, /字段名不合法/);
+  bad((d) => { d.spaces[0].accent = { title: "x" }; }, /键名不合法/);
+  bad((d) => { d.spaces[0].accent = { a: { b: { c: { d: 1 } } } }; }, /嵌套/);
+  bad((d) => { d.spaces[0].accent = "javascript:alert(1)"; }, /脚本/);
+  bad((d) => { d.spaces[0].accent = "x".repeat(1025); }, /太长/);
+  bad((d) => { d.spaces[0].accent = Array(65).fill(0); }, /数组/);
+  bad((d) => { for (let i = 0; i < 17; i++) d.spaces[0]["x" + i] = i; }, /最多 16/);
+  bad((d) => { for (let i = 0; i < 5; i++) d.spaces[0]["x" + i] = "y".repeat(1000); }, /4096/);
+  bad((d) => { d.spacesVersion = 1.5; }, /1–999/);
+  bad((d) => { d.spacesVersion = "2"; }, /1–999/);
   bad((d) => { d.spaces = Array.from({ length: 25 }, (_, i) => ({ id: "s" + i, name: "n" + i, groupIds: [] })); }, /最多 24/);
   // dangling refs are NOT a structural error (cleaned by prune)
   const ok = base(); ok.spaces[0].groupIds = ["gone"]; ok.spaces[0].itemIds = ["gone-too"]; assert.deepEqual(S.check(ok), []);
@@ -157,7 +168,7 @@ test("normalize(): tolerant cleanup of local/imported data (never throws)", () =
   ];
   assert.equal(S.normalize(d), true);
   assert.deepEqual(d.spaces.map((s) => [s.id, s.name]), [["s1", "日常"], ["s2", "日常 2"], ["s3", "全部 2"], ["s4", "未命名空间"], ["s5", "x".repeat(24)]]);
-  assert.deepEqual(d.spaces[0], { id: "s1", name: "日常", groupIds: ["chips00daily"], itemIds: ["mp7r2x0k1a"], theme: "dawn" });
+  assert.deepEqual(d.spaces[0], { id: "s1", name: "日常", groupIds: ["chips00daily"], itemIds: ["mp7r2x0k1a"], theme: "dawn", junk: 1 }, "valid extension field kept verbatim (stage 2 forward compat)");
   assert.deepEqual(d.spaces[1], { id: "s2", name: "日常 2", groupIds: [] }, "bad theme dropped, bad groupIds → []");
   assert.deepEqual(S.check(d), [], "result passes the strict server check");
   const e = fresh(); e.spaces = "garbage"; assert.equal(S.normalize(e), true); assert.ok(!("spaces" in e));
