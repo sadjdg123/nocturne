@@ -514,7 +514,8 @@ sh tools/restore.sh [--force] <备份.tar.gz> <目标 data 目录>
 
 升级 / 回滚请把镜像固定到 `标签@digest`：V1.1 为
 `ghcr.io/sadjdg123/nocturne:sha-3e6da3c@sha256:58a4c8349242ca80ca4a46681410eafcbbb41e0411c3567e3cbef9abff19e861`，
-V2 RC 的标签与 digest 见 `docs/v2.0-rc-report.md` 第 1 节。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
+V2 RC（2.0.0-rc.1）为
+`ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa`。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
 回滚到 V1.1 一般不需要替换 `data/`。
 
 文档：
