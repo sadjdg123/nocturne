@@ -132,3 +132,9 @@ test("dock 快速打开 opens the command palette; 更多 opens the menu", opt, 
   assert.ok(!doc.querySelector(".x-menu").hidden, "menu opened");
   assert.deepEqual(p.errors, []);
 });
+
+test("RC: the appearance switch stays visible in classic (CSS), so classic can switch back to Midnight", () => {
+  const css = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "public", "midnight.css"), "utf8");
+  assert.match(css, /html\[data-ui="classic"\] \.mn-setui[^{]*\{ display: block; \}|html\[data-ui="v2"\] \.mn-setui, html\[data-ui="classic"\] \.mn-setui \{ display: block; \}/);
+  assert.match(css, /html\[data-ui="classic"\] \.mn-v2only \{ display: none; \}/, "only the phone-columns row is v2-only");
+});
