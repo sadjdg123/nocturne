@@ -37,6 +37,10 @@ test("malformed spaces → 400 bad_spaces (PUT and stash), nothing written", asy
     { spaces: [{ id: "s1", name: "A", groupIds: [], theme: "javascript:alert(1)" }] }, { spaces: [{ id: "s1", name: "A", groupIds: [], density: "huge" }] },
     { spaces: [{ id: "s1", name: "A", groupIds: [], items: [{ title: "copy", wan: "https://x" }] }] },
     { spaces: Array.from({ length: 25 }, (_, i) => ({ id: "s" + i, name: "n" + i, groupIds: [] })) },
+    /* 阶段 2 扩展字段：畸形的仍是 bad_spaces */
+    { spaces: [{ id: "s1", name: "A", groupIds: [], "x-y": 1 }] }, { spaces: [{ id: "s1", name: "A", groupIds: [], accent: { a: { b: { c: { d: 1 } } } } }] },
+    { spaces: [{ id: "s1", name: "A", groupIds: [], accent: { lan: "http://x" } }] }, { spaces: [{ id: "s1", name: "A", groupIds: [], link: "javascript:alert(1)" }] },
+    { spaces: [{ id: "s1", name: "A", groupIds: [], blob: "z".repeat(4100) }] }, { spacesVersion: 0, spaces: [] }, { spacesVersion: "1" },
   ];
   for (const extra of cases) {
     const d = Object.assign(serverData(), extra);
