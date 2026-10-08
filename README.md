@@ -517,7 +517,7 @@ sh tools/restore.sh [--force] <备份.tar.gz> <目标 data 目录>
 `ghcr.io/sadjdg123/nocturne:sha-3e6da3c@sha256:58a4c8349242ca80ca4a46681410eafcbbb41e0411c3567e3cbef9abff19e861`，
 V2 RC（2.0.0-rc.1）为
 `ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa`。RC.2（2.0.0-rc.2）见 `docs/v2.0-rc2-report.md`；
-**RC.3（2.0.0-rc.3，当前推荐）**为 `ghcr.io/sadjdg123/nocturne:__RC3_TAG__@__RC3_DIGEST__`，见 `docs/v2.0-rc3-report.md`。
+**RC.3（2.0.0-rc.3，当前推荐）**为 `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b`，见 `docs/v2.0-rc3-report.md`。
 **已经在跑 RC.1 的 NAS 升级 / 回滚、以及全新安装，按 `docs/v2.0-upgrade-rc.md`**；V1.1 ↔ V2 按 `docs/v2.0-upgrade-rollback.md`。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
 回滚到 V1.1 一般不需要替换 `data/`。
 
