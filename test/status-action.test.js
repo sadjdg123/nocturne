@@ -17,7 +17,10 @@ test("static mode keeps browser re-check wording", () => {
   const a = R.statusAction(false);
   assert.equal(a.t, "重新检测状态");
   assert.match(a.d, /浏览器/);
-  assert.match(R.statusReport(false, { on: 2, off: 1 }), /^检测完成：2 个在线，1 个离线（浏览器检测/);
+  // 阶段 3：浏览器（no-cors）探测分不清在线与否 → 只说「可能在线 / 无法确认」，绝不说「在线 / 离线」
+  const msg = R.statusReport(false, { on: 0, off: 0, maybe: 2, unknown: 1 });
+  assert.equal(msg, "检测完成：2 个可能在线，1 个无法确认（浏览器检测无法确认真实状态）");
+  assert.doesNotMatch(msg, /个在线|离线/);
 });
 
 test("NAS report names the time of the NAS check and does not claim a new check", () => {
