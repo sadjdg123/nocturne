@@ -1,0 +1,10 @@
+#!/bin/sh
+# 假的 ip 命令（沙盒自测）：默认路由网卡 $FAKE_IP_DEV（eth0），地址 $FAKE_IP_ADDR（192.168.77.10）
+DEV=${FAKE_IP_DEV:-eth0}; ADDR=${FAKE_IP_ADDR:-192.168.77.10}
+case "$*" in
+  "-4 route show default") echo "default via ${FAKE_IP_GW:-192.168.77.1} dev $DEV proto static" ;;
+  "-4 -o addr show dev $DEV"|"-4 -o addr show")
+    [ "$*" = "-4 -o addr show" ] && echo "1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever"
+    echo "2: $DEV    inet $ADDR/24 brd 192.168.77.255 scope global $DEV\\       valid_lft forever preferred_lft forever" ;;
+  *) echo "fake ip: unsupported: $*" >&2; exit 1 ;;
+esac
