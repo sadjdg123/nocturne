@@ -114,7 +114,7 @@ sudo sh tools/v2test/teardown.sh --keep-backups  # 保留 backups/（含密码�
 - 不挂载、不修改生产 data；部署前后对生产 data 做 sha256 / 大小 / 修改时间清单对比。
 - 不改生产 compose、反向代理、Cloudflare、路由器；不开隧道 / 代理；端口只绑内网 IP。
 - 测试容器不挂 docker.sock，登录保持开启（没有 `NOCTURNE_NO_AUTH`），PUID/PGID 与生产相同。
-- 镜像固定 `ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa`（2.0.0-rc.1）。
+- 镜像固定 `ghcr.io/sadjdg123/nocturne:sha-3d5beaf@sha256:08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e`（2.0.0-rc.2；RC.1 为 `sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa`）。
 
 ## 开发者：沙盒自测
 
