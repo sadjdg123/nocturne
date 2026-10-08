@@ -19,6 +19,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * 打开一页（模拟一台设备上的一个标签页）。
  *  base：服务器地址；c：helpers.client（带 cookie，代表这台设备的登录）；opts.storage：这台设备的 localStorage 内容（对象，跨页面保留）
+ *  opts.timeScale：>1 时页面里 ≥1 秒的 setTimeout 按此比例缩短（模拟长时间的重试周期）
  *  返回 {win, A, reqs: [{method, path, body}], storage(): 当前 localStorage 快照, close()}
  */
 async function openPage(base, c, opts = {}) {
@@ -40,6 +41,10 @@ async function openPage(base, c, opts = {}) {
     url: base + "/", runScripts: "dangerously", resources: new Loader(), pretendToBeVisual: true, virtualConsole: vc,
     beforeParse(win) {
       for (const [k, v] of Object.entries(opts.storage || {})) win.localStorage.setItem(k, v);
+      if (opts.timeScale > 1) { // 模拟时间流逝：≥1 秒的定时器按比例缩短（15 秒重试 → 150ms），防抖等短定时器不变
+        const st = win.setTimeout.bind(win);
+        win.setTimeout = (fn, ms, ...rest) => st(fn, ms >= 1000 ? Math.max(1, Math.round(ms / opts.timeScale)) : ms, ...rest);
+      }
       win.structuredClone = (v) => structuredClone(v);
       win.TextEncoder = TextEncoder;
       win.matchMedia = win.matchMedia || ((q) => ({ matches: false, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
