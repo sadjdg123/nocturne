@@ -16,6 +16,7 @@ const dns = require("node:dns");
 const net = require("node:net");
 const os = require("node:os");
 const URLCHECK = require("./public/urlcheck.js"); // 与前端共用的 URL 白名单校验
+const SPACES = require("./public/spaces.js"); // 与前端共用的场景空间模型（V2.0）
 
 const PORT = +process.env.PORT || 8080;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -401,7 +402,7 @@ async function backupSummaries(name) {
     const at = +id.slice(0, 15); // 进备份（被替换）的时间
     const km = /-(auto|replaced|restore|local|legacy)$/.exec(id);
     out.push({ id, version: d.version || 0, updatedAt: d.updatedAt || null, at: new Date(at).toISOString(), time: Date.parse(d.updatedAt) || at, // time：这个版本保存的时间（毫秒）
-      groups: groups.length, items: allItems(d.data).length, kind: d.kind || (km ? km[1] : null) });
+      groups: groups.length, items: allItems(d.data).length, spaces: Array.isArray(d.data.spaces) ? d.data.spaces.length : 0, kind: d.kind || (km ? km[1] : null) });
   }
   return out;
 }
@@ -460,6 +461,26 @@ function aliasesError(d) {
   const bad = URLCHECK.checkAliases(d);
   if (!bad.length) return null;
   return { error: "有 " + bad.length + " 个项目的别名不合法（" + bad[0].where + "：" + bad[0].problem + "），未保存", code: "bad_aliases", aliases: bad.slice(0, 20) };
+}
+/** 场景空间 data.spaces（V2.0，可选）：结构不合法 → 400 bad_spaces（数量 ≤24、名称 ≤24 字且不重名、id 格式、引用是字符串数组且 ≤500、theme/density 枚举、无未知字段）。
+ *  引用了不存在的分组 / 项目不算错误：保存前由 reconcileSpaces 清掉（见下）。 */
+function spacesError(d) {
+  const bad = SPACES.check(d);
+  if (!bad.length) return null;
+  return { error: "空间定义不合法（" + bad[0].where + "：" + bad[0].problem + "），未保存", code: "bad_spaces", spaces: bad.slice(0, 20) };
+}
+/** 保存前整理空间（必须在 withUserLock 里、拿到当前版本 cur 之后调用）。原地修改 body.data，返回 {kept, pruned}。
+ *  1. 旧版前端保护：请求体没有 caps:["spaces"]（V1.1 前端不认识空间）且 data 里没有 spaces 字段，而服务器当前版本有空间定义
+ *     → 沿用服务器上的空间定义（kept）。V2 前端总是带 caps，所以它明确删光空间 / 恢复默认时不会被「保护」回来。
+ *  2. 悬空引用规则：groupIds / itemIds 里指向已不存在的分组 / 项目的 id 一律删掉（pruned = 删掉的个数）；空间本身保留（可以是空空间）。 */
+function reconcileSpaces(body, cur) {
+  const data = body.data, aware = Array.isArray(body.caps) && body.caps.includes("spaces");
+  let kept = false;
+  if (!aware && data.spaces === undefined && cur && cur.data && Array.isArray(cur.data.spaces) && cur.data.spaces.length) {
+    data.spaces = JSON.parse(JSON.stringify(cur.data.spaces));
+    kept = true;
+  }
+  return { kept, pruned: SPACES.prune(data) };
 }
 function validConfig(d) {
   return d && typeof d === "object" && !Array.isArray(d) && d.settings && typeof d.settings === "object" && Array.isArray(d.groups) &&
@@ -1275,7 +1296,7 @@ async function api(req, res, url) {
   if (p === "/config/stash" && m === "POST") { // 冲突时选「使用服务器版」：先把本机版本存成一份快照（不改当前配置），随时能从「恢复较早的版本」找回
     const b = await readBody(req);
     if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
-    const ae = aliasesError(b.data);
+    const ae = aliasesError(b.data) || spacesError(b.data);
     if (ae) return json(res, 400, ae);
     const r = await withUserLock(me.name, async () => {
       assertAlive(me, req);
@@ -1318,7 +1339,7 @@ async function api(req, res, url) {
        *  - 内容与服务器当前版本相同：不算冲突、不升版本。 */
       const b = await readBody(req); // 读请求体不占锁
       if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
-      const ae = aliasesError(b.data);
+      const ae = aliasesError(b.data) || spacesError(b.data);
       if (ae) return json(res, 400, ae);
       // baseVersion 必填：非负整数。缺失 / 不合法 → 400（不能靠省略它绕过冲突检测）
       if (!Number.isSafeInteger(b.baseVersion) || b.baseVersion < 0) return json(res, 400, { error: "缺少或不合法的 baseVersion", code: "bad_base_version" });
@@ -1346,16 +1367,18 @@ async function api(req, res, url) {
             return { stale: true, version: curV, updatedAt: cur.updatedAt, unchanged: true };
           }
         }
+        const sp = reconcileSpaces(b, cur); // 旧版前端保存时沿用服务器上的空间定义 + 清悬空引用（改了内容 → migrated，前端会重新拉取）
+        const spFix = sp.kept || sp.pruned > 0, spInfo = spFix ? { migrated: true, ...(sp.kept ? { spacesKept: true } : {}), ...(sp.pruned ? { spacesPruned: sp.pruned } : {}) } : {};
         const same = () => cur.data && (JSON.stringify(cur.data) === JSON.stringify(b.data) || dataHash(b.data) === currentHash(cur));
-        if (same()) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true };
+        if (same()) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, ...spInfo };
         const forced = mismatch && b.force === true && b.expectVersion != null && +b.expectVersion === curV;
         if (mismatch && !forced) {
           const groups = Array.isArray(cur.data.groups) ? cur.data.groups.length : 0;
           return { status: 409, error: "另一台设备在这之后改过配置，未覆盖", conflict: true, version: curV, updatedAt: cur.updatedAt,
-            groups, items: allItems(cur.data).length, unchanged: true };
+            groups, items: allItems(cur.data).length, spaces: Array.isArray(cur.data.spaces) ? cur.data.spaces.length : 0, unchanged: true };
         }
         const migrated = await migrateData(me.name, b.data);
-        if (migrated && same()) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, migrated: true };
+        if (migrated && same()) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, migrated: true, ...spInfo };
         // 快照：被强制覆盖 / 恢复较早的版本前，当前版本一定先存一份；普通保存按 30 分钟 / 20 个版本的节奏存
         if (cur.data) {
           if (forced) await addBackup(me.name, cur, "replaced");
@@ -1364,7 +1387,7 @@ async function api(req, res, url) {
         }
         const doc = await writeConfig(me.name, b.data, opId, inHash);
         await cleanupIcons(me.name).catch((e) => log("icon cleanup", me.name, e.message));
-        return { version: doc.version, updatedAt: doc.updatedAt, overwrote: forced, ...(forced ? { forced: true } : {}), ...(migrated ? { migrated: true } : {}) };
+        return { version: doc.version, updatedAt: doc.updatedAt, overwrote: forced, ...(forced ? { forced: true } : {}), ...(migrated ? { migrated: true } : {}), ...spInfo };
       });
       if (!r.unchanged) probeSoon();
       delete r.unchanged;
