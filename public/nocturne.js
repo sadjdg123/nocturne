@@ -199,7 +199,7 @@
   var rejectedRaw = null;
   var OP = "nocturne.op";
   /* 这个前端认识 data.spaces（V2.0）：推送时带上，服务器据此区分「明确没有空间」和「旧版前端不认识空间」（后者沿用服务器上的空间定义） */
-  var CAPS = window.NocturneSpaces ? ["spaces"] : [];
+  var CAPS = window.NocturneSpaces ? ["spaces", "spaces:" + (window.NocturneSpaces.SCHEMA || 1)] : []; // "spaces:<N>"：认识的空间 schema 版本（服务器据此补回它不认识的扩展字段）
   /** 参与同步的内容：去掉设备本地的 settings.net 与 recent */
   function snapshot() {
     var st = A.state;
@@ -598,7 +598,7 @@
       A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { if (i.id === id) r = i; }); });
       return r;
     }
-    function allIds() { var s = {}; A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { s[i.id] = 1; }); }); return s; }
+    function allIds() { var s = Object.create(null); A.state.groups.forEach(function (g) { (g.items || []).forEach(function (i) { s[i.id] = 1; }); }); return s; } // 无原型：项目 id 可以是 constructor / __proto__
     function inject(sh) {
       var more = sh.querySelector(".x-more");
       if (!more || more.querySelector("[data-nc-c]") || !dockerInfo || !dockerInfo.available) return;
