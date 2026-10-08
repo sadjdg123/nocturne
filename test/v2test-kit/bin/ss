@@ -1,0 +1,6 @@
+#!/bin/sh
+# 假的 ss（沙盒自测）：-ltnH 输出固定的监听列表 + $FAKE_SS_LISTEN（例如 "0.0.0.0:8089"）
+[ "$1" = "-ltnH" ] || { echo "fake ss: unsupported: $*" >&2; exit 1; }
+echo "LISTEN 0      4096         0.0.0.0:22         0.0.0.0:*"
+echo "LISTEN 0      4096         0.0.0.0:8088       0.0.0.0:*"
+for a in ${FAKE_SS_LISTEN:-}; do echo "LISTEN 0      511          $a       0.0.0.0:*"; done
