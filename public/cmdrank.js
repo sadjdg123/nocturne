@@ -101,8 +101,9 @@
       : { t: "重新检测状态", d: "在这个浏览器里重新检测", busy: "正在重新检测…" };
   }
   function statusReport(nas, d, checkedAt) {
-    var n = d.on + " 个在线，" + d.off + " 个离线";
-    if (!nas) return "检测完成：" + n + "（浏览器检测，仅供参考）";
+    /* 浏览器探测（no-cors）分不清在线与否：只说「可能在线 / 无法确认」，不说在线 / 离线 */
+    if (!nas) return "检测完成：" + (d.maybe || 0) + " 个可能在线，" + (d.unknown || 0) + " 个无法确认（浏览器检测无法确认真实状态）";
+    var n = d.on + " 个在线，" + d.off + " 个离线" + ((d.maybe || 0) + (d.unknown || 0) ? "，" + ((d.maybe || 0) + (d.unknown || 0)) + " 个无法确认" : "");
     var at = hms(checkedAt);
     return "已刷新：" + n + "（NAS " + (at ? at + " 的" : "最近一次") + "检测结果）";
   }
