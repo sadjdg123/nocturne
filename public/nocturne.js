@@ -135,6 +135,16 @@
     });
   }
 
+  /** 命令面板「重新检测状态」：重新读取 NAS 的检测结果。失败时 reject（不假装成功） */
+  A.refreshStatus = function () {
+    if (!N.user) return Promise.reject(new Error("未登录"));
+    return api("GET", "status").then(function (m) {
+      statusMap = m || {};
+      var w = statusWaiters; statusWaiters = []; w.forEach(function (f) { f(statusMap); });
+      return true;
+    }, function (e) { if (e.status === 401) expired(); throw e; });
+  };
+
   /* ------------------------------------------------------- auth screen */
   function authScreen() {
     var setup = !!N.setup;
@@ -293,6 +303,10 @@
       if (e.status === 409 && e.data && e.data.conflict) return conflict(e.data);
       if (e.status === 422 && e.data && e.data.code === "opid_mismatch") { // opId 被另一份内容占用：换新 opId 正常重推（照样判冲突）
         opReset(); if (force) forceNext = force; dirty = true; return;
+      }
+      if (e.status === 400 && e.data && e.data.code === "bad_aliases") { // 别名不合法：改了再推，不自动重试
+        if (!badWarned) { badWarned = true; A.toast(e.data.error || "项目别名不合法，未同步", { duration: 8000 }); }
+        return;
       }
       if (e.status === 400 && e.data && e.data.invalid) { // 有不安全的地址：改了再推，不自动重试
         if (!badWarned) { badWarned = true; A.toast("有 " + e.data.invalid.length + " 个地址无效（只支持 http/https），未同步：" + e.data.invalid.slice(0, 2).map(function (x) { return x.where; }).join("、"), { duration: 8000 }); }
