@@ -77,8 +77,8 @@ try:
     # direct spoof against the trusted backend from a non-proxy path is impossible here (same 127.0.0.1); the unit tests cover header spoofing (test/proxy.test.js)
     # caching through the proxy
     st, hi, _ = c.req('GET', '/', headers={'Accept-Encoding': 'gzip'})
-    st, hj, _ = c.req('GET', '/nocturne.js?v=8', headers={'Accept-Encoding': 'gzip'})
-    et = hj.get('ETag'); st304, _, _ = c.req('GET', '/nocturne.js?v=8', headers={'If-None-Match': et})
+    st, hj, _ = c.req('GET', '/nocturne.js?v=9', headers={'Accept-Encoding': 'gzip'})
+    et = hj.get('ETag'); st304, _, _ = c.req('GET', '/nocturne.js?v=9', headers={'If-None-Match': et})
     font = [f for f in os.listdir(os.path.join(pub, 'fonts')) if f.endswith('.woff2')][0]
     st, hf, _ = c.req('GET', '/fonts/' + font)
     st, hc, _ = c.req('GET', '/fonts/fonts.css')
@@ -103,7 +103,7 @@ try:
         nobump = pg.evaluate('window.__rcDeploy || null')
         # proper deploy: content + ?v= bump → new script immediately
         open(js, 'w').write(orig + '\nwindow.__rcDeploy = "bumped";\n'); os.utime(js, (time.time() + 10, time.time() + 10))
-        ix = os.path.join(pub, 'index.html'); html = open(ix).read(); open(ix, 'w').write(html.replace('nocturne.js?v=8', 'nocturne.js?v=9'))
+        ix = os.path.join(pub, 'index.html'); html = open(ix).read(); open(ix, 'w').write(html.replace('nocturne.js?v=9', 'nocturne.js?v=10'))
         pg.reload(); pg.wait_for_timeout(2500)
         bumped = pg.evaluate('window.__rcDeploy || null')
         res.ok('deploy: with ?v= bump the new script runs on the next reload (index is no-store)', bumped == 'bumped', {'without bump': nobump, 'with bump': bumped})
