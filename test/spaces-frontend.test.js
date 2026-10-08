@@ -213,7 +213,7 @@ test("「恢复较早的版本」 of a pre-V2 backup (no spaces field) keeps the
   p.A.commit((s) => { p.A.spaces.model.add(s, { name: "NAS", groupIds: ["st0rage9kq2", "dl92kfa0q1z"] }); s.settings.title = "V2 标题"; }, "space-add");
   await p.idle();
   const pre = (await c.get("/api/config/backups")).json.find((x) => x.version === 7);
-  assert.ok(pre && pre.spaces === 0, "the V1.1 version (v7) is in the backup ring without spaces");
+  assert.ok(pre && pre.spaces === null, "the V1.1 version (v7) is in the backup ring without a spaces field (null, not 0)");
   const doc = p.win.document;
   doc.querySelector('[data-tab="账户"]').click();
   doc.querySelector('[data-u="bk"]').click();
