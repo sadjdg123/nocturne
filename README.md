@@ -482,3 +482,8 @@ npm run check && npm test
 ## 许可
 
 MIT
+
+## V2.0 · Midnight Edition（v2 分支，开发中）
+
+- 新版外观默认开启；设置 → 外观 → 界面 可以随时切回「经典」（只影响这台设备，数据和功能完全相同）。
+- 场景空间、删除语义、可信状态、手机合并底栏等说明见 `docs/v2.0-stage1-report.md`、`docs/v2.0-stage2-report.md`、`docs/v2.0-stage3-report.md`。
