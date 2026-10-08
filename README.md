@@ -9,7 +9,7 @@
 - **容器状态（可选）**：挂载 docker.sock 后，可以给项目「关联容器」，用容器运行状态当作在线依据。
 - **图标代理与缓存**：Iconify 图标经 NAS 代理并缓存到本地，不怕限流；字体也已自托管（子集化，约 0.8MB），不依赖 Google Fonts。
 - **自定义壁纸存成文件**：从相册选的壁纸上传到 NAS（`data/wallpapers/`），配置里只记一个引用，换设备也在。
-- **多设备冲突提示**：另一台设备刚改过配置时，会提示「已用本机版本覆盖」，并可一键「改用服务器版」。
+- **多设备冲突保护**：另一台设备在这之间改过配置时**不会互相覆盖**，而是弹出冲突面板，由你选择用哪一份；被替换的那份都能在「恢复较早的版本」里找回。配置还会定期留快照。
 - **添加到主屏幕**：带图标与 Web App Manifest，iPhone Safari「添加到主屏幕」后是全屏的「夜曲」。
 - 镜像同时支持 **x86（amd64）** 和 **ARM（arm64）** 群晖。
 
@@ -97,7 +97,8 @@
 
 ## 首次使用：创建管理员
 
-第一次打开页面时还没有任何账户，会显示「**创建管理员**」界面：输入用户名（字母、数字、`.` `_` `-`）和至少 6 位的密码即可，创建后自动登录。
+第一次打开页面时还没有任何账户，会显示「**创建管理员**」界面：输入用户名（字母、数字、`.` `_` `-`）和至少 8 位的密码即可，创建后自动登录。
+新建用户、修改 / 重置密码同样要求至少 8 位（最长 200 位，欢迎用密码管理器生成长密码）；升级前设置的 6–7 位旧密码**照常能登录**，不会被强制修改，建议有空时改长一点。
 
 > ⚠️ 在创建管理员之前，任何能访问这个地址的人都能抢先创建。请**先在内网完成初始化，再开放外网访问**。
 
@@ -110,7 +111,9 @@
   这个用户名会对**陌生的外网设备**暂停登录 15 分钟（第 5 次起每次会逐渐变慢）。只影响这一个用户名，其他账户照常登录。
   - 计数在校验密码**之前**就记上，同一 IP、同一用户名同时最多 2 个登录请求在处理，并发爆发也绕不过去（多的直接返回 429）。
   - **别人锁不住你**：从内网地址登录、或这台浏览器以前登录成功过（会留一个 1 年有效的「已知设备」HttpOnly Cookie，
-    服务器只存它的哈希），都不受用户名封禁限制，只会逐渐变慢；按 IP 的锁定照常生效。
+    服务器只存它的哈希），都不受用户名封禁限制，只会逐渐变慢。带着有效「已知设备」Cookie 的登录也不受按 IP 的锁定
+    （反向代理没配置 `TRUSTED_PROXY_CIDRS` 时，外网访客会共用代理的 IP，别人试错不该把你也锁在外面）；其他请求按 IP 锁定照常生效。
+  - 「内网地址」按**判定出的真实客户端 IP** 算（见「外网访问 / HTTPS」）；请求带着转发头、但直连的对端不是可信代理时，不算内网。
   - 修改 / 重置密码、删除用户后，该账户所有「已知设备」都会作废（改密码的这台设备会重新获得一个）。
 - 登录状态保存 30 天（使用中会自动续期）。
 
@@ -139,15 +142,30 @@
       - /var/run/docker.sock:/var/run/docker.sock:ro
 ```
 
-重新构建/启动项目后，编辑项目时「更多」里会出现「**关联容器**」输入框（带容器名称提示）。
+重新构建/启动项目后，**管理员**编辑项目时「更多」里会出现「**关联容器**」输入框（带容器名称提示）。
 当某个项目没有可检测的网址，或者 HTTP 检测失败（连接不上）时，会改用该容器是否 `running` 作为在线状态。
 没有挂载 docker.sock 时，这个功能会自动隐藏，不影响其他功能。
+
+**权限**：容器清单（`/api/docker`）和「关联容器」只对管理员开放。普通账户请求容器清单会得到 403，
+它的项目即使填了容器名，也不会用容器状态（否则填个名字就能探出 NAS 上任意容器在不在跑）。
 
 > 🔐 **安全说明**：能访问 docker.sock 就等于拥有 NAS 上 Docker 的完全控制权（相当于 root）。
 > `:ro` 只是让挂载点只读，**并不能**阻止通过这个 socket 调用 Docker API。夜曲本身只会读取容器列表
 > （`GET /containers/json`），但如果夜曲被攻破，攻击者理论上可以控制所有容器。
-> 只在你信任的网络环境里开启；更稳妥的做法是使用 [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)
-> 只开放 `CONTAINERS=1`，再把 `DOCKER_SOCK` 指向它（目前仅支持 unix socket 路径）。
+> **`:ro` 挂载的 docker.sock 依然等同 root 权限。** 只在你信任的网络环境里开启；更稳妥的做法是（可选，默认不启用）
+> 使用 [tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)，只开放 `CONTAINERS=1`
+> （其余 `POST=0`、`IMAGES=0`、`EXEC=0` 等保持默认关闭），夜曲**不挂载** docker.sock，改设
+> `DOCKER_SOCK=tcp://docker-proxy:2375`（`DOCKER_SOCK` 也支持 unix socket 路径）。代理容器不要映射端口到宿主机，只放在同一个 compose 网络里：
+>
+> ```yaml
+>   docker-proxy:
+>     image: tecnativa/docker-socket-proxy
+>     restart: unless-stopped
+>     environment:
+>       - CONTAINERS=1
+>     volumes:
+>       - /var/run/docker.sock:/var/run/docker.sock:ro
+> ```
 >
 > 容器内进程以非 root 的 `node` 用户运行；启动脚本会自动把它加入 docker.sock 所属的用户组以便读取。
 
@@ -169,13 +187,43 @@
 
 **Lucky**：Web 服务 → 添加规则 → 反向代理，目标填 `http://NAS的IP:8088`，开启 TLS 即可。
 
-后端会读取代理传来的 `X-Forwarded-Proto: https`，自动给登录 Cookie 加上 `Secure`。
+**Cloudflare Tunnel**：在 cloudflared 里把公网主机名指向 `http://nocturne:8080`（同一 Docker 网络）或 `http://NAS的IP:8088`。
 
-登录失败限流按真实客户端 IP 计算：只有直连夜曲的是**内网地址**（群晖反代、Lucky、Docker 网关）时才信任代理头，
-优先用 `X-Real-IP`（DSM / Lucky / nginx 设成 `$remote_addr`），没有再取 `X-Forwarded-For` **最右边**的地址
-（离夜曲最近的那一跳代理追加的；最左边的值客户端可以随便伪造）。多层代理时请让最外层代理设置 `X-Real-IP`。
-「内网地址不受用户名封禁」也是按这个真实客户端 IP 判断的。**反向代理一定要传 `X-Real-IP` 或 `X-Forwarded-For`**：
-否则所有外网访客在夜曲看来都是代理自己的内网地址，既会被当成内网、也会共用同一个 IP 限流名额。
+### 可信代理：`TRUSTED_PROXY_CIDRS`
+
+夜曲**默认不信任任何转发头**（`X-Forwarded-For`、`X-Real-IP`、`X-Forwarded-Proto`），一律以 TCP 直连对端的地址作为客户端 IP，
+也只按这个连接本身判断是否 HTTPS —— 这样谁都不能靠伪造请求头绕过登录限流或「内网豁免」。
+
+放在反向代理后面时，请把**代理连到夜曲时使用的地址**填进 `TRUSTED_PROXY_CIDRS`（逗号分隔，IP 或 CIDR），例如：
+
+```yaml
+    environment:
+      - TRUSTED_PROXY_CIDRS=172.17.0.1
+```
+
+只有直连对端在这个列表里时，夜曲才读取转发头：`X-Forwarded-For` 从右往左跳过列表里的代理，第一个不在列表里的地址就是真实客户端；
+没有 `X-Forwarded-For` 时用 `X-Real-IP`；`X-Forwarded-Proto: https` 才会让登录 Cookie 带上 `Secure`。
+
+**怎么知道该填什么**：先不填，经反向代理用**管理员**账号登录，打开 设置 → 账户，页面底部有一行「连接诊断」：
+
+> 连接诊断：服务器看到的直连地址 **172.17.0.1** → 识别为客户端 172.17.0.1（收到了转发头，但 172.17.0.1 不在 TRUSTED_PROXY_CIDRS 里…）
+
+「直连地址」就是要填的值（也可以访问 `/api/health`，管理员登录时会多出 `client.peer` / `client.ip` 字段；日志里也会提示一次）。
+填好、重建容器后再看：应显示「→ 识别为客户端 <你的公网 IP>（经可信代理）」。常见情况：
+
+| 部署方式 | 夜曲看到的直连地址（通常） | 建议填写 |
+| --- | --- | --- |
+| 群晖 DSM 反向代理 → `localhost:8088`（bridge 网络） | Docker bridge 网关，例如 `172.17.0.1`；自定义 compose 网络常见 `172.18.0.1`、`172.19.0.1`… | 诊断里显示的那个网关地址 |
+| 群晖 DSM 反向代理 → `NAS的IP:8088` | NAS 自己的内网 IP（如 `192.168.1.10`），有时也是网关地址 | 诊断里显示的地址 |
+| Lucky（host 网络 / 套件）| 同上：网关地址或 NAS IP | 诊断里显示的地址 |
+| Cloudflare Tunnel（cloudflared 容器在同一 compose 网络） | cloudflared 容器的 IP（如 `172.20.0.3`，重建后可能变化） | 那个网段，例如 `172.20.0.0/16`（只放代理所在的网段） |
+
+> ⚠️ 只填你自己的代理。**不要**填 `0.0.0.0/0`，也尽量不要把整个家庭局域网（如 `192.168.1.0/24`）都填进去 ——
+> 列表里的每个地址都可以替任何人「声明」客户端 IP。
+>
+> **不配置时的后果**：通过反向代理来的所有访客在夜曲看来都是同一个代理地址：按 IP 的登录限流会合并计算
+> （别人输错 5 次，其他人也要等 10 分钟；你自己的「已知设备」不受影响），「内网不受用户名封禁」的豁免对这些请求**不生效**，
+> 登录 Cookie 也不会带 `Secure`（浏览器到代理这一段仍然是 HTTPS，只是 Cookie 少了这个标记）。直接用内网 IP 访问不受影响。
 
 ---
 
@@ -187,6 +235,31 @@
 - **方式二（源码）**：用新文件覆盖 `/docker/nocturne/` 里的代码（**不要覆盖 `data/`**），然后在项目里选择 **构建** 再启动。
 
 数据都在 `data/`，更新不会丢失配置。
+
+### 版本与回滚
+
+镜像标签：`:latest`（跟随 main）、`:sha-xxxxxxx`（每个提交，不可变）、打 `v1.2.3` tag 时还有 `:1.2.3` / `:1.2`。
+CI 只有在 `npm run check && npm test` 通过后才会构建、推送镜像。**生产部署建议固定版本**，不要长期用 `:latest`：
+
+```yaml
+    image: ghcr.io/sadjdg123/nocturne:sha-1a2b3c4   # 或 :1.2.3；也可以用 @sha256:<digest> 固定到不可变摘要
+```
+
+升级（NAS 上最少步骤）：
+
+1. **先备份**：停止项目，复制整个 `data/` 文件夹（如 `cp -a data data.bak-$(date +%Y%m%d)`）。
+2. 把 compose 里的镜像标签改成新版本（记下旧标签），`sudo docker compose pull && sudo docker compose up -d`。
+3. 验证：`/api/health` 返回 `ok`；用浏览器登录，看配置、壁纸、图标和状态点是否正常；反向代理用户检查「连接诊断」。
+
+回滚：
+
+1. 停止项目；
+2. compose 里改回旧标签（或旧的 digest）；
+3. 如果新版本已经写过数据而旧版本读不了 / 需要回到升级前的状态：用第 1 步备份的 `data.bak-…` 替换 `data/`；
+4. `sudo docker compose up -d`，再次检查 `/api/health`。
+
+> 本版本的数据格式向后兼容：配置文件只是多了 `ops`（最近的操作 ID）字段、快照文件名多了类型后缀，旧版本读取时会忽略它们，
+> 所以回滚到旧镜像**一般不需要**恢复 `data/`；旧版本不认识的 `-auto` / `-local` 等快照它仍能列出和恢复。
 
 ---
 
@@ -201,12 +274,36 @@ data/
 ├── config/<用户名>.json  每个用户的配置
 ├── wallpapers/<用户名>.jpg|png|webp  自定义壁纸（从相册上传的图片）
 ├── icons/<用户名>/<id>.png|jpg|webp  上传的图标（不再被引用满 24 小时后自动清理）
-├── backup/<用户名>/<时间>.json  被覆盖 / 被替换前的配置，每人保留最近 10 份（「改用服务器版」「恢复较早的版本」用）
+├── backup/<用户名>/<时间>-v<版本>-<类型>.json  配置快照，每人最多 30 份 / 共 20MB（「恢复较早的版本」用）
 └── cache/            图标缓存（可随时删除）
 ```
 
-**找回被覆盖的配置**：设置 → 账户 → 数据 →「恢复较早的版本」，列出上面这 10 份，点「恢复」（再点一次确认）即可；
-恢复前当前版本也会先存进备份，可以再换回来。
+**配置快照**：以下时刻会把**被替换掉的那个版本**存一份快照（`BACKUP_KEEP`、`BACKUP_MAX_MB` 可调，超出从最旧的删，最新一份永远保留）：
+
+- 普通保存：距上一份快照满 **30 分钟**或相差 **20 个版本**时（定期快照）；
+- 冲突时选「用本机版覆盖」：服务器原来的版本（被覆盖前）；
+- 冲突时选「使用服务器版」：这台设备上的版本（冲突时的本机版本）；
+- 「恢复较早的版本」之前：当前版本（恢复前）。
+
+**找回**：设置 → 账户 → 数据 →「恢复较早的版本」，列表里会标出快照类型，点「恢复」（再点一次确认）即可；恢复前当前版本也会先存一份，可以再换回来。
+快照引用的上传图标不会被清理，恢复后图标仍然在。**壁纸图片不在版本历史里**：快照只记录配置 JSON（壁纸只是一个引用），
+`data/wallpapers/` 里每个账户只保存当前那一张；想保留旧壁纸请自己备份图片。
+
+### 多设备同时编辑
+
+每次保存都会带上「这份修改基于服务器的哪个版本」。如果另一台设备在这之间改过配置，NAS **不会覆盖**，而是让这台设备弹出「配置冲突」面板（同步暂停，本机修改仍保存在本机）：
+
+- **使用服务器版**：换成另一台设备的版本；本机这份先存入快照，可以随时找回。
+- **用本机版覆盖**：用这台设备的版本；服务器上的版本先存入快照。确认前若服务器又被改了，会再提示一次。
+- **导出本机版**：把本机这份下载成 JSON 文件留存（面板不关闭，之后再选上面两项之一）。
+- **稍后处理**：先关掉面板，之后可从提示里的「处理冲突」重新打开；处理之前这台设备不会同步。
+
+> 这是行为变化：旧版会直接用后保存的一方覆盖，再提示「改用服务器版」。
+
+同一份修改重复送达（页面关闭前的后台发送其实成功了、但没来得及确认，下次打开又补发）不会产生新版本，也不会误报冲突：
+每次推送带一个操作 ID，服务器记住最近 50 个。**设备本地状态不参与同步**：内网/外网切换、「最近使用」只保存在当前设备上，
+切换或点击不会产生新版本，也不会和其他设备冲突（这也意味着「最近使用」不再跨设备同步）。断网 / 页面在后台时的修改先存在本机，
+联网后自动补推；从服务器拉取时，本机有未同步的修改就不会被覆盖。
 
 备份：直接复制整个 `data/` 文件夹（Hyper Backup 勾选 `/docker/nocturne` 即可）。
 恢复：停止容器 → 放回 `data/` → 启动。
@@ -228,9 +325,15 @@ data/
 | `STATUS_INTERVAL` | `30` | 服务状态检测间隔（秒，最小 10） |
 | `PROBE_TIMEOUT` | `4` | 单次检测超时（秒） |
 | `SESSION_DAYS` | `30` | 登录有效天数 |
-| `DOCKER_SOCK` | `/var/run/docker.sock` | Docker socket 路径 |
+| `DOCKER_SOCK` | `/var/run/docker.sock` | Docker socket 路径，或 `tcp://主机:端口`（docker-socket-proxy） |
 | `PROBE_PRIVATE_ONLY` | 未设置 | 设为 `1` 时状态检测**只访问内网地址**（10/8、172.16/12、192.168/16、100.64/10、fc00::/7、回环；`.local` / `.lan` / `.home.arpa` 也必须解析到这些地址）。外网域名会显示为「未检测」。默认不限制，因为外网地址通常就是公网域名 |
 | `PROBE_TLS_STRICT` | 未设置 | 设为 `1` 时校验 HTTPS 证书；默认不校验（家里的自签名证书也算在线） |
+| `TRUSTED_PROXY_CIDRS` | 空（不信任转发头） | 可信反向代理的地址（IP / CIDR，逗号分隔）。只有直连对端在这里面时才读 `X-Forwarded-For` / `X-Real-IP` / `X-Forwarded-Proto`。见「外网访问 / HTTPS」 |
+| `PROBE_ALLOW` | 空 | **普通账户**的项目允许由 NAS 探测的目标：IP / CIDR（所有解析结果都要在范围内）、主机名或 `*.域名`、`*`，都可带 `:端口`，例如 `192.168.1.0/24,nas.lan:5000,*:8096`。空 = 普通账户的地址一律由浏览器自己检测。管理员的项目不受影响 |
+| `PROBE_MAX_PER_USER` / `PROBE_MAX_TOTAL` | `200` / `2000` | 每轮检测：每个账户最多多少个地址 / 总共多少个（多出的地址由浏览器检测） |
+| `CACHE_MAX_MB` / `CACHE_MAX_FILES` / `CACHE_TTL_DAYS` | `50` / `5000` / `30` | 图标缓存 `data/cache` 的上限与过期天数（启动后和每 6 小时清理一次，超限时提前清理；按最近使用时间淘汰；不影响 `data/icons`） |
+| `ICON_UPSTREAM` | `https://api.iconify.design/` | Iconify API 地址（可换成自建实例） |
+| `BACKUP_KEEP` / `BACKUP_MAX_MB` | `30` / `20` | 每个账户保留的配置快照份数 / 总大小 |
 
 自定义壁纸固定存放在 `DATA_DIR/wallpapers/`（单张上限 15MB，支持 JPEG / PNG / WebP；页面会先把图片缩到长边 2560px 再上传）。
 上传的图标存放在 `DATA_DIR/icons/<用户名>/`（单个上限 512KB，每个账户最多 500 个、共 50MB，超出返回 413；只收 PNG / JPEG / WebP，不收 SVG；没有透明通道的图标会存成 JPEG）。
@@ -247,6 +350,11 @@ data/
   （`169.254.0.0/16`、`fe80::/10`，包括云服务器元数据 `169.254.169.254`）、`metadata.google.internal` 等元数据主机名、
   `0.0.0.0`，以及 Nocturne 自己的端口；内嵌 IPv4 的 IPv6 地址（`::ffff:a.b.c.d`、`::a.b.c.d`、NAT64 `64:ff9b::/96`）按内嵌的 IPv4 检查。
   这些项目的状态是 `blocked`，页面上显示灰色状态点「未检测」，不计入在线 / 离线数。
+- 只看第一个响应的状态码，**不跟随重定向**（重定向目标不会被请求，也就绕不过上面的检查）。
+- **普通（非管理员）账户**：只有管理员能决定 NAS 主动去访问哪里。普通账户的项目地址，只有匹配 `PROBE_ALLOW` 时才由 NAS 探测；
+  默认（`PROBE_ALLOW` 为空）NAS 不会替普通账户发任何请求（连 DNS 都不查），这些项目改由浏览器自己检测（和 `.local` 一样），
+  也拿不到管理员对同一地址的检测结果。每轮每个账户最多 `PROBE_MAX_PER_USER`（默认 200）个地址。
+  单人使用（只有一个管理员账户）时没有任何变化。
 - `xxx.local` 在容器里解析失败时，NAS 不返回这一项，页面改用浏览器自己检测（见上面「网络说明」，建议填 IP）。
 - 全部服务都离线时，状态卡片只显示一句提示（多半是地址还没填，或当前网络到不了）；桌面版的离线芯片可以直接点开对应服务。
 - `example.com` 等保留域名（默认示例数据）直接视为离线，不发请求。
@@ -256,16 +364,17 @@ data/
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用） |
+| GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用）；管理员登录时多一个 `client` 字段（直连对端 / 识别出的客户端 IP / 是否 HTTPS），用来确定 `TRUSTED_PROXY_CIDRS` |
 | GET | `/api/me` | 当前登录状态 |
 | POST | `/api/setup` · `/api/login` · `/api/logout` | 初始化 / 登录 / 退出 |
-| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`，后写覆盖）。PUT 带 `baseVersion`；若期间另一台设备改过，返回 `overwrote: true`，被覆盖的版本进入环形备份（保留 10 份），`GET /api/config?prev=1` 取最新一份；内容和服务器相同时不算冲突、不升版本；带 `restore: true` 时先备份当前版本再覆盖。带 `replay: true`（页面打开时补推上次没确认同步的内容）且内容是服务器最近 20 个版本里的某个旧版本时，返回 `{stale: true, version}`、不写入。同一用户的写入串行执行。JSON 请求体上限 2MB（页面在配置超过 800KB 时提示） |
+| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`）。PUT 带 `baseVersion` 和 `opId`：版本对不上（另一台设备改过）→ **409** `{conflict, version, updatedAt, groups, items}`，不写入；`force: true` + `expectVersion`（409 里的版本）= 明确用本机版覆盖，服务器锁内复核后先存快照再写，又变了就再 409；重复的 `opId` → `{duplicate: true, version, current}`，不产生新版本；内容与服务器相同不升版本；`restore: true` 先存快照再写。导航地址只收 `http(s)`、搜索模板需 `http(s)` 且含 `%s`、图片地址另有白名单，新出现的不安全地址 → 400 `{invalid:[…]}`（服务器上已有的旧值放行）。旧版前端的 `replay: true`（无 `opId`）仍按内容指纹返回 `{stale: true}`。`GET /api/config?prev=1` 取最新一份快照。同一用户的写入串行执行。JSON 请求体上限 2MB |
+| POST | `/api/config/stash` | 冲突时「使用服务器版」前，把本机版本存成一份快照（不改当前配置） |
 | GET / PUT(POST) / DELETE | `/api/wallpaper` | 当前用户的自定义壁纸。PUT/POST 请求体为原始图片（`Content-Type` 为 `image/jpeg`、`image/png` 或 `image/webp`，≤15MB）；GET 带 ETag，`?v=` 版本号可长期缓存 |
-| GET | `/api/config/backups` · `/api/config?backup=<id>` | 环形备份列表（`id`、`version`、`updatedAt`、分组 / 项目数，新的在前）/ 取其中一份 |
+| GET | `/api/config/backups` · `/api/config?backup=<id>` | 快照列表（`id`、`version`、`updatedAt`、分组 / 项目数、`kind`：`auto` / `replaced` / `restore` / `local`，新的在前）/ 取其中一份 |
 | POST / PUT / GET / DELETE | `/api/icons` · `/api/icons/<id>` | 上传的图标：POST（服务器生成 id）或 PUT 指定 id，请求体为原始 PNG / JPEG / WebP（≤512KB）；配置里记 `{type:"image", value:"api/icons/<id>"}` |
 | GET | `/api/status` | `{项目ID: {up, status, code, ms, checkedAt}}`，`status` 为 `up` / `auth` / `down` / `blocked` |
-| GET | `/api/docker` | 容器列表（未挂载 docker.sock 时 `available: false`） |
-| GET | `/api/icon/<前缀>/<名称>.svg`、`/api/icon/search?query=…`、`/api/icon?q=…` | Iconify 代理（缓存在 `data/cache`） |
+| GET | `/api/docker` | 管理员：容器列表（未挂载 docker.sock 时 `available: false`）；普通账户 403 |
+| GET | `/api/icon/<前缀>/<名称>.svg`、`/api/icon/search?query=…`、`/api/icon?q=…` | Iconify 代理（缓存在 `data/cache`）。搜索参数只认 `query`（≤100 字）/`limit`/`start`/`prefixes`/`prefix`/`category`；上游响应 ≤256KB、8 秒超时、类型须为 SVG / JSON |
 | POST | `/api/password` | 修改自己的密码 |
 | GET / POST | `/api/users` | 管理员：列出 / 添加用户 |
 | POST / DELETE | `/api/users/<名字>/password` · `/api/users/<名字>` | 管理员：重置密码 / 删除用户 |
@@ -281,11 +390,25 @@ DATA_DIR=./data node server.js
 # 打开 http://localhost:8080
 ```
 
+测试（同样不需要安装依赖，用的是 Node 自带的 `node:test`，每个用例用临时 `DATA_DIR` 启动独立的服务器和本地模拟服务）：
+
+```bash
+npm run check && npm test
+```
+
 `public/index.html` 直接双击打开也能用（纯静态模式，配置只存在浏览器里，自定义壁纸和上传的图标仍以 data URL 存在本机），和旧版行为一致；
 后端相关逻辑都在 `public/nocturne.js`，只有在由 `server.js` 提供页面时才会启用。
 
 字体是子集化后的 woff2（界面里出现的所有汉字 + 约 3500 个常用字，生僻字回退到系统宋体）。
 需要重新生成时见 `tools/subset-fonts.py` 顶部说明（开发工具，需要 `pip install fonttools brotli`，运行时不需要）。
+
+## 安全说明
+
+- **链接地址白名单**：项目的内网 / 外网地址、命令面板打开的地址只允许 `http://` / `https://`；`javascript:`、`data:`、`file:`、`vbscript:`、`blob:`
+  及大小写、空白、控制字符等变体一律无效。添加 / 编辑、导入 JSON、服务器保存、页面渲染、命令面板、自定义搜索引擎都做同一套检查（`public/urlcheck.js`）。
+  旧配置里已有的无效地址不会被删除：页面上它不可点击，编辑时提示「地址无效」，改掉或清空即可。图标的 `data:image/…` 只为兼容旧配置保留（启动 / 同步时会转存成文件）。
+- 内联脚本较多，暂未启用 CSP（以后拆分脚本后再逐步加），已有 `X-Frame-Options: DENY`、`nosniff` 等响应头。
+- 建议（如果 GitHub 套餐支持）给 `main` 开启分支保护：要求 PR 检查（`test` 任务）通过、禁止强推。
 
 ## 许可
 
