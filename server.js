@@ -87,9 +87,11 @@ function writeJSON(file, data) {
 }
 async function writeFileAtomic(file, buf) {
   const tmp = file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-  const fh = await fsp.open(tmp, "w", 0o600);
-  try { await fh.writeFile(buf); await fh.sync(); } finally { await fh.close(); }
-  await fsp.rename(tmp, file);
+  try {
+    const fh = await fsp.open(tmp, "w", 0o600);
+    try { await fh.writeFile(buf); await fh.sync(); } finally { await fh.close(); }
+    await fsp.rename(tmp, file);
+  } catch (e) { await fsp.rm(tmp, { force: true }).catch(() => {}); throw e; } // 失败不留临时文件
 }
 /** 按用户串行：配置的「迁移 → 读 → 判冲突 → 备份 → 写」、壁纸 / 图标写入、删除用户都在这把锁里，避免并发交错 */
 const userLocks = new Map();
@@ -273,26 +275,35 @@ function clientInfo(req) {
   const trustedPeer = tp.list.length > 0 && tp.has(peer);
   if (trustedPeer) {
     const xf = String(h["x-forwarded-for"] || "").split(",").map((x) => x.trim()).filter(Boolean).map(cleanIp); // 不合法的段变成 ""
+    let hops = 1; // 采信到第几跳（从右数）：X-Forwarded-Proto 取同一跳的值
     if (xf.length) {
-      let pick = null;
+      let pick = null, n = 0;
       for (let i = xf.length - 1; i >= 0; i--) {
         const v = xf[i];
         if (!v) break; // 中间有一段不是合法 IP：不再往左相信
-        pick = v;
+        pick = v; n++;
         if (!tp.has(v)) break; // 第一个不可信的地址 = 客户端
       }
-      if (pick) ip = pick;
+      if (pick) { ip = pick; hops = n; }
     } else {
       const xr = cleanIp(h["x-real-ip"]);
       if (xr) ip = xr;
     }
-    const proto = String(h["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+    const proto = forwardedProto(h["x-forwarded-proto"], hops);
     if (proto) https = proto === "https";
   } else if (forwarded && !fwdWarned.has(peer) && fwdWarned.size < 50) {
     fwdWarned.add(peer);
     log("收到来自 " + peer + " 的转发头（X-Forwarded-For / X-Real-IP），但它不在 TRUSTED_PROXY_CIDRS 里，已忽略；如果这是你的反向代理，把它加进 TRUSTED_PROXY_CIDRS");
   }
   return (req._client = { peer, ip: normIp(ip), https, forwarded, trustedPeer });
+}
+/** X-Forwarded-Proto（可能是逗号列表，重复的头被 Node 用 ", " 拼起来）：和 XFF 一样从右往左数，
+ *  取第 hops 个（= 记下客户端地址的那个可信代理追加的值）；列表比 hops 短（代理是覆盖写而不是追加）时取最左边那个——
+ *  也就是可信代理写下的值。最左边那些可能是客户端伪造的，只有真的走到那一跳才会用到。 */
+function forwardedProto(raw, hops) {
+  const list = (Array.isArray(raw) ? raw.join(",") : String(raw || "")).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (!list.length) return "";
+  return list[Math.max(0, list.length - Math.max(1, hops))];
 }
 const PRIVATE_IP = /^(::1$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|f[cd][0-9a-f]{0,2}:|fe[89ab][0-9a-f]:|::ffff:(127|10|192\.168|172\.(1[6-9]|2\d|3[01])|169\.254)\.)/i;
 const cleanIp = (s) => { s = String(s || "").trim().replace(/^\[|\](:\d+)?$/g, ""); return net.isIP(s) ? normIp(s) : ""; };
@@ -430,7 +441,7 @@ function currentHash(doc) {
 }
 /** 对外返回的配置文档：不带 hist */
 const publicDoc = (d) => ({ version: d.version || 0, updatedAt: d.updatedAt || null, data: d.data || null }); // 不带 hist / ops
-async function writeConfig(name, data, opId) {
+async function writeConfig(name, data, opId, opHash) {
   const cur = readConfig(name);
   const version = (cur.version || 0) + 1;
   let hist = Array.isArray(cur.hist) ? cur.hist.slice() : [];
@@ -438,7 +449,7 @@ async function writeConfig(name, data, opId) {
   hist.push({ v: version, h: dataHash(data) });
   hist = hist.slice(-HIST_KEEP);
   let ops = Array.isArray(cur.ops) ? cur.ops.slice() : [];
-  if (opId) ops = ops.filter((o) => o.id !== opId).concat({ id: opId, v: version }).slice(-OPS_KEEP);
+  if (opId) ops = ops.filter((o) => o.id !== opId).concat({ id: opId, v: version, h: opHash || dataHash(data) }).slice(-OPS_KEEP); // h：这次推送收到的内容指纹（迁移前）
   const doc = { version, updatedAt: new Date().toISOString(), data, hist, ...(ops.length ? { ops } : {}) };
   await writeJSON(configFile(name), doc);
   configCache.delete(configFile(name));
@@ -453,16 +464,27 @@ function validConfig(d) {
 async function newUnsafeUrls(name, data, cur) {
   const bad = URLCHECK.checkConfig(data);
   if (!bad.length) return [];
-  const key = (x) => x.kind + "\n" + (typeof x.value === "string" ? x.value : JSON.stringify(x.value));
   const known = new Set();
-  const add = (d) => { for (const x of URLCHECK.checkConfig(d)) known.add(key(x)); };
+  const add = (d) => { for (const x of URLCHECK.checkConfig(d)) { const k = legacyKey(x); if (k) known.add(k); } };
   if (cur && cur.data) add(cur.data);
-  if (bad.some((x) => !known.has(key(x)))) for (const f of await listBackups(name)) add((readJSON(f, null) || {}).data);
-  return bad.filter((x) => !known.has(key(x)));
+  if (bad.some((x) => !known.has(legacyKey(x)))) for (const f of await listBackups(name)) add((readJSON(f, null) || {}).data);
+  return bad.filter((x) => { const k = legacyKey(x); return !k || !known.has(k); });
+}
+/** 旧值豁免的键：同一个对象（项目 / 搜索引擎的 id；壁纸只有一个）+ 同一个字段 + 完全相同的原值。
+ *  没有 id 的项目 / 搜索引擎不豁免（返回 null），所以新项目、别的字段、别的项目抄这个值都会被拒。 */
+function legacyKey(x) {
+  const id = x.kind === "wallpaper" ? "-" : typeof x.id === "string" || typeof x.id === "number" ? String(x.id) : "";
+  if (!id) return null;
+  return JSON.stringify([x.kind, id, x.field, typeof x.value === "string" ? x.value : JSON.stringify(x.value)]);
 }
 function unsafeError(list) {
   return Object.assign(new Error("配置里有 " + list.length + " 个不安全的地址（只支持 http:// 或 https://），未保存"),
     { status: 400, invalid: list.slice(0, 20).map((x) => ({ kind: x.kind, where: x.where, id: x.id || null, field: x.field, value: URLCHECK.show(x.value) })) });
+}
+/** 拿到用户锁之后再确认一次：账户还在、这个会话还有效（请求开始后账户可能被删 / 密码被改导致会话作废）。否则 401，什么都不写。 */
+function assertAlive(me, req) {
+  if (NO_AUTH) return;
+  if (!findUser(me.name) || (req && req.sessionKey && !sessions[req.sessionKey])) throw Object.assign(new Error("账户已不存在或登录已失效"), { status: 401 });
 }
 function allUserNames() {
   return NO_AUTH ? [NO_AUTH_USER, ...users.users.map((u) => u.name)] : users.users.map((u) => u.name);
@@ -490,10 +512,7 @@ async function storeWallpaper(name, buf) {
   const ext = sniffImage(buf);
   if (!ext) throw Object.assign(new Error("只支持 JPEG / PNG / WebP 图片"), { status: 415 });
   const file = wallpaperBase(name) + "." + ext;
-  const tmp = file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-  const fh = await fsp.open(tmp, "w", 0o600);
-  try { await fh.writeFile(buf); await fh.sync(); } finally { await fh.close(); }
-  await fsp.rename(tmp, file);
+  await writeFileAtomic(file, buf);
   for (const e of Object.keys(WP_TYPES)) if (e !== ext) await fsp.rm(wallpaperBase(name) + "." + e, { force: true });
   return ext;
 }
@@ -1068,15 +1087,34 @@ function sweepCache() {
   })().catch((e) => { log("icon cache sweep", e.message); return null; }).finally(() => { cacheSweep = null; });
   return cacheSweep;
 }
+/* 上限是「软」的：写入后按估算值判断，超了马上（异步）清理一次；清理进行中又超了，就在它结束后再跑一次。
+ * 加上上游并发上限 ICON_FETCH_MAX，峰值最多超出 CACHE_MAX_FILES 约「清理一轮期间新写入的文件数」，随后很快回落。 */
 function noteCacheWrite(bytes) {
   cacheApprox.files += 2; cacheApprox.bytes += bytes;
-  if ((cacheApprox.files > CACHE_MAX_FILES || cacheApprox.bytes > CACHE_MAX_BYTES) && !cacheSoon) cacheSoon = setTimeout(() => { cacheSoon = null; sweepCache(); }, 2000);
+  if ((cacheApprox.files > CACHE_MAX_FILES || cacheApprox.bytes > CACHE_MAX_BYTES) && !cacheSoon) {
+    cacheSoon = setTimeout(() => { cacheSoon = null; (cacheSweep || Promise.resolve()).then(() => sweepCache()); }, 0);
+  }
 }
+/* 上游并发上限：同时最多 ICON_FETCH_MAX 个不同的图标在拉取 / 写缓存，其余排队（同一个 key 本来就只拉一次） */
+const ICON_FETCH_MAX = 8;
+let iconFetching = 0;
+const iconFetchQueue = [];
+function iconSlot() {
+  if (iconFetching < ICON_FETCH_MAX) { iconFetching++; return Promise.resolve(); }
+  return new Promise((r) => iconFetchQueue.push(r));
+}
+function iconSlotDone() { const next = iconFetchQueue.shift(); if (next) next(); else iconFetching--; }
 /** 拉上游并写缓存（同一个 key 并发只拉一次）；返回 {status, type, body} */
 function fetchIcon(key, base, upstreamUrl, isSvg) {
   let p = iconInflight.get(key);
   if (p) return p;
   p = (async () => {
+    await iconSlot();
+    try { return await fetchAndStore(); } finally { iconSlotDone(); }
+  })().finally(() => iconInflight.delete(key));
+  iconInflight.set(key, p);
+  return p;
+  async function fetchAndStore() {
     const r = await fetchUpstream(upstreamUrl, isSvg ? "image/svg+xml" : "application/json");
     if (r.status !== 200 && r.status !== 404) throw Object.assign(new Error("upstream http " + r.status), { upstream: true });
     const status = r.status === 200 ? 200 : 404;
@@ -1088,9 +1126,7 @@ function fetchIcon(key, base, upstreamUrl, isSvg) {
       noteCacheWrite(body.length + 200);
     } catch (e) { log("icon cache write", e.message); }
     return { status, type, body };
-  })().finally(() => iconInflight.delete(key));
-  iconInflight.set(key, p);
-  return p;
+  }
 }
 async function serveIcon(req, res, rest, search) {
   if (rest.length > 200) return json(res, 400, { error: "不支持的图标请求" });
@@ -1234,7 +1270,7 @@ async function api(req, res, url) {
     const b = await readBody(req);
     if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
     const r = await withUserLock(me.name, async () => {
-      if (!NO_AUTH && !findUser(me.name)) throw Object.assign(new Error("未登录"), { status: 401 });
+      assertAlive(me, req);
       const cur = readConfig(me.name);
       const unsafe = await newUnsafeUrls(me.name, b.data, cur);
       if (unsafe.length) throw unsafeError(unsafe);
@@ -1274,17 +1310,25 @@ async function api(req, res, url) {
        *  - 内容与服务器当前版本相同：不算冲突、不升版本。 */
       const b = await readBody(req); // 读请求体不占锁
       if (!validConfig(b.data)) return json(res, 400, { error: "配置格式不正确" });
+      // baseVersion 必填：非负整数。缺失 / 不合法 → 400（不能靠省略它绕过冲突检测）
+      if (!Number.isSafeInteger(b.baseVersion) || b.baseVersion < 0) return json(res, 400, { error: "缺少或不合法的 baseVersion", code: "bad_base_version" });
       const opId = typeof b.opId === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(b.opId) ? b.opId : null;
+      const inHash = dataHash(b.data); // 收到的内容指纹（迁移前算，和 opId 一起记下）
       const r = await withUserLock(me.name, async () => {
-        if (!NO_AUTH && !findUser(me.name)) throw Object.assign(new Error("未登录"), { status: 401 }); // 账户刚被删除
+        assertAlive(me, req); // 账户刚被删除 / 会话已作废
         const cur = readConfig(me.name), curV = cur.version || 0;
         if (opId && Array.isArray(cur.ops)) {
           const hit = cur.ops.find((o) => o.id === opId);
-          if (hit) return { version: hit.v, current: curV, updatedAt: cur.updatedAt, duplicate: true, unchanged: true };
+          if (hit) {
+            // 同一个 opId 只有内容也完全一样才算重复推送；旧记录没有指纹时用 hist 里那个版本的指纹核对，核对不了一律不认
+            const h = hit.h || ((Array.isArray(cur.hist) && cur.hist.find((x) => x.v === hit.v)) || {}).h;
+            if (h && h === inHash) return { version: hit.v, current: curV, updatedAt: cur.updatedAt, duplicate: true, unchanged: true };
+            return { status: 422, error: "这个 opId 已用于另一份内容，未保存", code: "opid_mismatch", version: curV, unchanged: true };
+          }
         }
         const unsafe = await newUnsafeUrls(me.name, b.data, cur);
         if (unsafe.length) throw unsafeError(unsafe);
-        const mismatch = !!cur.data && b.baseVersion != null && +b.baseVersion !== curV;
+        const mismatch = !!cur.data && b.baseVersion !== curV; // 服务器还没有配置时（首次同步 / 数据目录被清空）任何版本号都可以写
         // 旧版前端（没有 opId）的补推：内容是服务器早先接受过、后来又被别的设备改掉的旧版本 → 不写入，让它拉最新版（指纹只作辅助判断）
         if (!opId && b.replay === true && b.restore !== true && mismatch) {
           const h = dataHash(b.data);
@@ -1308,7 +1352,7 @@ async function api(req, res, url) {
           else if (b.restore === true) await addBackup(me.name, cur, "restore");
           else if (await snapshotDue(me.name, cur)) await addBackup(me.name, cur, "auto");
         }
-        const doc = await writeConfig(me.name, b.data, opId);
+        const doc = await writeConfig(me.name, b.data, opId, inHash);
         await cleanupIcons(me.name).catch((e) => log("icon cleanup", me.name, e.message));
         return { version: doc.version, updatedAt: doc.updatedAt, overwrote: forced, ...(forced ? { forced: true } : {}), ...(migrated ? { migrated: true } : {}) };
       });
@@ -1338,11 +1382,11 @@ async function api(req, res, url) {
       // 只收原始图片：跨站表单发不出 image/* 的 Content-Type，配合 SameSite=Lax 防 CSRF
       if (!/^image\/(jpeg|png|webp)\b/.test(ct)) return json(res, 415, { error: "需要 image/jpeg、image/png 或 image/webp" });
       const buf = await readRaw(req, MAX_WALLPAPER);
-      const ext = await withUserLock(me.name, () => storeWallpaper(me.name, buf));
+      const ext = await withUserLock(me.name, () => { assertAlive(me, req); return storeWallpaper(me.name, buf); });
       const v = Date.now();
       return json(res, 200, { ok: true, v, type: WP_TYPES[ext], size: buf.length, url: "api/wallpaper?v=" + v });
     }
-    if (m === "DELETE") { await withUserLock(me.name, () => removeWallpaper(me.name)); return json(res, 200, { ok: true }); }
+    if (m === "DELETE") { await withUserLock(me.name, () => { assertAlive(me, req); return removeWallpaper(me.name); }); return json(res, 200, { ok: true }); }
     return json(res, 405, { error: "Method Not Allowed" });
   }
 
@@ -1356,7 +1400,7 @@ async function api(req, res, url) {
       if (!/^image\/(jpeg|png|webp)\b/.test(ct)) return json(res, 415, { error: "需要 image/jpeg、image/png 或 image/webp（不支持 SVG）" });
       const buf = await readRaw(req, MAX_ICON);
       const nid = id || newIconId();
-      const ext = await withUserLock(me.name, async () => { await checkIconQuota(me.name, nid, buf.length); return storeIcon(me.name, nid, buf); });
+      const ext = await withUserLock(me.name, async () => { assertAlive(me, req); await checkIconQuota(me.name, nid, buf.length); return storeIcon(me.name, nid, buf); });
       return json(res, 200, { ok: true, id: nid, type: WP_TYPES[ext], size: buf.length, url: "api/icons/" + nid });
     }
     if (!ICON_ID.test(id)) return json(res, id ? 400 : 405, { error: id ? "图标 id 不合法" : "Method Not Allowed" });
@@ -1368,7 +1412,7 @@ async function api(req, res, url) {
       if (req.headers["if-none-match"] === etag) { res.writeHead(304, headers); return res.end(); }
       return send(res, 200, fs.readFileSync(f.file), headers);
     }
-    if (m === "DELETE") { await withUserLock(me.name, () => removeIcon(me.name, id)); return json(res, 200, { ok: true }); }
+    if (m === "DELETE") { await withUserLock(me.name, () => { assertAlive(me, req); return removeIcon(me.name, id); }); return json(res, 200, { ok: true }); }
     return json(res, 405, { error: "Method Not Allowed" });
   }
 
@@ -1507,5 +1551,5 @@ function main() {
 }
 if (require.main === module) main();
 else module.exports = { // 供 test/ 下的单元测试使用；作为程序运行时不导出
-  normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo,
+  normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo, forwardedProto, legacyKey,
 };
