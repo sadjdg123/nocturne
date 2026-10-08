@@ -2,7 +2,7 @@
  * 夜曲 Nocturne · 场景空间（V2.0）数据模型。前端（window.NocturneSpaces）与 server.js（require）共用，零依赖。
  *
  * 唯一的项目来源仍然是 data.groups[].items[]。空间只保存「空间信息 + 引用 + 显示配置」，从不复制项目：
- *   data.spaces = [{ id, name, groupIds: [分组 id…], itemIds?: [项目 id…], theme?, density? }]
+ *   data.spaces = [{ id, name, groupIds: [分组 id…], itemIds?: [项目 id…], excludeItemIds?: [项目 id…], theme?, density? }]
  *   - 「全部」（id = "all"）是虚拟空间：不存进 data.spaces、不可删除，永远展示全部分组和全部项目。
  *   - data.spaces 不存在 = 只有「全部」（V1.1 及更早的配置）。本模块从不主动给配置加上 spaces 字段。
  *   - 空间顺序 = data.spaces 数组顺序。
@@ -11,6 +11,10 @@
  *   - groupIds：整组引用（组内现在和将来的项目都在这个空间里）。
  *   - itemIds：单个项目的引用（不必带上整组）；项目移到别的分组后引用照样有效（按 id 找）。
  *     单独引用的项目显示在它当前所在分组的标题下（该分组只显示被引用的那几个项目）。
+ *   - excludeItemIds（V2.0 阶段 3，schema 2）：在这个空间里「隐藏」整组包含的分组里的某几个项目（只改关系，不删项目）。
+ *     可见规则：项目可见 ⇔（它所在分组整组在空间里 且 不在 excludeItemIds）或 它在 itemIds 里。itemIds 与 excludeItemIds 互斥
+ *     （单独加入会取消隐藏；隐藏会取消单独加入）。排除只对「整组包含」的分组有意义：项目被删、或它所在分组不再整组在空间里时，
+ *     prune() 清掉这条排除。
  *   - 复制项目会得到新 id，新项目不会自动加进任何 itemIds（若它所在分组整组在空间里，则随分组出现）。
  *   - 删除项目 / 分组后，悬空的引用由 prune() 清掉；删除空间只删这条空间记录，不动分组、项目、图标、壁纸。
  * 当前选中的空间是本机状态：存在 localStorage 的 nocturne.space:<账户> 里，不在 data 里、不参与同步、不产生版本号。
@@ -41,8 +45,11 @@
   var THEMES = ["default", "dawn", "dusk", "frost"]; // 默认（中性午夜蓝）/ 晨光琥珀 / 深靛紫 / 冷霜青
   var DENSITIES = ["comfortable", "poster", "compact"]; // 舒适 / 海报卡 / 紧凑行
   var CTRL = /[\u0000-\u001f\u007f\u2028\u2029]/;
-  var SCHEMA = 1; // 本模块认识的空间 schema 版本
-  var KNOWN_BY_VERSION = { 1: ["id", "name", "groupIds", "itemIds", "theme", "density"] }; // 每个 schema 版本认识的空间字段
+  var SCHEMA = 2; // 本模块认识的空间 schema 版本（2 = 阶段 3 加了 excludeItemIds）
+  var KNOWN_BY_VERSION = { // 每个 schema 版本认识的空间字段
+    1: ["id", "name", "groupIds", "itemIds", "theme", "density"],
+    2: ["id", "name", "groupIds", "itemIds", "excludeItemIds", "theme", "density"]
+  };
   var EXT_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,31}$/, EXT_SUBKEY_RE = /^[A-Za-z0-9_-]{1,32}$/;
   var EXT_MAX_KEYS = 16, EXT_MAX_BYTES = 4096, EXT_MAX_DEPTH = 4, EXT_MAX_STR = 1024, EXT_MAX_ARR = 64, EXT_MAX_OBJ = 32;
 
@@ -129,9 +136,9 @@
       else if (CTRL.test(s.name)) bad.push({ where: w, problem: "名称含控制字符" });
       else if (!lenient && (nameKey(s.name) === ALL_NAME || has(names, nameKey(s.name)))) bad.push({ where: w, problem: "名称「" + s.name.trim() + "」重复" });
       else names[nameKey(s.name)] = true;
-      ["groupIds", "itemIds"].forEach(function (f) {
+      ["groupIds", "itemIds", "excludeItemIds"].forEach(function (f) {
         var v = s[f];
-        if (v === undefined && f === "itemIds") return;
+        if (v === undefined && f !== "groupIds") return;
         if (!Array.isArray(v)) { bad.push({ where: w, problem: f + " 必须是字符串数组" }); return; }
         if (v.length > MAX_REFS) { bad.push({ where: w, problem: f + " 最多 " + MAX_REFS + " 个" }); return; }
         for (var j = 0; j < v.length; j++) if (typeof v[j] !== "string" || !v[j] || v[j].length > REF_MAX || CTRL.test(v[j])) { bad.push({ where: w, problem: f + " 里有不合法的 id" }); return; }
@@ -166,9 +173,14 @@
     var ix = index(data), n = 0;
     data.spaces.forEach(function (s) {
       if (!isObj(s)) return;
-      ["groupIds", "itemIds"].forEach(function (f) {
+      ["groupIds", "itemIds", "excludeItemIds"].forEach(function (f) {
         if (!Array.isArray(s[f])) return;
         var next = cleanRefs(s[f], f === "groupIds" ? ix.groups : ix.items);
+        if (f === "excludeItemIds") { /* 排除只对整组包含的分组有意义；与 itemIds 互斥（单独加入优先） */
+          var whole = setOf(Array.isArray(s.groupIds) ? s.groupIds.filter(function (x) { return typeof x === "string"; }) : []);
+          var pinned = setOf(Array.isArray(s.itemIds) ? s.itemIds.filter(function (x) { return typeof x === "string"; }) : []);
+          next = next.filter(function (id) { var g = ix.items[id]; return g && has(whole, String(g.id)) && !has(pinned, id); });
+        }
         if (next.length !== s[f].length) { n += s[f].length - next.length; s[f] = next; }
       });
     });
@@ -201,6 +213,7 @@
         else if (key === "name") x.name = name;
         else if (key === "groupIds") x.groupIds = Array.isArray(s.groupIds) ? s.groupIds.slice(0, MAX_REFS) : [];
         else if (key === "itemIds") { if (Array.isArray(s.itemIds)) x.itemIds = s.itemIds.slice(0, MAX_REFS); }
+        else if (key === "excludeItemIds") { if (Array.isArray(s.excludeItemIds)) x.excludeItemIds = s.excludeItemIds.slice(0, MAX_REFS); }
         else if (key === "theme") { if (THEMES.indexOf(s.theme) > -1) x.theme = s.theme; }
         else if (key === "density") { if (DENSITIES.indexOf(s.density) > -1) x.density = s.density; }
         else if (!has(badExt, key)) {
@@ -231,14 +244,18 @@
     var groups = isObj(data) && Array.isArray(data.groups) ? data.groups : [];
     var s = get(data, id);
     if (!s) return groups.filter(isObj).map(function (g) { return { group: g, items: Array.isArray(g.items) ? g.items : [], whole: true }; });
-    var gs = dict(), is = dict();
+    var gs = dict(), is = dict(), ex = dict();
     (Array.isArray(s.groupIds) ? s.groupIds : []).forEach(function (x) { if (typeof x === "string") gs[x] = true; });
     (Array.isArray(s.itemIds) ? s.itemIds : []).forEach(function (x) { if (typeof x === "string") is[x] = true; });
+    (Array.isArray(s.excludeItemIds) ? s.excludeItemIds : []).forEach(function (x) { if (typeof x === "string") ex[x] = true; });
     var out = [];
     groups.forEach(function (g) {
       if (!isObj(g)) return;
       var items = Array.isArray(g.items) ? g.items : [];
-      if (g.id != null && has(gs, String(g.id))) out.push({ group: g, items: items, whole: true });
+      if (g.id != null && has(gs, String(g.id))) {
+        var shown = items.filter(function (i) { return !(isObj(i) && i.id != null && has(ex, String(i.id)) && !has(is, String(i.id))); });
+        out.push({ group: g, items: shown, whole: true, hidden: items.length - shown.length });
+      }
       else {
         var pick = items.filter(function (i) { return isObj(i) && i.id != null && has(is, String(i.id)); });
         if (pick.length) out.push({ group: g, items: pick, whole: false });
@@ -389,8 +406,46 @@
   function pin(data, id, itemId, on) {
     var s = get(data, id); if (!s) throw err("空间不存在");
     var l = Array.isArray(s.itemIds) ? s.itemIds.filter(function (x) { return x !== itemId; }) : [];
-    if (on !== false) l.push(itemId);
+    if (on !== false) { l.push(itemId); unhide(data, id, itemId); }
     s.itemIds = l.slice(0, MAX_REFS); prune(data);
+  }
+  /** 取消隐藏（整组包含的分组里被排除的项目重新出现）。没有 excludeItemIds 字段时不加字段。返回是否有变化 */
+  function unhide(data, id, itemId) {
+    var s = get(data, id); if (!s || !Array.isArray(s.excludeItemIds)) return false;
+    var l = s.excludeItemIds.filter(function (x) { return x !== String(itemId); });
+    if (l.length === s.excludeItemIds.length) return false;
+    if (l.length) s.excludeItemIds = l; else delete s.excludeItemIds;
+    return true;
+  }
+  /**
+   * 「从当前空间移除」一个项目会怎样（界面先说清楚再动手）：
+   *   { visible, pinned: 是否单独加入, viaGroup: 所在分组是否整组在空间里, group: 所在分组对象 | null,
+   *     action: "unpin"（只取消单独加入就会消失）| "hide"（要加一条排除才会消失；同时取消单独加入）| "none"（本来就看不见）}
+   */
+  function removal(data, id, itemId) {
+    var s = get(data, id), ix = index(data), g = ix.items[String(itemId)] || null;
+    if (!s) return { visible: true, pinned: false, viaGroup: true, group: g, action: "none" };
+    var pinned = Array.isArray(s.itemIds) && s.itemIds.indexOf(String(itemId)) > -1;
+    var viaGroup = !!g && Array.isArray(s.groupIds) && s.groupIds.indexOf(String(g.id)) > -1;
+    var visible = itemVisible(data, id, itemId);
+    return { visible: visible, pinned: pinned, viaGroup: viaGroup, group: g, action: !visible ? "none" : viaGroup ? "hide" : "unpin" };
+  }
+  /** 从空间里移除一个项目（只改关系）：取消单独加入；分组整组在空间里时再加一条排除（excludeItemIds）。返回 removal() 的判断 */
+  function hide(data, id, itemId) {
+    var r = removal(data, id, itemId), s = get(data, id); if (!s) throw err("空间不存在");
+    itemId = String(itemId);
+    if (Array.isArray(s.itemIds) && s.itemIds.indexOf(itemId) > -1) s.itemIds = s.itemIds.filter(function (x) { return x !== itemId; });
+    if (r.viaGroup) {
+      var l = Array.isArray(s.excludeItemIds) ? s.excludeItemIds.filter(function (x) { return x !== itemId; }) : [];
+      l.push(itemId); s.excludeItemIds = l.slice(0, MAX_REFS);
+      if (!versionOk(data.spacesVersion) || data.spacesVersion < SCHEMA) data.spacesVersion = SCHEMA; // 用到了 schema 2 的字段
+    }
+    prune(data);
+    return r;
+  }
+  /** 哪些自定义空间里看得见这个项目（「从所有空间删除」的说明用；不含「全部」） */
+  function spacesWith(data, itemId) {
+    return list(data).filter(function (s) { return itemVisible(data, s.id, itemId); });
   }
   function setLook(data, id, look) {
     var s = get(data, id); if (!s) throw err("空间不存在");
@@ -418,6 +473,7 @@
     check: check, prune: prune, normalize: normalize, nameProblem: nameProblem,
     list: list, get: get, resolve: resolve, view: view, membership: membership, itemVisible: itemVisible, groupInSpace: groupInSpace, stats: stats, reorder: reorder,
     add: add, rename: rename, remove: remove, move: move, setGroups: setGroups, pin: pin, setLook: setLook,
+    unhide: unhide, removal: removal, hide: hide, spacesWith: spacesWith,
     selKey: selKey, readSel: readSel, writeSel: writeSel, SEL_PREFIX: SEL_PREFIX
   };
 });
