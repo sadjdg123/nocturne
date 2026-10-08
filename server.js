@@ -464,26 +464,59 @@ function aliasesError(d) {
   if (!bad.length) return null;
   return { error: "有 " + bad.length + " 个项目的别名不合法（" + bad[0].where + "：" + bad[0].problem + "），未保存", code: "bad_aliases", aliases: bad.slice(0, 20) };
 }
-/** 场景空间 data.spaces（V2.0，可选）：结构不合法 → 400 bad_spaces（数量 ≤24、名称 ≤24 字且不重名、id 格式、引用是字符串数组且 ≤500、theme/density 枚举、无未知字段）。
+/** 场景空间 data.spaces（V2.0，可选）：结构不合法 → 400 bad_spaces（数量 ≤24、名称 ≤24 字且不重名、id 格式、引用是字符串数组且 ≤500、theme/density 枚举、
+ *  不认识的字段必须是限制内的「扩展字段」（较新版本加的，见 spaces.js 顶部：字段名规则、值类型、≤4 层、每个空间 ≤16 个 / ≤4096 字节）、spacesVersion 为 1–999 的整数）。
  *  引用了不存在的分组 / 项目不算错误：保存前由 reconcileSpaces 清掉（见下）。 */
 function spacesError(d) {
   const bad = SPACES.check(d);
   if (!bad.length) return null;
   return { error: "空间定义不合法（" + bad[0].where + "：" + bad[0].problem + "），未保存", code: "bad_spaces", spaces: bad.slice(0, 20) };
 }
-/** 保存前整理空间（必须在 withUserLock 里、拿到当前版本 cur 之后调用）。原地修改 body.data，返回 {kept, pruned}。
+/** 请求里 caps 声明的空间 schema 版本："spaces:<N>" → N；只有 "spaces"（V2.0 阶段 1 前端）→ 1；没有 → 0（V1.1 前端，不认识空间） */
+function capsSpacesVersion(caps) {
+  if (!Array.isArray(caps)) return 0;
+  let v = 0;
+  for (const c of caps) {
+    if (c === "spaces") v = Math.max(v, 1);
+    else if (typeof c === "string") { const m = /^spaces:(\d{1,3})$/.exec(c); if (m) v = Math.max(v, +m[1] || 1); }
+  }
+  return v;
+}
+/** 保存前整理空间（必须在 withUserLock 里、拿到当前版本 cur 之后调用）。原地修改 body.data，返回 {kept, pruned, restored}。
  *  1. 旧版前端保护：请求体没有 caps:["spaces"]（V1.1 前端不认识空间）且 data 里没有 spaces 字段，而服务器当前版本有 spaces 字段
  *     → 沿用服务器上的空间定义（kept）。包括 spaces: []（用户明确删光了自定义空间）：照样保留空数组，不会退回「没有这个字段」。
  *     V2 前端总是带 caps，所以它明确删光空间 / 恢复默认时不会被「保护」回来。
- *  2. 悬空引用规则：groupIds / itemIds 里指向已不存在的分组 / 项目的 id 一律删掉（pruned = 删掉的个数）；空间本身保留（可以是空空间）。 */
+ *  2. 向前兼容（较旧的 V2 客户端不得悄悄丢掉较新版本加的空间字段）：客户端在 caps 里声明自己的空间 schema 版本 N（见 capsSpacesVersion）。
+ *     N 不比服务器新时，服务器知道它认识哪些字段（SPACES.knownKeys(N)）：同一个空间（按 id）在服务器当前版本里有、而它不认识、请求里又没有的字段
+ *     → 不可能是它有意删的，照原样补回（restored = 补回的字段数）。补回后若超出扩展字段限制，这个空间就不补（不报错）。
+ *     N 比服务器还新（服务器不知道它认识什么）→ 完全以它为准。删掉整个空间不受影响（按 id 找不到就不补）。
+ *     data.spacesVersion 只升不降：请求里没有或更低时沿用服务器上的值。
+ *  3. 悬空引用规则：groupIds / itemIds 里指向已不存在的分组 / 项目的 id 一律删掉（pruned = 删掉的个数）；空间本身保留（可以是空空间）。 */
 function reconcileSpaces(body, cur) {
-  const data = body.data, aware = Array.isArray(body.caps) && body.caps.includes("spaces");
-  let kept = false;
-  if (!aware && data.spaces === undefined && cur && cur.data && Array.isArray(cur.data.spaces)) { // [] 也算「有」：区分「删光了」和「从没有过」
-    data.spaces = JSON.parse(JSON.stringify(cur.data.spaces));
+  const data = body.data, cv = capsSpacesVersion(body.caps), aware = cv > 0;
+  const prev = cur && cur.data && typeof cur.data === "object" ? cur.data : null;
+  let kept = false, restored = 0;
+  if (!aware && data.spaces === undefined && prev && Array.isArray(prev.spaces)) { // [] 也算「有」：区分「删光了」和「从没有过」
+    data.spaces = JSON.parse(JSON.stringify(prev.spaces));
     kept = true;
   }
-  return { kept, pruned: SPACES.prune(data) };
+  const known = aware ? SPACES.knownKeys(cv) : null;
+  if (known && Array.isArray(data.spaces) && prev && Array.isArray(prev.spaces)) {
+    const byId = new Map();
+    for (const t of prev.spaces) if (t && typeof t === "object" && typeof t.id === "string") byId.set(t.id, t);
+    data.spaces.forEach((s, i) => {
+      const t = s && typeof s === "object" && typeof s.id === "string" ? byId.get(s.id) : null;
+      if (!t) return;
+      const cand = JSON.parse(JSON.stringify(s)); let n = 0; // JSON 复制：键名原样（不会经过 __proto__ setter）
+      for (const k of Object.keys(t)) if (!Object.prototype.hasOwnProperty.call(known, k) && !Object.prototype.hasOwnProperty.call(s, k)) { cand[k] = JSON.parse(JSON.stringify(t[k])); n++; }
+      if (n && !SPACES.extProblems(cand, SPACES.knownKeys(SPACES.SCHEMA)).length) { data.spaces[i] = cand; restored += n; }
+    });
+  }
+  if (prev && typeof prev.spacesVersion === "number" && (kept || aware) && Array.isArray(data.spaces) &&
+      !(typeof data.spacesVersion === "number" && data.spacesVersion >= prev.spacesVersion)) {
+    data.spacesVersion = prev.spacesVersion; restored++;
+  }
+  return { kept, pruned: SPACES.prune(data), restored };
 }
 function validConfig(d) {
   return d && typeof d === "object" && !Array.isArray(d) && d.settings && typeof d.settings === "object" && Array.isArray(d.groups) &&
@@ -1372,7 +1405,8 @@ async function api(req, res, url) {
           }
         }
         const sp = reconcileSpaces(b, cur); // 旧版前端保存时沿用服务器上的空间定义 + 清悬空引用（改了内容 → migrated，前端会重新拉取）
-        const spFix = sp.kept || sp.pruned > 0, spInfo = spFix ? { migrated: true, ...(sp.kept ? { spacesKept: true } : {}), ...(sp.pruned ? { spacesPruned: sp.pruned } : {}) } : {};
+        const spFix = sp.kept || sp.pruned > 0 || sp.restored > 0;
+        const spInfo = spFix ? { migrated: true, ...(sp.kept ? { spacesKept: true } : {}), ...(sp.pruned ? { spacesPruned: sp.pruned } : {}), ...(sp.restored ? { spacesRestored: sp.restored } : {}) } : {};
         const same = () => cur.data && (JSON.stringify(cur.data) === JSON.stringify(b.data) || dataHash(b.data) === currentHash(cur));
         if (same()) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, ...spInfo };
         const forced = mismatch && b.force === true && b.expectVersion != null && +b.expectVersion === curV;
