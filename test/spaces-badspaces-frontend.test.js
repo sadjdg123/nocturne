@@ -40,8 +40,9 @@ async function pokeEverything(p) {
   win.dispatchEvent(new win.Event("online"));
   win.dispatchEvent(new win.Event("pagehide"));
 }
-/** 能通过 commit 的 prune、但服务器结构校验会拒收的空间（未知字段——例如更新版本加的字段） */
-const BAD = { id: "s-bad", name: "坏空间", groupIds: ["chips00daily"], color: "red" };
+/** 能通过 commit 的 prune、但服务器结构校验会拒收的空间。阶段 2 起合法的扩展字段会被放行（向前兼容），
+ *  所以这里用畸形的扩展字段（脚本地址）来模拟「服务器拒收」 */
+const BAD = { id: "s-bad", name: "坏空间", groupIds: ["chips00daily"], color: "javascript:red" };
 
 test("400 bad_spaces: Chinese toast, local edit + dirty flag kept, no automatic re-push over simulated time", opt, async (t) => {
   const { srv, c } = await seeded(t, serverData());
@@ -59,7 +60,7 @@ test("400 bad_spaces: Chinese toast, local edit + dirty flag kept, no automatic 
   assert.equal(p.win.document.getElementById("x-toast-act").textContent, "重试");
   // local state kept: nothing reverted, cache + dirty flag persisted, server untouched
   deq(p.A.state.spaces, [BAD]);
-  assert.ok(p.storage()["yeqv.v1"].includes('"color":"red"'), "local cache keeps the edit");
+  assert.ok(p.storage()["yeqv.v1"].includes('"color":"javascript:red"'), "local cache keeps the edit");
   assert.equal(p.storage()["nocturne.dirty"], "1", "dirty marker kept");
   assert.equal((await c.get("/api/config")).json.version, 7);
   // simulated intervals: ~5 minutes of page time (20+ cycles of the 15 s retry), plus every push trigger
