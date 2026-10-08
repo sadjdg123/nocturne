@@ -1,6 +1,6 @@
 "use strict";
 /* V2.0 阶段 2 · 向前兼容（用户决定）：较旧的 V2 客户端不得悄悄丢掉较新版本加的空间字段。
- * 模拟一个「V2.1 客户端」：给空间加扩展字段（accent 对象、pinnedAt 数字、mood 字符串）并写 spacesVersion: 2，
+ * 模拟一个「更新的客户端」（schema 3；本版本为 schema 2）：给空间加扩展字段（accent 对象、pinnedAt 数字、mood 字符串）并写 spacesVersion: 3，
  * 让它经过本 V2 客户端（模型 / jsdom 真实页面：载入 → 改名 / 勾选分组 / 撤销 / 导出）和本 V2 服务端（存储、补回、限制）后原样回来。 */
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -17,8 +17,8 @@ const deq = (a, b, m) => assert.deepEqual(plain(a), plain(b), m);
 const G = FIX.groups.map((g) => g.id);
 /** V2.1 客户端写的空间（扩展字段夹在已知字段中间，键顺序也要保住） */
 const V21 = () => ({ id: "s-fun", name: "娱乐", accent: { hue: 268, glow: [0.2, 0.6], label: "夜紫" }, groupIds: [G[0]], pinnedAt: 1760000000, theme: "dusk", mood: "calm" });
-const V21_DATA = () => Object.assign(serverData(), { spacesVersion: 2, spaces: [V21(), { id: "s-nas", name: "NAS", groupIds: [G[1]] }] });
-const CAPS20 = ["spaces", "spaces:1"], CAPS21 = ["spaces", "spaces:2"];
+const V21_DATA = () => Object.assign(serverData(), { spacesVersion: 3, spaces: [V21(), { id: "s-nas", name: "NAS", groupIds: [G[1]] }] });
+const CAPS20 = ["spaces", "spaces:1"], CAPS21 = ["spaces", "spaces:3"];
 
 test("model: normalize / rename / setGroups / pin / move / prune keep extension fields verbatim (values and key order)", () => {
   const d = V21_DATA(), before = JSON.stringify(d.spaces);
@@ -32,8 +32,8 @@ test("model: normalize / rename / setGroups / pin / move / prune keep extension 
   const s = S.get(d, "s-fun");
   deq(s.accent, V21().accent); assert.equal(s.pinnedAt, 1760000000); assert.equal(s.mood, "calm");
   deq(Object.keys(s).slice(0, 5), ["id", "name", "accent", "groupIds", "pinnedAt"], "key order kept");
-  assert.equal(d.spacesVersion, 2, "spacesVersion untouched");
-  S.add(d, { name: "日常" }); assert.equal(d.spacesVersion, 2, "add never lowers a newer spacesVersion");
+  assert.equal(d.spacesVersion, 3, "spacesVersion untouched");
+  S.add(d, { name: "日常" }); assert.equal(d.spacesVersion, 3, "add never lowers a newer spacesVersion");
   const e = serverData(); S.add(e, { name: "x" }); assert.equal(e.spacesVersion, S.SCHEMA, "first space writes this client's schema version");
   // malformed extension fields are dropped by normalize (the server would reject them), valid ones kept
   const m = serverData();
@@ -46,7 +46,7 @@ test("model: normalize / rename / setGroups / pin / move / prune keep extension 
   const b = serverData(); b.spaces = [{ id: "s1", name: "A", groupIds: [] }];
   for (let i = 0; i < 20; i++) b.spaces[0]["k" + i] = i;
   S.normalize(b); assert.equal(Object.keys(b.spaces[0]).length, 3 + 16); assert.deepEqual(S.check(b), []);
-  assert.equal(S.knownKeys(1).name, true); assert.equal(S.knownKeys(2), null, "a newer schema is unknown to this client");
+  assert.equal(S.knownKeys(1).name, true); assert.equal(S.knownKeys(1).excludeItemIds, undefined); assert.equal(S.knownKeys(2).excludeItemIds, true); assert.equal(S.knownKeys(3), null, "a newer schema is unknown to this client");
 });
 
 async function boot(t) {
@@ -63,7 +63,7 @@ test("server: V2.1 fields are stored verbatim; an older V2 client that drops the
   assert.equal(r0.status, 200);
   let g = await cur(a);
   assert.equal(JSON.stringify(g.data.spaces), JSON.stringify(V21_DATA().spaces), "stored byte-identical");
-  assert.equal(g.data.spacesVersion, 2);
+  assert.equal(g.data.spacesVersion, 3);
   // (1) an older V2 client (stage 1: caps ["spaces"], its normalize stripped unknown keys) renames the space
   const stripped = structuredClone(g.data);
   stripped.spaces[0] = { id: "s-fun", name: "娱乐2", groupIds: [G[0]], theme: "dusk" }; delete stripped.spacesVersion;
@@ -72,7 +72,7 @@ test("server: V2.1 fields are stored verbatim; an older V2 client that drops the
   g = await cur(a);
   const s = g.data.spaces[0];
   assert.equal(s.name, "娱乐2", "the old client's own edit wins"); deq(s.accent, V21().accent); assert.equal(s.pinnedAt, 1760000000); assert.equal(s.mood, "calm");
-  assert.equal(g.data.spacesVersion, 2, "spacesVersion never lowered");
+  assert.equal(g.data.spacesVersion, 3, "spacesVersion never lowered");
   // (2) same with this client's caps ("spaces:1")
   const s2 = structuredClone(g.data); s2.spaces[0] = { id: "s-fun", name: "娱乐3", groupIds: [] };
   assert.equal((await a.put("/api/config", { baseVersion: g.version, data: s2, caps: CAPS20 })).json.spacesRestored, 3);
@@ -91,7 +91,7 @@ test("server: V2.1 fields are stored verbatim; an older V2 client that drops the
   g = await cur(a);
   const old = structuredClone(g.data); delete old.spaces; delete old.spacesVersion; old.settings.title = "旧版改的";
   assert.equal((await a.put("/api/config", { baseVersion: g.version, data: old })).json.spacesKept, true);
-  g = await cur(a); deq(g.data.spaces, s4.spaces); assert.equal(g.data.spacesVersion, 2); assert.equal(g.data.settings.title, "旧版改的");
+  g = await cur(a); deq(g.data.spaces, s4.spaces); assert.equal(g.data.spacesVersion, 3); assert.equal(g.data.settings.title, "旧版改的");
   // (6) stash (冲突时「使用服务器版」先存本机版) accepts extension fields too
   assert.equal((await a.post("/api/config/stash", { baseVersion: g.version, data: g.data })).status, 200);
 });
@@ -139,11 +139,11 @@ test("jsdom: this V2 client loads V2.1 data, edits through the real UI paths (re
   await p.idle();
   const put = p.puts().at(-1);
   assert.equal(put.status, 200);
-  deq(put.body.caps, CAPS20);
+  deq(put.body.caps, ["spaces", "spaces:" + S.SCHEMA]); // 本客户端 = schema 2（阶段 3 加了 excludeItemIds）
   const sent = put.body.data.spaces[0];
   assert.equal(sent.name, "夜场"); deq(sent.groupIds, [G[0], G[2]]);
   deq(sent.accent, V21().accent); assert.equal(sent.pinnedAt, 1760000000); assert.equal(sent.mood, "calm");
-  assert.equal(put.body.data.spacesVersion, 2);
+  assert.equal(put.body.data.spacesVersion, 3);
   assert.equal(put.res.spacesRestored, undefined, "nothing had to be restored: the client kept the fields itself");
   // undo keeps them too
   p.A.undo(); await p.idle();
@@ -153,5 +153,5 @@ test("jsdom: this V2 client loads V2.1 data, edits through the real UI paths (re
   // export JSON carries them
   doc.querySelector("[data-a=export]") && doc.querySelector("[data-a=export]").click();
   const exp = JSON.parse(JSON.stringify(p.A.state));
-  deq(exp.spaces[0].accent, V21().accent); assert.equal(exp.spacesVersion, 2);
+  deq(exp.spaces[0].accent, V21().accent); assert.equal(exp.spacesVersion, 3);
 });
