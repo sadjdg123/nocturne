@@ -61,3 +61,29 @@ test("icon proxy cache", async (t) => {
   assert.equal(fs.readdirSync(iconsDir).filter((f) => /\.png$/.test(f)).length, 1, "uploaded icons untouched by cache cleanup");
   assert.equal((await c.get("/" + icon.json.url)).status, 200);
 });
+
+test("icon cache: concurrent distinct misses — upstream concurrency capped, disk peak bounded (soft quota), then trimmed", async (t) => {
+  let active = 0, maxActive = 0;
+  const up = await mockServer((q, s) => {
+    active++; maxActive = Math.max(maxActive, active);
+    setTimeout(() => { active--; s.writeHead(200, { "Content-Type": "image/svg+xml" }); s.end("<svg xmlns='http://www.w3.org/2000/svg'>" + "y".repeat(2000) + "</svg>"); }, 40);
+  });
+  const MAX = 20;
+  const srv = await startServer({ env: { ICON_UPSTREAM: "http://127.0.0.1:" + up.port + "/", CACHE_MAX_FILES: String(MAX), CACHE_MAX_MB: "1" } });
+  t.after(async () => { await srv.stop(); await up.close(); });
+  const c = client(srv.base);
+  await c.post("/api/setup", { name: "admin", password: "admin-pass-1" });
+  const cacheDir = path.join(srv.dataDir, "cache");
+  let peak = 0, sampling = true;
+  const sampler = (async () => { while (sampling) { try { peak = Math.max(peak, fs.readdirSync(cacheDir).filter((f) => !f.endsWith(".tmp")).length); } catch (e) { /* */ } await new Promise((r) => setTimeout(r, 5)); } })();
+  const N = 80;
+  const rs = await Promise.all(Array.from({ length: N }, (_, i) => c.get("/api/icon/mdi/burst" + i + ".svg")));
+  assert.ok(rs.every((x) => x.status === 200), "every request answered");
+  assert.ok(maxActive <= 8, "upstream concurrency capped at 8, saw " + maxActive);
+  const n = await waitFor(() => { const k = fs.readdirSync(cacheDir).length; return k <= MAX ? k : 0; }, 8000, 100);
+  sampling = false; await sampler;
+  assert.ok(n > 0 && n <= MAX, "trimmed back under CACHE_MAX_FILES, now " + fs.readdirSync(cacheDir).length);
+  // 软上限：峰值 ≤ 上限 + 两倍并发写入（每个图标 .bin + .json）+ 一轮清理期间的余量。80 个不同图标 = 160 个文件，远低于此即说明有及时回收
+  console.log("# icon cache peak", peak, "maxActive", maxActive);
+  assert.ok(peak <= MAX + 2 * 8 + 24, "disk peak bounded: " + peak + " files (limit " + MAX + ", " + 2 * N + " written)");
+});
