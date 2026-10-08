@@ -135,13 +135,14 @@
     });
   }
 
-  /** 命令面板「重新检测状态」：重新读取 NAS 的检测结果。失败时 reject（不假装成功） */
+  /** 命令面板「刷新状态」：重新读取 NAS 最近一次后台检测的结果（不触发新的检测）。
+   *  resolve 为状态表；失败时 reject（不假装成功） */
   A.refreshStatus = function () {
     if (!N.user) return Promise.reject(new Error("未登录"));
     return api("GET", "status").then(function (m) {
       statusMap = m || {};
       var w = statusWaiters; statusWaiters = []; w.forEach(function (f) { f(statusMap); });
-      return true;
+      return statusMap;
     }, function (e) { if (e.status === 401) expired(); throw e; });
   };
 
