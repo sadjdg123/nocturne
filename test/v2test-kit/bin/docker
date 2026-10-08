@@ -118,7 +118,10 @@ function portsStr(c) { const out = []; for (const [p, bs] of Object.entries(c.Ho
 let argv = process.argv.slice(2);
 function takeFmt(a) { const i = a.findIndex((x) => x === "-f" || x === "--format"); if (i < 0) return { fmt: null, rest: a }; const fmt = a[i + 1]; return { fmt, rest: a.slice(0, i).concat(a.slice(i + 2)) }; }
 const cmd = argv.shift();
-const IMG_REPO = "ghcr.io/sadjdg123/nocturne", IMG_DIGEST = "sha256:08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e";
+// 固定镜像的 repo / digest 从 tools/v2test/lib.sh 读（换 RC 镜像只改 lib.sh 一处）
+const LIB = require("fs").readFileSync(require("path").join(__dirname, "..", "..", "..", "tools", "v2test", "lib.sh"), "utf8");
+const libVar = (k) => { const m = new RegExp("^" + k + '="([^"]*)"', "m").exec(LIB); if (!m) throw new Error("lib.sh 里没有 " + k); return m[1]; };
+const IMG_REPO = libVar("IMAGE_REPO"), IMG_DIGEST = libVar("IMAGE_DIGEST");
 const imgKey = (ref) => { const m = /^(.*?)(?::[\w.-]+)?@(sha256:[0-9a-f]{64})$/.exec(ref); return m ? m[1] + "@" + m[2] : ref; };
 switch (cmd) {
   case "version": console.log("Client: fake 24.0\nServer: fake 24.0"); break;
