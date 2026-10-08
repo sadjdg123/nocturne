@@ -1,0 +1,590 @@
+{
+  "about": "已发布版本当时浏览器会按固定 URL 缓存的本地静态文件（相对 public/）；由 tools/gen-released-assets.js 从 GitHub 远程提交生成，勿手改。test/cache-bust.test.js：现在相同的 URL 必须内容相同。",
+  "repo": "sadjdg123/nocturne",
+  "releases": [
+    {
+      "name": "V1.1",
+      "commit": "3e6da3cf80c59fda12fa0a719afb8745829679b4",
+      "image": "ghcr.io/sadjdg123/nocturne:sha-3e6da3c",
+      "indexBlob": "cbc42170a30b33c6a4f20c3afb0dc2ab0160ddbe",
+      "assets": {
+        "Sortable.min.js": {
+          "path": "Sortable.min.js",
+          "v": "",
+          "blob": "95423a64911d06109c228d8cc8f9c69d23beebee",
+          "sha256": "6d0a831fc19b4bae851797ad3393157e861afb7862459c11226359b27e2c4337"
+        },
+        "apple-touch-icon.png": {
+          "path": "apple-touch-icon.png",
+          "v": "",
+          "blob": "ee72dfe83aee032005e3edc08f62449fe4a71bd0",
+          "sha256": "d535ac81e6b114cbf158bd9371e98adbb21f69c559ffe41a1954e129f4e699e7"
+        },
+        "bg-desktop.jpg": {
+          "path": "bg-desktop.jpg",
+          "v": "",
+          "blob": "8c1bfa08ed6fd37221ac4fc8d1c54b55ffeb82b4",
+          "sha256": "4889eb353498e61c53f60d2e3ae18a918e908cf4ce95853cbe50e768156390da"
+        },
+        "bg-mobile.jpg": {
+          "path": "bg-mobile.jpg",
+          "v": "",
+          "blob": "a4fe1a69268a5dd33c170fcd03c824e7c9980f69",
+          "sha256": "fea3b0a773980092bee567c9f8ee9f06a0622ef6df76d263fb3930f224e9a4fd"
+        },
+        "cmdrank.js?v=2": {
+          "path": "cmdrank.js",
+          "v": "2",
+          "blob": "c68134e9be337e3679c97fb9a9ccd26e0736a3d7",
+          "sha256": "206459f202eb3ac94b98fd36ba1af8207ddf6b94aa1751ddb0a9596916788f02"
+        },
+        "favicon.svg": {
+          "path": "favicon.svg",
+          "v": "",
+          "blob": "197937edc8ae56179d569c41f75c064e55137a53",
+          "sha256": "a789b39e09ba3f316866538cd2fc5027fc40153b5fa991fdf3e3214c93d92b48"
+        },
+        "fonts/cormorantgaramond-300-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin-ext.woff2",
+          "v": "",
+          "blob": "22f15b749a0e59d4d3a0157d4c3dff41cc167b4a",
+          "sha256": "7e86fb56e35ccb1ecc5d71110d9097ef9132bce69b6a296528f05f25aa1657d2"
+        },
+        "fonts/cormorantgaramond-300-latin.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin.woff2",
+          "v": "",
+          "blob": "3f9e20f3e4a830499d856612122fcb8c72913bdd",
+          "sha256": "8973d65ce70fb03cee5788acbcc36bc9e74bda2227bbef99f26c826514cc79f7"
+        },
+        "fonts/cormorantgaramond-400italic-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin-ext.woff2",
+          "v": "",
+          "blob": "17d37725c8ab840f55af9b53c8464e44652c8ba0",
+          "sha256": "96ec6109d044a8f2b279937499923fc0435db3e6bd91ce4cb1fd806d566378b9"
+        },
+        "fonts/cormorantgaramond-400italic-latin.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin.woff2",
+          "v": "",
+          "blob": "d9272649681c0d1843e3b5403b7834e9c6add271",
+          "sha256": "e48e58027030df56869b795ca6f19b7012158275f7ad7cde1900b4a0b68d02e2"
+        },
+        "fonts/fonts.css": {
+          "path": "fonts/fonts.css",
+          "v": "",
+          "blob": "74c1b13c2228d56b0e47282f10961ea0ae45d64f",
+          "sha256": "e73dffe393c02cb64dadbbf2d862ba553706d3866b6f1352faf838a9b58310a0"
+        },
+        "fonts/notoserifsc-400-greet.woff2": {
+          "path": "fonts/notoserifsc-400-greet.woff2",
+          "v": "",
+          "blob": "490bdeec8238190dbd2d081b61006d702d6b4193",
+          "sha256": "e6b758cd97da8039bce727e8cca93760f5fcd00a0c59639f22b20e87f855432e"
+        },
+        "fonts/notoserifsc-500-core.woff2": {
+          "path": "fonts/notoserifsc-500-core.woff2",
+          "v": "",
+          "blob": "633e35c7a71855818c436eaabc97200402a4a6a5",
+          "sha256": "9c94d7e462423e97385e2ae0c53dedda406ce3208900df6b19cfaebe8d08aa62"
+        },
+        "fonts/notoserifsc-500-ext.woff2": {
+          "path": "fonts/notoserifsc-500-ext.woff2",
+          "v": "",
+          "blob": "8a527cc64094700cbd2b12b9e07ca56a2eb94b59",
+          "sha256": "d9a1914da3804f427a6c266ee474b383c3fc4e2b7a3e8daf790c41f7e4db53fd"
+        },
+        "icon-192.png": {
+          "path": "icon-192.png",
+          "v": "",
+          "blob": "001e941588875891a81de64a5894af1c7691886a",
+          "sha256": "03c745a53dc9e8cb0df2a5c6543f7d559eb86d20a8033ba50460952f2ad9dfdf"
+        },
+        "icon-512.png": {
+          "path": "icon-512.png",
+          "v": "",
+          "blob": "71295a919a7b86a0a9e8906fa8dc46963a6dd55a",
+          "sha256": "9d731b2119d331bb3b1cf2a6f0c407318b4d21fb3258b4adb0e1226aedc20aaf"
+        },
+        "netmode.js?v=1": {
+          "path": "netmode.js",
+          "v": "1",
+          "blob": "8796f9d9b7eca5fd7d47ca08f6bbf48ed2f453d7",
+          "sha256": "58abecc45d8ad185a54939d9a5ba018899675cb3bca6012817fc8020ff438ee0"
+        },
+        "nocturne.js?v=4": {
+          "path": "nocturne.js",
+          "v": "4",
+          "blob": "7944742de2ee6a1c856b334c6231abd5bd22c691",
+          "sha256": "da1f3f6ada12e228422a9329d34991c3f067aceb1b2b08f5cf364ff3889e174a"
+        },
+        "site.webmanifest": {
+          "path": "site.webmanifest",
+          "v": "",
+          "blob": "554ca79a331ae7b4d301365de32304b41379f36b",
+          "sha256": "0b7a209907d11c035eb3ade44fd6d2f38b124b8be925ff05e46af82d0103df52"
+        },
+        "urlcheck.js?v=3": {
+          "path": "urlcheck.js",
+          "v": "3",
+          "blob": "3881cfd472158cbf41d63389188cb4c224470533",
+          "sha256": "c6b4e27e4e0d4b710d3f84476896667083439916a20400e1d671f01133c6b30a"
+        }
+      }
+    },
+    {
+      "name": "RC.1",
+      "commit": "2ee09835ea780cc2885f389a62b9cde188b13f2e",
+      "image": "ghcr.io/sadjdg123/nocturne:sha-2ee0983",
+      "indexBlob": "904291b5aae8e625857d5ee9cd5d161a14331ac5",
+      "assets": {
+        "Sortable.min.js": {
+          "path": "Sortable.min.js",
+          "v": "",
+          "blob": "95423a64911d06109c228d8cc8f9c69d23beebee",
+          "sha256": "6d0a831fc19b4bae851797ad3393157e861afb7862459c11226359b27e2c4337"
+        },
+        "apple-touch-icon.png": {
+          "path": "apple-touch-icon.png",
+          "v": "",
+          "blob": "ee72dfe83aee032005e3edc08f62449fe4a71bd0",
+          "sha256": "d535ac81e6b114cbf158bd9371e98adbb21f69c559ffe41a1954e129f4e699e7"
+        },
+        "bg-desktop.jpg": {
+          "path": "bg-desktop.jpg",
+          "v": "",
+          "blob": "8c1bfa08ed6fd37221ac4fc8d1c54b55ffeb82b4",
+          "sha256": "4889eb353498e61c53f60d2e3ae18a918e908cf4ce95853cbe50e768156390da"
+        },
+        "bg-mobile.jpg": {
+          "path": "bg-mobile.jpg",
+          "v": "",
+          "blob": "a4fe1a69268a5dd33c170fcd03c824e7c9980f69",
+          "sha256": "fea3b0a773980092bee567c9f8ee9f06a0622ef6df76d263fb3930f224e9a4fd"
+        },
+        "cmdrank.js?v=3": {
+          "path": "cmdrank.js",
+          "v": "3",
+          "blob": "84e7b753fbbeb79f0834915877746640ab560064",
+          "sha256": "0f66cba43990dd061176a17df7da2767848fddd5d5b966f41d0f6ac7380cacd5"
+        },
+        "favicon.svg": {
+          "path": "favicon.svg",
+          "v": "",
+          "blob": "197937edc8ae56179d569c41f75c064e55137a53",
+          "sha256": "a789b39e09ba3f316866538cd2fc5027fc40153b5fa991fdf3e3214c93d92b48"
+        },
+        "fonts/cormorantgaramond-300-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin-ext.woff2",
+          "v": "",
+          "blob": "22f15b749a0e59d4d3a0157d4c3dff41cc167b4a",
+          "sha256": "7e86fb56e35ccb1ecc5d71110d9097ef9132bce69b6a296528f05f25aa1657d2"
+        },
+        "fonts/cormorantgaramond-300-latin.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin.woff2",
+          "v": "",
+          "blob": "3f9e20f3e4a830499d856612122fcb8c72913bdd",
+          "sha256": "8973d65ce70fb03cee5788acbcc36bc9e74bda2227bbef99f26c826514cc79f7"
+        },
+        "fonts/cormorantgaramond-400italic-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin-ext.woff2",
+          "v": "",
+          "blob": "17d37725c8ab840f55af9b53c8464e44652c8ba0",
+          "sha256": "96ec6109d044a8f2b279937499923fc0435db3e6bd91ce4cb1fd806d566378b9"
+        },
+        "fonts/cormorantgaramond-400italic-latin.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin.woff2",
+          "v": "",
+          "blob": "d9272649681c0d1843e3b5403b7834e9c6add271",
+          "sha256": "e48e58027030df56869b795ca6f19b7012158275f7ad7cde1900b4a0b68d02e2"
+        },
+        "fonts/fonts.css": {
+          "path": "fonts/fonts.css",
+          "v": "",
+          "blob": "74c1b13c2228d56b0e47282f10961ea0ae45d64f",
+          "sha256": "e73dffe393c02cb64dadbbf2d862ba553706d3866b6f1352faf838a9b58310a0"
+        },
+        "fonts/notoserifsc-400-greet.woff2": {
+          "path": "fonts/notoserifsc-400-greet.woff2",
+          "v": "",
+          "blob": "490bdeec8238190dbd2d081b61006d702d6b4193",
+          "sha256": "e6b758cd97da8039bce727e8cca93760f5fcd00a0c59639f22b20e87f855432e"
+        },
+        "fonts/notoserifsc-500-core.woff2": {
+          "path": "fonts/notoserifsc-500-core.woff2",
+          "v": "",
+          "blob": "633e35c7a71855818c436eaabc97200402a4a6a5",
+          "sha256": "9c94d7e462423e97385e2ae0c53dedda406ce3208900df6b19cfaebe8d08aa62"
+        },
+        "fonts/notoserifsc-500-ext.woff2": {
+          "path": "fonts/notoserifsc-500-ext.woff2",
+          "v": "",
+          "blob": "8a527cc64094700cbd2b12b9e07ca56a2eb94b59",
+          "sha256": "d9a1914da3804f427a6c266ee474b383c3fc4e2b7a3e8daf790c41f7e4db53fd"
+        },
+        "icon-192.png": {
+          "path": "icon-192.png",
+          "v": "",
+          "blob": "001e941588875891a81de64a5894af1c7691886a",
+          "sha256": "03c745a53dc9e8cb0df2a5c6543f7d559eb86d20a8033ba50460952f2ad9dfdf"
+        },
+        "icon-512.png": {
+          "path": "icon-512.png",
+          "v": "",
+          "blob": "71295a919a7b86a0a9e8906fa8dc46963a6dd55a",
+          "sha256": "9d731b2119d331bb3b1cf2a6f0c407318b4d21fb3258b4adb0e1226aedc20aaf"
+        },
+        "midnight.css?v=3": {
+          "path": "midnight.css",
+          "v": "3",
+          "blob": "f910bbefbcf72b430260b4f72b5fb32380d8c4c7",
+          "sha256": "13b59f3cf720ef1aaf6e0906ae3367a22b407b41d9936f5ea8a06fba7299c116"
+        },
+        "midnight.js?v=2": {
+          "path": "midnight.js",
+          "v": "2",
+          "blob": "3436375292cdf4ba96520dd1ee82747e3ca6a523",
+          "sha256": "5298ffc9ff3d4dbb3ab7951f39d322e9e8d0554686f51f7e0e18c173b970a2b0"
+        },
+        "netmode.js?v=1": {
+          "path": "netmode.js",
+          "v": "1",
+          "blob": "8796f9d9b7eca5fd7d47ca08f6bbf48ed2f453d7",
+          "sha256": "58abecc45d8ad185a54939d9a5ba018899675cb3bca6012817fc8020ff438ee0"
+        },
+        "nocturne.js?v=8": {
+          "path": "nocturne.js",
+          "v": "8",
+          "blob": "ecafecbab096699ba5906e752e45b81508ec1cb0",
+          "sha256": "66b923c6b2bdabfdc6cf3c46e33570bd71bf340efbc5012a745fbc849ac64448"
+        },
+        "site.webmanifest": {
+          "path": "site.webmanifest",
+          "v": "",
+          "blob": "554ca79a331ae7b4d301365de32304b41379f36b",
+          "sha256": "0b7a209907d11c035eb3ade44fd6d2f38b124b8be925ff05e46af82d0103df52"
+        },
+        "spaces.js?v=3": {
+          "path": "spaces.js",
+          "v": "3",
+          "blob": "061943e47dbd996ac14f351cf1fd3c5c2324c4e0",
+          "sha256": "eec74cf67859d385b5bb1e43df484f6e1ec062b66fd339f529fbdf6831f87c18"
+        },
+        "status.js?v=1": {
+          "path": "status.js",
+          "v": "1",
+          "blob": "161c625181f8232a242da68e95c8b382b2ca8ec1",
+          "sha256": "e9acd0ddcddd1bdc7c5940c2da7e2ae2b01df89eec7b8f7df0d344ceeed80826"
+        },
+        "urlcheck.js?v=3": {
+          "path": "urlcheck.js",
+          "v": "3",
+          "blob": "3881cfd472158cbf41d63389188cb4c224470533",
+          "sha256": "c6b4e27e4e0d4b710d3f84476896667083439916a20400e1d671f01133c6b30a"
+        }
+      }
+    },
+    {
+      "name": "RC.2",
+      "commit": "3d5beaf4c5327d02312ab9096e9ba4dc9e095db2",
+      "image": "ghcr.io/sadjdg123/nocturne:sha-3d5beaf",
+      "indexBlob": "904291b5aae8e625857d5ee9cd5d161a14331ac5",
+      "assets": {
+        "Sortable.min.js": {
+          "path": "Sortable.min.js",
+          "v": "",
+          "blob": "95423a64911d06109c228d8cc8f9c69d23beebee",
+          "sha256": "6d0a831fc19b4bae851797ad3393157e861afb7862459c11226359b27e2c4337"
+        },
+        "apple-touch-icon.png": {
+          "path": "apple-touch-icon.png",
+          "v": "",
+          "blob": "ee72dfe83aee032005e3edc08f62449fe4a71bd0",
+          "sha256": "d535ac81e6b114cbf158bd9371e98adbb21f69c559ffe41a1954e129f4e699e7"
+        },
+        "bg-desktop.jpg": {
+          "path": "bg-desktop.jpg",
+          "v": "",
+          "blob": "8c1bfa08ed6fd37221ac4fc8d1c54b55ffeb82b4",
+          "sha256": "4889eb353498e61c53f60d2e3ae18a918e908cf4ce95853cbe50e768156390da"
+        },
+        "bg-mobile.jpg": {
+          "path": "bg-mobile.jpg",
+          "v": "",
+          "blob": "a4fe1a69268a5dd33c170fcd03c824e7c9980f69",
+          "sha256": "fea3b0a773980092bee567c9f8ee9f06a0622ef6df76d263fb3930f224e9a4fd"
+        },
+        "cmdrank.js?v=3": {
+          "path": "cmdrank.js",
+          "v": "3",
+          "blob": "84e7b753fbbeb79f0834915877746640ab560064",
+          "sha256": "0f66cba43990dd061176a17df7da2767848fddd5d5b966f41d0f6ac7380cacd5"
+        },
+        "favicon.svg": {
+          "path": "favicon.svg",
+          "v": "",
+          "blob": "197937edc8ae56179d569c41f75c064e55137a53",
+          "sha256": "a789b39e09ba3f316866538cd2fc5027fc40153b5fa991fdf3e3214c93d92b48"
+        },
+        "fonts/cormorantgaramond-300-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin-ext.woff2",
+          "v": "",
+          "blob": "22f15b749a0e59d4d3a0157d4c3dff41cc167b4a",
+          "sha256": "7e86fb56e35ccb1ecc5d71110d9097ef9132bce69b6a296528f05f25aa1657d2"
+        },
+        "fonts/cormorantgaramond-300-latin.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin.woff2",
+          "v": "",
+          "blob": "3f9e20f3e4a830499d856612122fcb8c72913bdd",
+          "sha256": "8973d65ce70fb03cee5788acbcc36bc9e74bda2227bbef99f26c826514cc79f7"
+        },
+        "fonts/cormorantgaramond-400italic-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin-ext.woff2",
+          "v": "",
+          "blob": "17d37725c8ab840f55af9b53c8464e44652c8ba0",
+          "sha256": "96ec6109d044a8f2b279937499923fc0435db3e6bd91ce4cb1fd806d566378b9"
+        },
+        "fonts/cormorantgaramond-400italic-latin.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin.woff2",
+          "v": "",
+          "blob": "d9272649681c0d1843e3b5403b7834e9c6add271",
+          "sha256": "e48e58027030df56869b795ca6f19b7012158275f7ad7cde1900b4a0b68d02e2"
+        },
+        "fonts/fonts.css": {
+          "path": "fonts/fonts.css",
+          "v": "",
+          "blob": "74c1b13c2228d56b0e47282f10961ea0ae45d64f",
+          "sha256": "e73dffe393c02cb64dadbbf2d862ba553706d3866b6f1352faf838a9b58310a0"
+        },
+        "fonts/notoserifsc-400-greet.woff2": {
+          "path": "fonts/notoserifsc-400-greet.woff2",
+          "v": "",
+          "blob": "490bdeec8238190dbd2d081b61006d702d6b4193",
+          "sha256": "e6b758cd97da8039bce727e8cca93760f5fcd00a0c59639f22b20e87f855432e"
+        },
+        "fonts/notoserifsc-500-core.woff2": {
+          "path": "fonts/notoserifsc-500-core.woff2",
+          "v": "",
+          "blob": "633e35c7a71855818c436eaabc97200402a4a6a5",
+          "sha256": "9c94d7e462423e97385e2ae0c53dedda406ce3208900df6b19cfaebe8d08aa62"
+        },
+        "fonts/notoserifsc-500-ext.woff2": {
+          "path": "fonts/notoserifsc-500-ext.woff2",
+          "v": "",
+          "blob": "8a527cc64094700cbd2b12b9e07ca56a2eb94b59",
+          "sha256": "d9a1914da3804f427a6c266ee474b383c3fc4e2b7a3e8daf790c41f7e4db53fd"
+        },
+        "icon-192.png": {
+          "path": "icon-192.png",
+          "v": "",
+          "blob": "001e941588875891a81de64a5894af1c7691886a",
+          "sha256": "03c745a53dc9e8cb0df2a5c6543f7d559eb86d20a8033ba50460952f2ad9dfdf"
+        },
+        "icon-512.png": {
+          "path": "icon-512.png",
+          "v": "",
+          "blob": "71295a919a7b86a0a9e8906fa8dc46963a6dd55a",
+          "sha256": "9d731b2119d331bb3b1cf2a6f0c407318b4d21fb3258b4adb0e1226aedc20aaf"
+        },
+        "midnight.css?v=3": {
+          "path": "midnight.css",
+          "v": "3",
+          "blob": "f910bbefbcf72b430260b4f72b5fb32380d8c4c7",
+          "sha256": "13b59f3cf720ef1aaf6e0906ae3367a22b407b41d9936f5ea8a06fba7299c116"
+        },
+        "midnight.js?v=2": {
+          "path": "midnight.js",
+          "v": "2",
+          "blob": "3436375292cdf4ba96520dd1ee82747e3ca6a523",
+          "sha256": "5298ffc9ff3d4dbb3ab7951f39d322e9e8d0554686f51f7e0e18c173b970a2b0"
+        },
+        "netmode.js?v=1": {
+          "path": "netmode.js",
+          "v": "1",
+          "blob": "8796f9d9b7eca5fd7d47ca08f6bbf48ed2f453d7",
+          "sha256": "58abecc45d8ad185a54939d9a5ba018899675cb3bca6012817fc8020ff438ee0"
+        },
+        "nocturne.js?v=8": {
+          "path": "nocturne.js",
+          "v": "8",
+          "blob": "ecafecbab096699ba5906e752e45b81508ec1cb0",
+          "sha256": "66b923c6b2bdabfdc6cf3c46e33570bd71bf340efbc5012a745fbc849ac64448"
+        },
+        "site.webmanifest": {
+          "path": "site.webmanifest",
+          "v": "",
+          "blob": "554ca79a331ae7b4d301365de32304b41379f36b",
+          "sha256": "0b7a209907d11c035eb3ade44fd6d2f38b124b8be925ff05e46af82d0103df52"
+        },
+        "spaces.js?v=3": {
+          "path": "spaces.js",
+          "v": "3",
+          "blob": "061943e47dbd996ac14f351cf1fd3c5c2324c4e0",
+          "sha256": "eec74cf67859d385b5bb1e43df484f6e1ec062b66fd339f529fbdf6831f87c18"
+        },
+        "status.js?v=1": {
+          "path": "status.js",
+          "v": "1",
+          "blob": "161c625181f8232a242da68e95c8b382b2ca8ec1",
+          "sha256": "e9acd0ddcddd1bdc7c5940c2da7e2ae2b01df89eec7b8f7df0d344ceeed80826"
+        },
+        "urlcheck.js?v=3": {
+          "path": "urlcheck.js",
+          "v": "3",
+          "blob": "3881cfd472158cbf41d63389188cb4c224470533",
+          "sha256": "c6b4e27e4e0d4b710d3f84476896667083439916a20400e1d671f01133c6b30a"
+        }
+      }
+    },
+    {
+      "name": "RC.3",
+      "commit": "e4de70bc25df4bce6b586bdff523a269bae105eb",
+      "image": "ghcr.io/sadjdg123/nocturne:sha-e4de70b",
+      "indexBlob": "904291b5aae8e625857d5ee9cd5d161a14331ac5",
+      "assets": {
+        "Sortable.min.js": {
+          "path": "Sortable.min.js",
+          "v": "",
+          "blob": "95423a64911d06109c228d8cc8f9c69d23beebee",
+          "sha256": "6d0a831fc19b4bae851797ad3393157e861afb7862459c11226359b27e2c4337"
+        },
+        "apple-touch-icon.png": {
+          "path": "apple-touch-icon.png",
+          "v": "",
+          "blob": "ee72dfe83aee032005e3edc08f62449fe4a71bd0",
+          "sha256": "d535ac81e6b114cbf158bd9371e98adbb21f69c559ffe41a1954e129f4e699e7"
+        },
+        "bg-desktop.jpg": {
+          "path": "bg-desktop.jpg",
+          "v": "",
+          "blob": "8c1bfa08ed6fd37221ac4fc8d1c54b55ffeb82b4",
+          "sha256": "4889eb353498e61c53f60d2e3ae18a918e908cf4ce95853cbe50e768156390da"
+        },
+        "bg-mobile.jpg": {
+          "path": "bg-mobile.jpg",
+          "v": "",
+          "blob": "a4fe1a69268a5dd33c170fcd03c824e7c9980f69",
+          "sha256": "fea3b0a773980092bee567c9f8ee9f06a0622ef6df76d263fb3930f224e9a4fd"
+        },
+        "cmdrank.js?v=3": {
+          "path": "cmdrank.js",
+          "v": "3",
+          "blob": "84e7b753fbbeb79f0834915877746640ab560064",
+          "sha256": "0f66cba43990dd061176a17df7da2767848fddd5d5b966f41d0f6ac7380cacd5"
+        },
+        "favicon.svg": {
+          "path": "favicon.svg",
+          "v": "",
+          "blob": "197937edc8ae56179d569c41f75c064e55137a53",
+          "sha256": "a789b39e09ba3f316866538cd2fc5027fc40153b5fa991fdf3e3214c93d92b48"
+        },
+        "fonts/cormorantgaramond-300-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin-ext.woff2",
+          "v": "",
+          "blob": "22f15b749a0e59d4d3a0157d4c3dff41cc167b4a",
+          "sha256": "7e86fb56e35ccb1ecc5d71110d9097ef9132bce69b6a296528f05f25aa1657d2"
+        },
+        "fonts/cormorantgaramond-300-latin.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin.woff2",
+          "v": "",
+          "blob": "3f9e20f3e4a830499d856612122fcb8c72913bdd",
+          "sha256": "8973d65ce70fb03cee5788acbcc36bc9e74bda2227bbef99f26c826514cc79f7"
+        },
+        "fonts/cormorantgaramond-400italic-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin-ext.woff2",
+          "v": "",
+          "blob": "17d37725c8ab840f55af9b53c8464e44652c8ba0",
+          "sha256": "96ec6109d044a8f2b279937499923fc0435db3e6bd91ce4cb1fd806d566378b9"
+        },
+        "fonts/cormorantgaramond-400italic-latin.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin.woff2",
+          "v": "",
+          "blob": "d9272649681c0d1843e3b5403b7834e9c6add271",
+          "sha256": "e48e58027030df56869b795ca6f19b7012158275f7ad7cde1900b4a0b68d02e2"
+        },
+        "fonts/fonts.css": {
+          "path": "fonts/fonts.css",
+          "v": "",
+          "blob": "74c1b13c2228d56b0e47282f10961ea0ae45d64f",
+          "sha256": "e73dffe393c02cb64dadbbf2d862ba553706d3866b6f1352faf838a9b58310a0"
+        },
+        "fonts/notoserifsc-400-greet.woff2": {
+          "path": "fonts/notoserifsc-400-greet.woff2",
+          "v": "",
+          "blob": "490bdeec8238190dbd2d081b61006d702d6b4193",
+          "sha256": "e6b758cd97da8039bce727e8cca93760f5fcd00a0c59639f22b20e87f855432e"
+        },
+        "fonts/notoserifsc-500-core.woff2": {
+          "path": "fonts/notoserifsc-500-core.woff2",
+          "v": "",
+          "blob": "633e35c7a71855818c436eaabc97200402a4a6a5",
+          "sha256": "9c94d7e462423e97385e2ae0c53dedda406ce3208900df6b19cfaebe8d08aa62"
+        },
+        "fonts/notoserifsc-500-ext.woff2": {
+          "path": "fonts/notoserifsc-500-ext.woff2",
+          "v": "",
+          "blob": "8a527cc64094700cbd2b12b9e07ca56a2eb94b59",
+          "sha256": "d9a1914da3804f427a6c266ee474b383c3fc4e2b7a3e8daf790c41f7e4db53fd"
+        },
+        "icon-192.png": {
+          "path": "icon-192.png",
+          "v": "",
+          "blob": "001e941588875891a81de64a5894af1c7691886a",
+          "sha256": "03c745a53dc9e8cb0df2a5c6543f7d559eb86d20a8033ba50460952f2ad9dfdf"
+        },
+        "icon-512.png": {
+          "path": "icon-512.png",
+          "v": "",
+          "blob": "71295a919a7b86a0a9e8906fa8dc46963a6dd55a",
+          "sha256": "9d731b2119d331bb3b1cf2a6f0c407318b4d21fb3258b4adb0e1226aedc20aaf"
+        },
+        "midnight.css?v=3": {
+          "path": "midnight.css",
+          "v": "3",
+          "blob": "f910bbefbcf72b430260b4f72b5fb32380d8c4c7",
+          "sha256": "13b59f3cf720ef1aaf6e0906ae3367a22b407b41d9936f5ea8a06fba7299c116"
+        },
+        "midnight.js?v=2": {
+          "path": "midnight.js",
+          "v": "2",
+          "blob": "3436375292cdf4ba96520dd1ee82747e3ca6a523",
+          "sha256": "5298ffc9ff3d4dbb3ab7951f39d322e9e8d0554686f51f7e0e18c173b970a2b0"
+        },
+        "netmode.js?v=1": {
+          "path": "netmode.js",
+          "v": "1",
+          "blob": "8796f9d9b7eca5fd7d47ca08f6bbf48ed2f453d7",
+          "sha256": "58abecc45d8ad185a54939d9a5ba018899675cb3bca6012817fc8020ff438ee0"
+        },
+        "nocturne.js?v=8": {
+          "path": "nocturne.js",
+          "v": "8",
+          "blob": "df562fd5fd2fc183ba4246b97c55dabd83e1e290",
+          "sha256": "da2a6481f28c8c80a920177baf56477491a620c921c8f1adae580b5f2627dee7"
+        },
+        "site.webmanifest": {
+          "path": "site.webmanifest",
+          "v": "",
+          "blob": "554ca79a331ae7b4d301365de32304b41379f36b",
+          "sha256": "0b7a209907d11c035eb3ade44fd6d2f38b124b8be925ff05e46af82d0103df52"
+        },
+        "spaces.js?v=3": {
+          "path": "spaces.js",
+          "v": "3",
+          "blob": "061943e47dbd996ac14f351cf1fd3c5c2324c4e0",
+          "sha256": "eec74cf67859d385b5bb1e43df484f6e1ec062b66fd339f529fbdf6831f87c18"
+        },
+        "status.js?v=1": {
+          "path": "status.js",
+          "v": "1",
+          "blob": "161c625181f8232a242da68e95c8b382b2ca8ec1",
+          "sha256": "e9acd0ddcddd1bdc7c5940c2da7e2ae2b01df89eec7b8f7df0d344ceeed80826"
+        },
+        "urlcheck.js?v=3": {
+          "path": "urlcheck.js",
+          "v": "3",
+          "blob": "3881cfd472158cbf41d63389188cb4c224470533",
+          "sha256": "c6b4e27e4e0d4b710d3f84476896667083439916a20400e1d671f01133c6b30a"
+        }
+      }
+    }
+  ]
+}
