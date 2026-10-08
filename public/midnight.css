@@ -384,7 +384,8 @@ html[data-ui="v2"] .x-spm-ck small { display: block; }
 html[data-ui="v2"] .x-toast { background: rgba(18, 24, 38, .96); border: 1px solid var(--mn-line-2); -webkit-backdrop-filter: none; backdrop-filter: none; }
 html[data-ui="v2"] .x-toast button { background: rgba(231, 180, 103, .14); color: var(--mn-amber); }
 /* 设置：新版下「手机每行」用本机的 3 / 4 列（经典的 3 / 4 / 5 列是同步设置，切回经典照旧） */
-html[data-ui="v2"] .mn-setui { display: block; }
+/* 外观开关在两种外观里都要看得见（经典外观下只隐藏「手机每行」这一行），否则切到经典后就切不回来 */
+html[data-ui="v2"] .mn-setui, html[data-ui="classic"] .mn-setui { display: block; }
 html[data-ui="v2"] .x-set .x-gl > .x-row:has([data-cols]) { display: none; }
 html[data-ui="v2"] .x-set .x-gt:has(+ .x-gl > .x-row:only-child [data-cols]) { display: none; }
 html[data-ui="classic"] .mn-v2only { display: none; }
