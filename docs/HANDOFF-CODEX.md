@@ -100,7 +100,7 @@ sh test/v2test-kit/run.sh [dash] [busybox]   # tools/v2test 套件沙盒自测�
 python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归；另有 rollback_drill.py / restore_drill.py / rc_perf.py / https_proxy.py
 ```
 
-- RC.3 时：`npm test` 204 项全过；套件自测 dash 50 项。
+- RC.3 时：`npm test` 204 项全过；套件自测 dash 50 项（本沙盒的 busybox 静态版会优先用内置 ip / hostname，绕过假命令，busybox 轮次 39 / 50，RC.2 代码上同样如此）。
 - v2test 套件的固定镜像 / 期望版本统一在 `tools/v2test/lib.sh`（`IMAGE_TAG` / `IMAGE_DIGEST` / `EXPECT_VERSION`），套件自测会核对 `EXPECT_VERSION` 与 `package.json` 一致——**发新 RC 后要更新 lib.sh**。
 
 ## 5. CI/CD
@@ -121,6 +121,7 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
 4. 回滚：image 改回上一版的 `标签@digest`；一般不用换 data。
 - RC 之间：`docs/v2.0-upgrade-rc.md`；V1.1 ↔ V2：`docs/v2.0-upgrade-rollback.md`；人工验收：`docs/v2.0-manual-acceptance.md`。
 - 生产当前：RC.1 `sha-2ee0983@sha256:85ee7ab4…77fa`（Synology Container Manager，真实数据）。
+- 候选版镜像：RC.3 `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b`（CI 37843878107）；RC.2 `sha-3d5beaf@sha256:08ff9c08…444e`。
 
 ## 7. 已知风险 / 待办
 
