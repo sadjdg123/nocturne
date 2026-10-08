@@ -81,16 +81,19 @@ const ownTmps = new Set();
 const tmpName = (file) => file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
 async function atomicWrite(file, body) {
   const tmp = tmpName(file);
-  ownTmps.add(tmp);
-  let done = false;
+  let created = false, done = false;
   try {
-    const fh = await fsp.open(tmp, "wx", 0o600); // wx：临时文件名已存在（极小概率）就失败，不覆盖别人的文件
+    // wx：临时文件名已存在（极小概率撞名）就失败（EEXIST），不覆盖别人的文件。created 只在 open 成功后才置位：
+    // 撞名时那个文件不是我们建的，清理时绝不能删（RC.3 修复：RC.2 在 EEXIST 时会把它删掉）
+    const fh = await fsp.open(tmp, "wx", 0o600);
+    created = true;
+    ownTmps.add(tmp);
     try { await fh.writeFile(body); await fh.sync(); } finally { await fh.close(); }
     await fsp.rename(tmp, file);
     done = true;
   } finally {
-    if (!done) await fsp.rm(tmp, { force: true }).catch(() => {}); // 只删自己的临时文件
-    ownTmps.delete(tmp);
+    if (created && !done) await fsp.rm(tmp, { force: true }).catch(() => {}); // 只删这一次自己创建的临时文件
+    if (created) ownTmps.delete(tmp);
   }
 }
 /** 原子写 JSON。按文件串行，避免并发写交错。 */
@@ -550,16 +553,25 @@ async function guardWriteFailed(name, e) {
   const code = (e && e.code) || "EIO";
   let invalidated = false;
   try { await fsp.rm(guardFile(name)); invalidated = true; } catch (x) { invalidated = x.code === "ENOENT"; }
-  guardIssues.set(name.toLowerCase(), { user: name, kind: "write_failed", at: new Date().toISOString(), error: code, invalidated });
+  const prev = guardIssues.get(name.toLowerCase()), at = new Date().toISOString();
+  // since：这一轮连续失败的开始时间（同一轮里每次失败只更新 at），前端据此「每次发生只提示一次」
+  guardIssues.set(name.toLowerCase(), { user: name, kind: "write_failed", at, since: prev && prev.kind === "write_failed" && prev.since ? prev.since : at, error: code, invalidated });
   log("ERROR spaces guard write failed", name, code, invalidated ? "(old guard removed; spaces auto-recovery off until the next successful write)" : "(old guard could not be removed; it is now stale and will be rejected by the version/hash check)");
   return "spaces_guard_write_failed";
 }
-/** 旁路是否对得上当前配置历史：{ok} 或 {ok:false, reason} */
+/** 旁路记录格式是否合格（RC.3）：fmt 必须是数字 2，h 必须是 64 位小写十六进制（sha256），version 是整数，spaces 是数组或 null。
+ *  RC.1 的旧格式（没有 fmt / h）、fmt 不对、h 不合法的记录一律不用于自动找回（启动自愈会按当前 V2 配置重写它们）。 */
+const GUARD_H_RE = /^[0-9a-f]{64}$/;
+function guardFormatOk(g) {
+  return !!g && typeof g === "object" && g.fmt === 2 && Number.isSafeInteger(g.version) && typeof g.h === "string" && GUARD_H_RE.test(g.h) && (g.spaces === null || Array.isArray(g.spaces));
+}
+/** 旁路是否对得上当前配置历史：{ok} 或 {ok:false, reason}。格式不合格 / 指纹与 hist 里那个版本不一致 / 之后还有 V2 写的版本 → 不合格 */
 function guardMatches(g, cur) {
+  if (!guardFormatOk(g)) return { ok: false, reason: "guard v" + (g && g.version) + " has an old or invalid format (fmt/h)" };
   const hist = Array.isArray(cur.hist) ? cur.hist : [];
   const at = hist.find((x) => x && x.v === g.version);
   if (!at) return { ok: false, reason: "guard v" + g.version + " is not in the config history" };
-  if (g.h != null && at.h !== g.h) return { ok: false, reason: "guard v" + g.version + " hash does not match the config history" };
+  if (at.h !== g.h) return { ok: false, reason: "guard v" + g.version + " hash does not match the config history" };
   const later = hist.find((x) => x && +x.g >= 2 && x.v > g.version);
   if (later) return { ok: false, reason: "config v" + later.v + " was written by V2 after guard v" + g.version + " (guard write failed back then)" };
   return { ok: true };
@@ -601,6 +613,11 @@ async function guardRecover(name) {
   if (!src) {
     const b = await lastV2FromBackups(name, cur);
     if (!b) return null; // 没有 V2 写过的版本可对照：什么都不做
+    // RC.1 写的旧格式旁路版本比「最后一个 g:2 版本」还新 = RC.1（hist 不带 g:2）在那之后又写过：快照环里的那份已经过期，不找回
+    if (g && typeof g === "object" && !guardFormatOk(g) && Number.isSafeInteger(g.version) && g.version > b.version) {
+      guardLogOnce(name, cur, "spaces guard: skipped", name, "old-format guard v" + g.version + " is newer than the last V2 version v" + b.version + " (written by RC.1 later); nothing recovered (see 恢复较早的版本)");
+      return null;
+    }
     if (b.missing) { guardLogOnce(name, cur, "spaces guard: skipped", name, "last V2 version v" + b.version + " is not in the backup ring either; nothing recovered (see 恢复较早的版本)"); return null; }
     src = b;
   }
@@ -622,8 +639,8 @@ async function guardHeal(name) {
   const cur = readConfig(name);
   if (!cur.data || typeof cur.data !== "object" || !v2Written(cur)) return false;
   const g = readJSON(guardFile(name), null), h = dataHash(cur.data);
-  if (g && g.fmt >= 2 && g.version === cur.version && g.h === h) return false;
-  const why = !g ? (fs.existsSync(guardFile(name)) ? "unreadable" : "missing") : !(g.fmt >= 2) ? "old format" : g.version !== cur.version ? "guard v" + g.version + " != config v" + cur.version : "hash mismatch";
+  if (guardFormatOk(g) && g.version === cur.version && g.h === h) return false;
+  const why = !g || typeof g !== "object" ? (fs.existsSync(guardFile(name)) ? "unreadable" : "missing") : g.fmt === undefined && g.h === undefined ? "old format" : !guardFormatOk(g) ? "invalid format" : g.version !== cur.version ? "guard v" + g.version + " != config v" + cur.version : "hash mismatch";
   try { await writeGuard(name, cur); } catch (e) { await guardWriteFailed(name, e); return false; }
   guardIssues.delete(name.toLowerCase());
   log("spaces guard: healed", name, "v" + cur.version, "(" + why + ")");
@@ -1850,4 +1867,5 @@ function main() {
 if (require.main === module) main();
 else module.exports = { // 供 test/ 下的单元测试使用；作为程序运行时不导出
   cookieNames, normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo, forwardedProto, legacyKey,
+  atomicWrite,
 };
