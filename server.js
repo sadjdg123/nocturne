@@ -54,6 +54,8 @@ const SNAPSHOT_EVERY_MS = 30 * 60 * 1000, SNAPSHOT_EVERY_VERSIONS = 20; // 普�
 const OPS_KEEP = 50; // 记住最近 50 个已接受的推送 opId（重复推送直接返回当时的结果）
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
+const GUARD_DIR = path.join(DATA_DIR, "spaces-guard"); // 回滚写保护：spaces-guard/<user>.json = V2 最后一次写入时的空间定义（last-known-good）
+const SNAPSHOT_PREFIX = "pre-v2-snapshot-"; // 首次以 V2 启动、检测到 V1.1 数据时写的固定快照 data/pre-v2-snapshot-<时间>/（永不轮换、不自动清理）
 
 /** 本地时间 + 时区偏移（跟随 TZ 环境变量），例如 2026-10-08 03:14:05.123+08:00 */
 function stamp(d = new Date()) {
@@ -66,7 +68,7 @@ const log = (...a) => console.log(stamp(), ...a);
 /* ------------------------------------------------------------------ storage */
 
 function ensureDirs() {
-  for (const d of [DATA_DIR, CONFIG_DIR, CACHE_DIR, WALLPAPER_DIR, BACKUP_DIR, ICONS_DIR]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [DATA_DIR, CONFIG_DIR, CACHE_DIR, WALLPAPER_DIR, BACKUP_DIR, ICONS_DIR, GUARD_DIR]) fs.mkdirSync(d, { recursive: true });
 }
 function readJSON(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; }
@@ -370,7 +372,7 @@ async function listBackups(name) {
   return files.filter((f) => /^\d{15}-[\w-]+\.json$/.test(f)).sort().reverse().map((f) => path.join(backupDir(name), f)); // 新的在前
 }
 /** 写一份快照（环形：最多 BACKUP_KEEP 份、总共 BACKUP_MAX_BYTES，超出从最旧的删）；必须在 withUserLock 里调用。
- *  kind：auto 定期快照 / replaced 被「用本机版覆盖」替换 / restore 恢复前 / local 冲突时选「使用服务器版」留下的本机版本 */
+ *  kind：auto 定期快照 / replaced 被「用本机版覆盖」替换 / restore 恢复前 / local 冲突时选「使用服务器版」留下的本机版本 / guard 回滚写保护自动找回空间前的版本 */
 async function addBackup(name, doc, kind) {
   await migrateLegacyBackup(name);
   await fsp.mkdir(backupDir(name), { recursive: true });
@@ -402,7 +404,7 @@ async function backupSummaries(name) {
     if (!d || !d.data) continue;
     const id = path.basename(f, ".json"), groups = Array.isArray(d.data.groups) ? d.data.groups : [];
     const at = +id.slice(0, 15); // 进备份（被替换）的时间
-    const km = /-(auto|replaced|restore|local|legacy)$/.exec(id);
+    const km = /-(auto|replaced|restore|local|legacy|guard)$/.exec(id);
     out.push({ id, version: d.version || 0, updatedAt: d.updatedAt || null, at: new Date(at).toISOString(), time: Date.parse(d.updatedAt) || at, // time：这个版本保存的时间（毫秒）
       groups: groups.length, items: allItems(d.data).length, spaces: spacesCount(d.data), kind: d.kind || (km ? km[1] : null) });
   }
@@ -453,10 +455,97 @@ async function writeConfig(name, data, opId, opHash) {
   hist = hist.slice(-HIST_KEEP);
   let ops = Array.isArray(cur.ops) ? cur.ops.slice() : [];
   if (opId) ops = ops.filter((o) => o.id !== opId).concat({ id: opId, v: version, h: opHash || dataHash(data) }).slice(-OPS_KEEP); // h：这次推送收到的内容指纹（迁移前）
-  const doc = { version, updatedAt: new Date().toISOString(), data, hist, ...(ops.length ? { ops } : {}) };
+  const doc = { version, updatedAt: new Date().toISOString(), data, hist, ...(ops.length ? { ops } : {}), writer: WRITER };
   await writeJSON(configFile(name), doc);
   configCache.delete(configFile(name));
+  await writeGuard(name, doc).catch((e) => log("spaces guard write", name, e.message));
   return doc;
+}
+
+/* ---------------------------------------------------- 回滚写保护（V2.0 RC）
+ * 已知风险：回滚到 V1.1 期间，V1.1 服务端没有「旧版前端保护」，任何不带 spaces 的保存（例如冲突面板「用本机版覆盖」一份 V2 之前的离线修改）
+ * 都会让当前配置丢掉空间定义。V1.1 的 writeConfig 只写 {version, updatedAt, data, hist, ops}，不认识的顶层字段会被丢掉。
+ *  1. 写入标记：V2 每次写配置都在文档顶层带 writer:{app,v,gen:2}（不在 data 里，GET 不返回）。标记不见了 = 最后一次是非 V2 写的。
+ *  2. 旁路文件 spaces-guard/<user>.json：V2 每次写配置时同步记下当时的空间定义（数组 / 明确删光的 [] / 没有字段 null）+ 版本号。
+ *     不参与备份环轮换；V1.1 不读不写它。
+ *  3. 重新升级到 V2（启动时，以及读取配置时）：配置没有 V2 标记 + data 里没有 spaces 字段 + 配置版本比旁路文件新 + 旁路文件里有非空空间
+ *     → 先把当前版本存一份快照（备份环 -guard），再把空间定义写回（悬空引用照常清掉），记一行日志，页面载入时提示一次。
+ *     V2 里明确删光空间（[]）或「恢复默认」后没有 spaces 字段：旁路文件跟着记成 [] / null，不会被找回。
+ *     旁路文件版本不比配置旧（例如手动把配置换回了升级前快照）→ 不动，只记日志。 */
+const WRITER = Object.freeze({ app: "nocturne", v: VERSION, gen: 2 });
+const v2Written = (doc) => !!(doc && doc.writer && doc.writer.app === "nocturne" && +doc.writer.gen >= 2);
+const guardFile = (name) => path.join(GUARD_DIR, name.toLowerCase() + ".json");
+const GUARD_NOTICE_MS = 14 * 864e5; // 自动找回后，页面在 14 天内（每台设备一次）提示
+async function writeGuard(name, doc) {
+  const data = doc && doc.data;
+  if (!data || typeof data !== "object") return;
+  const prev = readJSON(guardFile(name), null);
+  const g = { version: doc.version, updatedAt: doc.updatedAt, writer: WRITER,
+    spaces: Array.isArray(data.spaces) ? data.spaces : null, ...(typeof data.spacesVersion === "number" ? { spacesVersion: data.spacesVersion } : {}),
+    ...(prev && prev.recovered ? { recovered: prev.recovered } : {}) };
+  await fsp.mkdir(GUARD_DIR, { recursive: true });
+  await writeJSON(guardFile(name), g);
+}
+/** 必须在 withUserLock 里调用。找回了 → {at, spaces, fromVersion, version, pruned}，否则 null */
+async function guardRecover(name) {
+  const cur = readConfig(name);
+  if (!cur.data || typeof cur.data !== "object" || v2Written(cur) || cur.data.spaces !== undefined) return null;
+  const g = readJSON(guardFile(name), null);
+  if (!g || !Array.isArray(g.spaces) || !g.spaces.length) return null;
+  if (!((cur.version || 0) > (g.version || 0))) { log("spaces guard: skipped", name, "config v" + (cur.version || 0) + " is not newer than guard v" + (g.version || 0)); return null; }
+  const data = JSON.parse(JSON.stringify(cur.data));
+  data.spaces = JSON.parse(JSON.stringify(g.spaces));
+  if (typeof g.spacesVersion === "number" && !(typeof data.spacesVersion === "number" && data.spacesVersion >= g.spacesVersion)) data.spacesVersion = g.spacesVersion;
+  if (SPACES.check(data).length) { log("spaces guard: skipped", name, "saved spaces no longer valid"); return null; }
+  const pruned = SPACES.prune(data);
+  await addBackup(name, cur, "guard");
+  const doc = await writeConfig(name, data);
+  const rec = { at: doc.updatedAt, spaces: data.spaces.length, fromVersion: cur.version || 0, version: doc.version, pruned };
+  await writeJSON(guardFile(name), Object.assign(readJSON(guardFile(name), {}), { recovered: rec }));
+  log("spaces guard: restored", name, rec.spaces, "spaces", "v" + rec.fromVersion + " -> v" + rec.version, "(last write was not by V2 and dropped them; previous version kept as backup -guard; pruned refs " + pruned + ")");
+  return rec;
+}
+/** 页面提示用：最近 14 天内自动找回过 → {at, spaces}，否则 null */
+function guardNotice(name) {
+  const g = readJSON(guardFile(name), null), r = g && g.recovered;
+  if (!r || !r.at || Date.now() - Date.parse(r.at) > GUARD_NOTICE_MS) return null;
+  return { at: r.at, spaces: r.spaces };
+}
+
+/** 首次以 V2 启动且检测到 V1.1 数据（有配置、没有任何一份带 V2 标记、也还没有固定快照）：
+ *  把 config/、users.json、icons/、wallpapers/ 原样复制到 data/pre-v2-snapshot-<时间>/（先写临时目录再改名），附 MANIFEST.json（每个文件的 sha256）。
+ *  这份快照永不轮换、不被自动清理；手动回滚步骤见 docs/v2.0-upgrade-rollback.md。失败只记日志，不影响启动。 */
+function preV2Snapshot() {
+  let top; try { top = fs.readdirSync(DATA_DIR); } catch (e) { return null; }
+  if (top.some((f) => f.startsWith(SNAPSHOT_PREFIX) && !f.endsWith(".tmp"))) return null;
+  let cfgs; try { cfgs = fs.readdirSync(CONFIG_DIR).filter((f) => /^[^.].*\.json$/.test(f)); } catch (e) { return null; }
+  if (!cfgs.length) return null; // 全新安装
+  if (cfgs.some((f) => v2Written(readJSON(path.join(CONFIG_DIR, f), null)))) return null; // 已经是 V2 写过的数据
+  const p2 = (n) => String(n).padStart(2, "0"), d = new Date();
+  const name = SNAPSHOT_PREFIX + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + "-" + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+  const tmp = path.join(DATA_DIR, name + "." + process.pid + ".tmp"), files = [];
+  try {
+    const copy = (rel) => {
+      const src = path.join(DATA_DIR, rel); let st; try { st = fs.statSync(src); } catch (e) { return; }
+      if (st.isDirectory()) { for (const f of fs.readdirSync(src).sort()) if (!f.endsWith(".tmp")) copy(path.join(rel, f)); return; }
+      if (!st.isFile()) return;
+      const buf = fs.readFileSync(src), dst = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.writeFileSync(dst, buf, { mode: 0o600 });
+      files.push({ path: rel.split(path.sep).join("/"), bytes: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex") });
+    };
+    fs.mkdirSync(tmp, { recursive: true });
+    for (const rel of ["users.json", "config", "icons", "wallpapers"]) copy(rel);
+    fs.writeFileSync(path.join(tmp, "MANIFEST.json"), JSON.stringify({ app: "nocturne", createdBy: VERSION, createdAt: stamp(d), reason: "first start of V2 on V1.1 data",
+      note: "固定的升级前快照：不参与轮换、不会被自动删除。恢复方法见 docs/v2.0-upgrade-rollback.md", files }, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, path.join(DATA_DIR, name));
+    log("pre-v2 snapshot written", name, files.length, "files");
+    return name;
+  } catch (e) {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (x) { /* ignore */ }
+    log("pre-v2 snapshot failed", e.message);
+    return null;
+  }
 }
 /** 项目搜索别名 item.aliases（V1.1）：字符串数组、≤10 个、每个 ≤32 字。不合法 → 400（只是搜索文本，服务器不解释它） */
 function aliasesError(d) {
@@ -712,6 +801,7 @@ async function migrateData(name, data) {
 async function migrateAll() {
   for (const name of allUserNames()) {
     await withUserLock(name, async () => {
+      await guardRecover(name).catch((e) => log("spaces guard", name, e.message));
       const cur = readConfig(name);
       if (cur.data && await migrateData(name, cur.data)) await writeConfig(name, cur.data);
     });
@@ -1050,7 +1140,8 @@ function serveStatic(req, res, pathname) {
   }
   const headers = {
     "Content-Type": c.type, ETag: c.etag, "Last-Modified": new Date(st.mtimeMs).toUTCString(), Vary: "Accept-Encoding",
-    "Cache-Control": /\/fonts\//.test(file) ? "public, max-age=31536000, immutable" : "public, max-age=86400, must-revalidate",
+    // 只有字体文件本身长期缓存（文件名变了才会换内容）；fonts.css 和其他静态文件 1 天后重新校验，更新靠 index.html 里的 ?v= 版本号
+    "Cache-Control": /\/fonts\/[^/]+\.woff2$/.test(file) ? "public, max-age=31536000, immutable" : "public, max-age=86400, must-revalidate",
   };
   if (req.headers["if-none-match"] === c.etag) { res.writeHead(304, headers); return res.end(); }
   if (c.gz && acceptsGzip(req)) return send(res, 200, c.gz, Object.assign(headers, { "Content-Encoding": "gzip" }));
@@ -1066,6 +1157,8 @@ function serveIndex(req, res) {
     backend: true, version: u ? readConfig(u.name).version || 0 : 0,
     auth: !NO_AUTH, setup: !NO_AUTH && users.users.length === 0, user: u, app: VERSION,
   };
+  const rec = u && guardNotice(u.name);
+  if (rec) boot.recovered = rec; // 回滚写保护刚自动找回过空间：页面提示一次
   const tag = "<script>window.NOCTURNE=" + JSON.stringify(boot).replace(/</g, "\\u003c") + ";</script>";
   const html = Buffer.from(indexCache.html.replace("<!--nocturne:boot-->", tag));
   const headers = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", Vary: "Cookie, Accept-Encoding", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
@@ -1361,10 +1454,12 @@ async function api(req, res, url) {
     }
     if (m === "GET") {
       const doc = await withUserLock(me.name, async () => {
+        await guardRecover(me.name).catch((e) => log("spaces guard", me.name, e.message));
         const d = readConfig(me.name);
         return d.data && await migrateData(me.name, d.data) ? writeConfig(me.name, d.data) : d;
       });
-      return json(res, 200, publicDoc(doc));
+      const rec = guardNotice(me.name);
+      return json(res, 200, rec ? Object.assign(publicDoc(doc), { recovered: rec }) : publicDoc(doc));
     }
     if (m === "PUT") {
       /* 乐观并发：body = {baseVersion, data, opId?, force?, expectVersion?, restore?}
@@ -1574,6 +1669,7 @@ async function api(req, res, url) {
           await fsp.rm(legacyBackupFile(target.name), { force: true });
           await fsp.rm(backupDir(target.name), { recursive: true, force: true });
           await fsp.rm(iconDir(target.name), { recursive: true, force: true });
+          await fsp.rm(guardFile(target.name), { force: true }); // 回滚写保护旁路文件随用户删除（固定的升级前快照不动）
           configCache.delete(configFile(target.name));
         });
         return json(res, 200, { ok: true });
@@ -1607,6 +1703,7 @@ const server = http.createServer(async (req, res) => {
 function main() {
   ensureDirs();
   loadState();
+  preV2Snapshot();
   migrateAll().catch((e) => log("migrate", e.message));
   server.listen(PORT, HOST, () => {
     log(`夜曲 Nocturne v${VERSION} 已启动 http://${HOST}:${PORT}  data=${DATA_DIR}  auth=${NO_AUTH ? "off" : "on"}  users=${users.users.length}  trusted-proxies=${trustedProxies().list.join(",") || "none"}`);
