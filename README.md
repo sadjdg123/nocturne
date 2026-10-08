@@ -203,6 +203,16 @@
 
 只有直连对端在这个列表里时，夜曲才读取转发头：`X-Forwarded-For` 从右往左跳过列表里的代理，第一个不在列表里的地址就是真实客户端；
 没有 `X-Forwarded-For` 时用 `X-Real-IP`；`X-Forwarded-Proto: https` 才会让登录 Cookie 带上 `Secure`。
+`X-Forwarded-Proto` 若是逗号列表（或出现多次），按和 `X-Forwarded-For` 相同的跳数**从右往左**取：
+只经过一层代理时取最右边那个（代理追加的值），客户端自己塞进来的 `X-Forwarded-Proto: https` 不会被采信。
+
+> **反向代理必须覆盖（而不是透传）`X-Forwarded-Proto`**，否则客户端伪造的值可能原样到达夜曲：
+> - **群晖 DSM 反向代理**：在规则的「自定义标头」里新增 `X-Forwarded-Proto`，值填 `$scheme`。
+> - **Lucky**：在反向代理规则的自定义请求头里设置 `X-Forwarded-Proto`（TLS 入口填 `https`）。
+> - **cloudflared**：Cloudflare 边缘会按访客到 Cloudflare 的协议设置 `X-Forwarded-Proto`；不要在 cloudflared 和夜曲之间再叠一层透传该头的代理。
+> - **nginx**：`proxy_set_header X-Forwarded-Proto $scheme;`（覆盖而不是追加）。
+>
+> 自查：管理员登录后访问 `/api/health`，`client.https` 应与浏览器地址栏的协议一致。
 
 **怎么知道该填什么**：先不填，经反向代理用**管理员**账号登录，打开 设置 → 账户，页面底部有一行「连接诊断」：
 
@@ -331,7 +341,7 @@ data/
 | `TRUSTED_PROXY_CIDRS` | 空（不信任转发头） | 可信反向代理的地址（IP / CIDR，逗号分隔）。只有直连对端在这里面时才读 `X-Forwarded-For` / `X-Real-IP` / `X-Forwarded-Proto`。见「外网访问 / HTTPS」 |
 | `PROBE_ALLOW` | 空 | **普通账户**的项目允许由 NAS 探测的目标：IP / CIDR（所有解析结果都要在范围内）、主机名或 `*.域名`、`*`，都可带 `:端口`，例如 `192.168.1.0/24,nas.lan:5000,*:8096`。空 = 普通账户的地址一律由浏览器自己检测。管理员的项目不受影响 |
 | `PROBE_MAX_PER_USER` / `PROBE_MAX_TOTAL` | `200` / `2000` | 每轮检测：每个账户最多多少个地址 / 总共多少个（多出的地址由浏览器检测） |
-| `CACHE_MAX_MB` / `CACHE_MAX_FILES` / `CACHE_TTL_DAYS` | `50` / `5000` / `30` | 图标缓存 `data/cache` 的上限与过期天数（启动后和每 6 小时清理一次，超限时提前清理；按最近使用时间淘汰；不影响 `data/icons`） |
+| `CACHE_MAX_MB` / `CACHE_MAX_FILES` / `CACHE_TTL_DAYS` | `50` / `5000` / `30` | 图标缓存 `data/cache` 的上限与过期天数（启动后和每 6 小时清理一次，超限时立即异步清理；按最近使用时间淘汰；不影响 `data/icons`）。这是**软上限**：同时最多拉取 8 个不同的上游图标，突发大量新图标时磁盘上的文件数会短暂超出上限（约「上限 + 一轮清理期间新写入的文件」），随即回落 |
 | `ICON_UPSTREAM` | `https://api.iconify.design/` | Iconify API 地址（可换成自建实例） |
 | `BACKUP_KEEP` / `BACKUP_MAX_MB` | `30` / `20` | 每个账户保留的配置快照份数 / 总大小 |
 
@@ -367,7 +377,7 @@ data/
 | GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用）；管理员登录时多一个 `client` 字段（直连对端 / 识别出的客户端 IP / 是否 HTTPS），用来确定 `TRUSTED_PROXY_CIDRS` |
 | GET | `/api/me` | 当前登录状态 |
 | POST | `/api/setup` · `/api/login` · `/api/logout` | 初始化 / 登录 / 退出 |
-| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`）。PUT 带 `baseVersion` 和 `opId`：版本对不上（另一台设备改过）→ **409** `{conflict, version, updatedAt, groups, items}`，不写入；`force: true` + `expectVersion`（409 里的版本）= 明确用本机版覆盖，服务器锁内复核后先存快照再写，又变了就再 409；重复的 `opId` → `{duplicate: true, version, current}`，不产生新版本；内容与服务器相同不升版本；`restore: true` 先存快照再写。导航地址只收 `http(s)`、搜索模板需 `http(s)` 且含 `%s`、图片地址另有白名单，新出现的不安全地址 → 400 `{invalid:[…]}`（服务器上已有的旧值放行）。旧版前端的 `replay: true`（无 `opId`）仍按内容指纹返回 `{stale: true}`。`GET /api/config?prev=1` 取最新一份快照。同一用户的写入串行执行。JSON 请求体上限 2MB |
+| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`）。PUT **必须**带 `baseVersion`（非负整数，缺失 / 不合法 → 400 `{code:"bad_base_version"}`；服务器还没有配置时任何值都可以，通常是 0）和 `opId`：版本对不上（另一台设备改过）→ **409** `{conflict, version, updatedAt, groups, items}`，不写入；`force: true` + `expectVersion`（409 里的版本）= 明确用本机版覆盖，服务器锁内复核后先存快照再写，又变了就再 409；重复的 `opId` 且内容（键排序后 JSON 的 SHA-256）完全相同 → `{duplicate: true, version, current}`，不产生新版本；同一个 `opId` 却是另一份内容 → **422** `{code:"opid_mismatch"}`，不写入（前端换新 `opId` 正常重推）；内容与服务器相同不升版本；`restore: true` 先存快照再写。导航地址只收 `http(s)`、搜索模板需 `http(s)` 且含 `%s`、图片地址另有白名单，新出现的不安全地址 → 400 `{invalid:[…]}`（旧值豁免只对「同一个项目 / 搜索引擎 id + 同一个字段 + 完全相同的原值」生效，依据当前配置和备份；新项目、别的字段抄这个值一律 400）。旧版前端的 `replay: true`（无 `opId`）仍按内容指纹返回 `{stale: true}`。`GET /api/config?prev=1` 取最新一份快照。同一用户的写入串行执行。JSON 请求体上限 2MB |
 | POST | `/api/config/stash` | 冲突时「使用服务器版」前，把本机版本存成一份快照（不改当前配置） |
 | GET / PUT(POST) / DELETE | `/api/wallpaper` | 当前用户的自定义壁纸。PUT/POST 请求体为原始图片（`Content-Type` 为 `image/jpeg`、`image/png` 或 `image/webp`，≤15MB）；GET 带 ETag，`?v=` 版本号可长期缓存 |
 | GET | `/api/config/backups` · `/api/config?backup=<id>` | 快照列表（`id`、`version`、`updatedAt`、分组 / 项目数、`kind`：`auto` / `replaced` / `restore` / `local`，新的在前）/ 取其中一份 |
