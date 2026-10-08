@@ -61,7 +61,7 @@ test("space edits sync through commit (caps, version+1); selecting a space is de
   p.A.commit((s) => { sid = S.add(s, { name: "NAS", groupIds: ["st0rage9kq2"], itemIds: ["e7h2kq9b1m"], theme: "frost" }); }, "space-add");
   await p.idle();
   const put = p.puts().at(-1);
-  assert.equal(put.status, 200); deq(put.body.caps, ["spaces", "spaces:1"]); // 阶段 2：带上空间 schema 版本
+  assert.equal(put.status, 200); deq(put.body.caps, ["spaces", "spaces:2"]); // 阶段 2：带上空间 schema 版本
   deq(put.body.data.spaces, [{ id: sid, name: "NAS", groupIds: ["st0rage9kq2"], itemIds: ["e7h2kq9b1m"], theme: "frost" }]);
   assert.ok(!("net" in put.body.data.settings) && !("recent" in put.body.data), "device-local fields still stripped");
   const v = (await c.get("/api/config")).json.version;
