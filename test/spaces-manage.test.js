@@ -48,10 +48,10 @@ test("create with templates (name only, no groups), validation mirrors the serve
   submit(win, sh.querySelector("[data-spm-new]"));
   await p.idle();
   let put = p.puts().at(-1);
-  assert.equal(put.status, 200); deq(put.body.caps, ["spaces", "spaces:1"]);
+  assert.equal(put.status, 200); deq(put.body.caps, ["spaces", "spaces:2"]);
   assert.equal(put.body.data.spaces.length, 1);
   deq(put.body.data.spaces[0].groupIds, [], "template never assigns groups by name (存储与监控 not guessed)");
-  assert.equal(put.body.data.spacesVersion, 1);
+  assert.equal(put.body.data.spacesVersion, 2); // 本客户端 schema 2（阶段 3）
   const nas = put.body.data.spaces[0].id;
   assert.equal(A.spaces.selected(), nas, "new space selected (device-local) and expanded");
   assert.ok(sh.querySelector('[data-ed="' + nas + '"]'));
@@ -78,7 +78,12 @@ test("create with templates (name only, no groups), validation mirrors the serve
   deq((await c.get("/api/config")).json.data.spaces[2].groupIds, ["mzq1a0lq8x2", "dl92kfa0q1z"]);
   // pin a single item from another group
   sh.querySelector('[data-ed="' + fun + '"] input[data-sp-item="gh0000chip"]').click();
-  assert.ok(sh.querySelector('[data-ed="' + fun + '"] input[data-sp-item="e7h2kq9b1m"]').disabled, "items of a whole group are covered by the group");
+  const emb = () => sh.querySelector('[data-ed="' + fun + '"] input[data-sp-item="e7h2kq9b1m"]');
+  assert.ok(emb().checked && emb().hasAttribute("data-whole") && !emb().disabled, "items of a whole group are covered by the group (阶段 3：取消勾选 = 在本空间隐藏)");
+  emb().click(); await sleep(10);
+  deq(A.spaces.model.get(A.state, fun).excludeItemIds, ["e7h2kq9b1m"], "unchecking a whole-group item hides it in this space only");
+  assert.ok(!emb().checked); emb().click(); await sleep(10);
+  assert.equal(A.spaces.model.get(A.state, fun).excludeItemIds, undefined, "re-checking removes the exclusion (field dropped when empty)");
   await p.idle();
   deq(A.spaces.list()[2].itemIds, ["gh0000chip"]);
   deq([...doc.querySelectorAll("#x-groups .x-group")].map((s) => s.getAttribute("data-gid")), ["mzq1a0lq8x2", "dl92kfa0q1z", "chips00daily"]);
@@ -208,7 +213,12 @@ test("editing inside a space: add / move / duplicate / new group / delete / unli
   deq(dlNow.filter((id) => dlOrder.ids.includes(id)), dlOrder.ids, "visible items in the new order");
   deq(dlNow.filter((id) => hidden.includes(id)), hidden, "hidden items (MoviePilot) kept, in their relative order");
   // (7) delete an item globally → refs pruned in the same commit, undo restores both
-  const del = doc.querySelector('#x-groups [data-id="e7h2kq9b1m"] .x-ebadge'); del.click();
+  //     阶段 3：在自定义空间里，减号先弹出选择（默认只改本空间）；「从所有空间删除…」→ 再确认一次才真的删
+  const del = doc.querySelector('#x-groups [data-id="e7h2kq9b1m"] .x-ebadge'); del.click(); await sleep(20);
+  assert.ok(A.state.groups.some((g) => g.items.some((i) => i.id === "e7h2kq9b1m")), "the minus badge alone never deletes in a custom space");
+  byText(doc.querySelector(".x-sheet"), ".x-row", "从所有空间删除").click(); await sleep(20);
+  assert.match(doc.querySelector(".x-sheet .x-sdesc").textContent, /出现在 2 个空间里（全部、娱乐）/);
+  byText(doc.querySelector(".x-sheet"), ".x-row.is-red", "删除项目").click(); await sleep(20);
   assert.ok(!sp().itemIds.includes("e7h2kq9b1m")); A.undo(); assert.ok(sp().itemIds.includes("e7h2kq9b1m"));
   // (8) delete every referenced group → empty-state + 选择分组 opens the sheet on this space
   A.commit((s) => { s.groups = s.groups.filter((g) => !sp().groupIds.includes(g.id) && !g.items.some((i) => sp().itemIds.includes(i.id))); }, "delete-group");
