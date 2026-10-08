@@ -1,0 +1,228 @@
+#!/usr/bin/env node
+"use strict";
+/* 假的 docker 命令（只给 tools/v2test 的沙盒自测用）：模拟 inspect / image inspect / pull / ps / run / compose up|down / logs / restart / stop / rm / network。
+ * 状态在 $FAKE_DOCKER_DIR/state.json，所有调用记在 calls.log。「容器」= 真实的 node server.js 进程（FAKE_SERVER_ROOT），
+ * 监听 compose 里写的 <HostIp>:<HostPort>，数据目录 = 挂载到 /data 的宿主机路径。
+ * 拉取行为：FAKE_PULL=ok（默认）| auth（GHCR 401）| mismatch（RepoDigest 不一致）| net（网络错误）。
+ * 支持 --format / -f 的 Go 模板子集：{{.A.B}}、{{range …}}、{{range $k, $v := …}}、{{if …}}、{{eq a b}}、{{index .X "k"}}、{{println …}}、{{json …}}、{{end}}。 */
+const fs = require("fs"), path = require("path"), cp = require("child_process"), crypto = require("crypto");
+const DIR = process.env.FAKE_DOCKER_DIR || die("FAKE_DOCKER_DIR not set");
+const SF = path.join(DIR, "state.json");
+function die(m, code) { process.stderr.write(m + "\n"); process.exit(code == null ? 1 : code); }
+fs.appendFileSync(path.join(DIR, "calls.log"), process.argv.slice(2).map((a) => (a.length > 80 ? a.slice(0, 40) + "…" : a)).join(" ") + "\n");
+const load = () => { try { return JSON.parse(fs.readFileSync(SF, "utf8")); } catch (e) { return { containers: {}, images: {}, networks: {} }; } };
+let st = load();
+const save = () => fs.writeFileSync(SF, JSON.stringify(st, null, 2));
+
+/* ---------------- 模板 */
+function tokenize(s) {
+  const out = []; let i = 0;
+  while (i < s.length) {
+    const j = s.indexOf("{{", i);
+    if (j < 0) { out.push({ t: "text", v: s.slice(i) }); break; }
+    if (j > i) out.push({ t: "text", v: s.slice(i, j) });
+    const k = s.indexOf("}}", j); out.push({ t: "act", v: s.slice(j + 2, k).trim() }); i = k + 2;
+  }
+  return out;
+}
+function parse(toks) {
+  let i = 0;
+  function block() {
+    const nodes = [];
+    while (i < toks.length) {
+      const tk = toks[i++];
+      if (tk.t === "text") { nodes.push(tk); continue; }
+      const v = tk.v;
+      if (v === "end") return nodes;
+      if (/^range /.test(v)) { const m = /^range (\$\w+), (\$\w+) := (.*)$/.exec(v); nodes.push({ t: "range", k: m && m[1], val: m && m[2], expr: m ? m[3] : v.slice(6), body: block() }); continue; }
+      if (/^if /.test(v)) { nodes.push({ t: "if", expr: v.slice(3), body: block() }); continue; }
+      nodes.push({ t: "expr", expr: v });
+    }
+    return nodes;
+  }
+  return block();
+}
+function args(s) { const r = []; const re = /"((?:[^"\\]|\\.)*)"|(\S+)/g; let m; while ((m = re.exec(s))) r.push(m[1] != null ? { lit: JSON.parse('"' + m[1] + '"') } : { ref: m[2] }); return r; }
+function val(a, dot, vars) {
+  if (a.lit != null) return a.lit;
+  const r = a.ref;
+  if (r === ".") return dot;
+  if (r.startsWith("$")) { const [v, ...rest] = r.split("."); let x = vars[v]; for (const p of rest) x = x == null ? undefined : x[p]; return x; }
+  if (r.startsWith(".")) { let x = dot; for (const p of r.slice(1).split(".")) x = x == null ? undefined : x[p]; return x; }
+  return r;
+}
+function evalExpr(e, dot, vars) {
+  const a = args(e);
+  if (!a.length) return "";
+  const f = a[0].ref;
+  if (f === "eq") return val(a[1], dot, vars) === val(a[2], dot, vars);
+  if (f === "index") { const o = val(a[1], dot, vars); const x = o ? o[val(a[2], dot, vars)] : undefined; return x == null ? "" : x; }
+  if (f === "println") return a.slice(1).map((x) => str(val(x, dot, vars))).join(" ") + "\n";
+  if (f === "json") return JSON.stringify(val(a[1], dot, vars));
+  if (f === "join") { const o = val(a[1], dot, vars) || []; return o.join(val(a[2], dot, vars)); }
+  return val(a[0], dot, vars);
+}
+const str = (x) => (x == null ? "<no value>" : typeof x === "object" ? JSON.stringify(x) : String(x));
+const truthy = (x) => !(x == null || x === false || x === "" || x === 0 || (Array.isArray(x) && !x.length) || (typeof x === "object" && !Array.isArray(x) && !Object.keys(x).length));
+function run(nodes, dot, vars) {
+  let o = "";
+  for (const n of nodes) {
+    if (n.t === "text") o += n.v;
+    else if (n.t === "expr") { const v = evalExpr(n.expr, dot, vars); o += v === undefined ? "<no value>" : typeof v === "string" ? v : str(v); }
+    else if (n.t === "if") { if (truthy(evalExpr(n.expr, dot, vars))) o += run(n.body, dot, vars); }
+    else if (n.t === "range") {
+      const c = evalExpr(n.expr, dot, vars);
+      if (Array.isArray(c)) c.forEach((x, i) => { const v2 = Object.assign({}, vars); if (n.k) { v2[n.k] = i; v2[n.val] = x; } o += run(n.body, x, v2); });
+      else if (c && typeof c === "object") for (const k of Object.keys(c).sort()) { const v2 = Object.assign({}, vars); if (n.k) { v2[n.k] = k; v2[n.val] = c[k]; } o += run(n.body, c[k], v2); }
+    }
+  }
+  return o;
+}
+const tpl = (fmt, obj) => run(parse(tokenize(fmt)), obj, {});
+
+/* ---------------- 容器进程 */
+function alive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return false; } }
+function refresh(c) {
+  if (!c.proc) return c;
+  if (c.State.Status === "running" && !(c.pid && alive(c.pid))) { c.State.Status = "exited"; c.State.Health = c.State.Health && { Status: "unhealthy" }; }
+  if (c.State.Status === "running") {
+    const b = c.HostConfig.PortBindings["8080/tcp"][0];
+    let okH = false;
+    try { cp.execFileSync("curl", ["-fsS", "--max-time", "2", "http://" + b.HostIp + ":" + b.HostPort + "/api/health"], { stdio: "ignore" }); okH = true; } catch (e) { /* not yet */ }
+    c.State.Health = { Status: okH ? "healthy" : "starting" };
+  }
+  return c;
+}
+function startProc(c) {
+  const b = c.HostConfig.PortBindings["8080/tcp"][0];
+  const env = Object.assign({}, process.env);
+  for (const kv of c.Config.Env) { const i = kv.indexOf("="); env[kv.slice(0, i)] = kv.slice(i + 1); }
+  const m = c.Mounts.find((x) => x.Destination === "/data");
+  Object.assign(env, { PORT: b.HostPort, HOST: b.HostIp, DATA_DIR: m.Source, STATUS_INTERVAL: "3600", DOCKER_SOCK: path.join(DIR, "no.sock") });
+  for (const k of ["NOCTURNE_NO_AUTH", "TRUSTED_PROXY_CIDRS", "PROBE_ALLOW"]) if (!c.Config.Env.some((x) => x.startsWith(k + "="))) delete env[k];
+  const lf = path.join(DIR, c.Name + ".log");
+  const fd = fs.openSync(lf, "a");
+  const ch = cp.spawn(process.execPath, [path.join(process.env.FAKE_SERVER_ROOT, "server.js")], { env, detached: true, stdio: ["ignore", fd, fd] });
+  ch.unref();
+  c.pid = ch.pid; c.State.Status = "running"; c.State.StartedAt = new Date().toISOString().replace("Z", Math.random().toString().slice(2, 8) + "Z");
+  c.State.Health = { Status: "starting" };
+}
+function stopProc(c) {
+  if (c.pid && alive(c.pid)) { try { process.kill(c.pid, "SIGTERM"); } catch (e) { /* gone */ } for (let i = 0; i < 50 && alive(c.pid); i++) cp.execFileSync("sleep", ["0.1"]); if (alive(c.pid)) process.kill(c.pid, "SIGKILL"); }
+  c.pid = null; c.State.Status = "exited"; c.State.Health = c.State.Health && { Status: "unhealthy" };
+}
+function getC(name) { const c = st.containers[name.replace(/^\//, "")]; return c ? refresh(c) : null; }
+function portsStr(c) { const out = []; for (const [p, bs] of Object.entries(c.HostConfig.PortBindings || {})) for (const b of bs) out.push((b.HostIp || "0.0.0.0") + ":" + b.HostPort + "->" + p); return out.join(", "); }
+
+/* ---------------- 命令 */
+let argv = process.argv.slice(2);
+function takeFmt(a) { const i = a.findIndex((x) => x === "-f" || x === "--format"); if (i < 0) return { fmt: null, rest: a }; const fmt = a[i + 1]; return { fmt, rest: a.slice(0, i).concat(a.slice(i + 2)) }; }
+const cmd = argv.shift();
+const IMG_REPO = "ghcr.io/sadjdg123/nocturne", IMG_DIGEST = "sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa";
+const imgKey = (ref) => { const m = /^(.*?)(?::[\w.-]+)?@(sha256:[0-9a-f]{64})$/.exec(ref); return m ? m[1] + "@" + m[2] : ref; };
+switch (cmd) {
+  case "version": console.log("Client: fake 24.0\nServer: fake 24.0"); break;
+  case "inspect": case "container": {
+    if (cmd === "container") argv.shift(); // container inspect
+    let { fmt, rest } = takeFmt(argv);
+    const ti = rest.indexOf("--type"); let type = "container"; if (ti >= 0) { type = rest[ti + 1]; rest.splice(ti, 2); }
+    if (type !== "container") die("Error: unsupported type");
+    let rc = 0;
+    for (const n of rest) { const c = getC(n); if (!c) { process.stderr.write("Error: No such container: " + n + "\n"); rc = 1; continue; } process.stdout.write(fmt ? tpl(fmt, c) + "\n" : JSON.stringify([c], null, 2) + "\n"); }
+    save(); process.exit(rc);
+  }
+  case "image": {
+    const sub = argv.shift();
+    if (sub === "inspect") {
+      const { fmt, rest } = takeFmt(argv); const im = st.images[imgKey(rest[0])];
+      if (!im) die("Error: No such image: " + rest[0]);
+      process.stdout.write(fmt ? tpl(fmt, im) + "\n" : JSON.stringify([im]) + "\n"); break;
+    }
+    if (sub === "rm") { delete st.images[imgKey(argv[0])]; save(); break; }
+    die("unsupported image " + sub);
+  }
+  case "pull": {
+    const ref = argv[0], mode = process.env.FAKE_PULL || "ok";
+    if (mode === "auth") die('Error response from daemon: Head "https://ghcr.io/v2/sadjdg123/nocturne/manifests/' + IMG_DIGEST + '": unauthorized');
+    if (mode === "net") die("Error response from daemon: Get \"https://ghcr.io/v2/\": dial tcp: lookup ghcr.io: no such host");
+    const dg = mode === "mismatch" ? IMG_REPO + "@sha256:" + "0".repeat(64) : IMG_REPO + "@" + IMG_DIGEST;
+    st.images[imgKey(ref)] = { Id: "sha256:" + crypto.createHash("sha256").update(dg).digest("hex"), RepoTags: [], RepoDigests: [dg] };
+    console.log(IMG_DIGEST.slice(7, 19) + ": Pull complete\nStatus: Downloaded newer image for " + ref); save(); break;
+  }
+  case "ps": {
+    const all = argv.includes("-a"); const { fmt } = takeFmt(argv);
+    for (const c of Object.values(st.containers).map(refresh)) {
+      if (!all && c.State.Status !== "running") continue;
+      const row = { Names: c.Name, Ports: portsStr(c), Image: c.Config.Image, ID: c.Id.slice(0, 12) };
+      console.log(fmt ? tpl(fmt, row) : row.ID + "  " + row.Image + "  " + row.Ports + "  " + row.Names);
+    }
+    save(); break;
+  }
+  case "run": {
+    const env = Object.assign({}, process.env), maps = []; let ep = null, i = 0;
+    for (; i < argv.length; i++) {
+      const a = argv[i];
+      if (a === "--rm") continue;
+      if (a === "--network" || a === "--user") { i++; continue; }
+      if (a === "--entrypoint") { ep = argv[++i]; continue; }
+      if (a === "-e") { const kv = argv[++i]; const j = kv.indexOf("="); env[kv.slice(0, j)] = kv.slice(j + 1); continue; }
+      if (a === "-v") { const [s, d] = argv[++i].split(":"); maps.push([d, s]); continue; }
+      break;
+    }
+    const image = argv[i], rest = argv.slice(i + 1);
+    if (!st.images[imgKey(image)]) die("Unable to find image '" + image + "' locally");
+    const sub = (x) => { for (const [d, s] of maps) if (x === d || x.startsWith(d + "/")) return s + x.slice(d.length); return x; };
+    for (const k of Object.keys(env)) env[k] = sub(env[k]);
+    if (ep !== "node") die("fake docker run: only --entrypoint node is supported");
+    const r = cp.spawnSync(process.execPath, rest.map((x, k) => (rest[k - 1] === "-e" ? x : sub(x))), { env, stdio: "inherit" });
+    process.exit(r.status == null ? 1 : r.status);
+  }
+  case "compose": {
+    if (argv[0] === "version") { if (process.env.FAKE_COMPOSE === "none") die("docker: 'compose' is not a docker command."); console.log("Docker Compose version v2.fake"); break; }
+    let proj = null, file = null; const rest = [];
+    for (let i = 0; i < argv.length; i++) { if (argv[i] === "-p") proj = argv[++i]; else if (argv[i] === "-f") file = argv[++i]; else rest.push(argv[i]); }
+    const y = fs.readFileSync(file, "utf8");
+    if (rest[0] === "up") {
+      const g = (re) => { const m = re.exec(y); return m && m[1]; };
+      const name = g(/^\s+container_name: (\S+)$/m), image = g(/^\s+image: (\S+)$/m);
+      const port = g(/^\s+- "([\d.]+:\d+:\d+)"$/m).split(":");
+      const env = [...y.matchAll(/^\s+- ([A-Z_]+=\S*)$/gm)].map((m) => m[1]);
+      const vol = g(/^\s+- "(\/[^"]+:\/data)"$/m).split(":");
+      const labels = { "com.docker.compose.project": proj, "com.docker.compose.project.working_dir": path.dirname(file), "com.docker.compose.service": name };
+      for (const m of y.matchAll(/^\s+(com\.[\w.]+): "([^"]*)"$/gm)) labels[m[1]] = m[2];
+      if (st.containers[name]) die("Error response from daemon: Conflict. The container name \"/" + name + "\" is already in use");
+      const im = st.images[imgKey(image)]; if (!im) die("pull access denied");
+      if (/0\.0\.0\.0|::/.test(port[0])) die("fake: refusing wildcard bind in tests");
+      const c = { Id: crypto.randomBytes(32).toString("hex"), Name: name, Image: im.Id, RestartCount: 0, proc: true,
+        Config: { Image: image, Env: env.concat(["NODE_ENV=production", "PORT=8080", "DATA_DIR=/data"]), Labels: labels },
+        State: { Status: "created", StartedAt: "" }, Mounts: [{ Type: "bind", Source: vol[0], Destination: "/data", RW: true }],
+        HostConfig: { PortBindings: { "8080/tcp": [{ HostIp: port[0], HostPort: port[1] }] } } };
+      st.networks[proj + "_default"] = { Name: proj + "_default", Labels: { "com.docker.compose.project": proj } };
+      startProc(c); st.containers[name] = c; save(); console.log(" Container " + name + "  Started"); break;
+    }
+    if (rest[0] === "down") {
+      for (const c of Object.values(st.containers)) if (c.Config.Labels["com.docker.compose.project"] === proj) { stopProc(c); delete st.containers[c.Name]; }
+      delete st.networks[proj + "_default"]; save(); break;
+    }
+    die("unsupported compose " + rest[0]);
+  }
+  case "logs": { const n = argv[argv.length - 1]; const c = getC(n); if (!c) die("Error: No such container: " + n); try { process.stdout.write(fs.readFileSync(path.join(DIR, c.Name + ".log"))); } catch (e) { /* none */ } break; }
+  case "restart": case "stop": case "start": {
+    for (const n of argv) {
+      const c = getC(n); if (!c) die("Error: No such container: " + n);
+      if (!c.proc) { if (cmd === "stop") c.State.Status = "exited"; else { c.State.Status = "running"; c.State.StartedAt = new Date().toISOString(); } continue; }
+      if (cmd !== "start") stopProc(c);
+      if (cmd !== "stop") startProc(c);
+      console.log(n);
+    }
+    save(); break;
+  }
+  case "rm": { const n = argv.filter((x) => !x.startsWith("-")); for (const x of n) { const c = getC(x); if (c) { stopProc(c); delete st.containers[c.Name]; } } save(); break; }
+  case "network": {
+    const sub = argv.shift(); const { fmt, rest } = takeFmt(argv); const nw = st.networks[rest[0]];
+    if (sub === "inspect") { if (!nw) die("Error: No such network"); process.stdout.write(fmt ? tpl(fmt, nw) + "\n" : JSON.stringify([nw]) + "\n"); break; }
+    if (sub === "rm") { delete st.networks[rest[0]]; save(); break; }
+    die("unsupported network " + sub);
+  }
+  default: die("fake docker: unsupported command " + cmd);
+}
