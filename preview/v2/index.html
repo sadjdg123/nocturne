@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0A0D14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>夜曲 Nocturne V2.0 · 设计预览</title>
+  <!--v2:fonts--><link rel="stylesheet" href="../../public/fonts/fonts.css" /><!--/v2:fonts-->
+  <!--v2:css--><link rel="stylesheet" href="v2.css" /><!--/v2:css-->
+</head>
+<body class="boot" data-theme="midnight" data-density="comfortable">
+  <div class="sky" aria-hidden="true">
+    <img class="wp wp--d" src="../../public/bg-desktop.jpg" alt="" decoding="async" />
+    <img class="wp wp--m" src="../../public/bg-mobile.jpg" alt="" decoding="async" />
+    <div class="dome dome--midnight" data-t="midnight"></div>
+    <div class="dome dome--dawn" data-t="dawn"></div>
+    <div class="dome dome--indigo" data-t="indigo"></div>
+    <div class="dome dome--frost" data-t="frost"></div>
+    <div class="vignette"></div>
+    <div class="grain"></div>
+  </div>
+
+  <div class="app">
+    <!-- 桌面左栏 -->
+    <nav class="rail" aria-label="空间">
+      <p class="brand">夜曲 <em>Nocturne</em></p>
+      <p class="rail-h" id="sp-h">空间</p>
+      <ul class="spaces" id="spaces" aria-labelledby="sp-h"><span class="sp-ind" id="sp-ind" aria-hidden="true"></span></ul>
+      <button class="rail-act" type="button" data-act="manage">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>管理空间
+      </button>
+      <div class="rail-foot">
+        <button class="netbtn" id="netbtn" type="button" aria-haspopup="dialog" aria-expanded="false" data-act="net">
+          <span class="dot" aria-hidden="true"></span>
+          <span><b id="net-mode">网络：自动</b><small id="net-eff">当前走内网</small></span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10l4-4 4 4M8 14l4 4 4-4"/></svg>
+        </button>
+        <div class="acct">
+          <span class="avatar" aria-hidden="true">J</span>
+          <span><b>jingbo</b><small>管理员</small></span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- 手机顶栏 -->
+    <header class="mbar">
+      <p class="brand">夜曲 <em>Nocturne</em></p>
+      <button class="netpill" id="netpill" type="button" aria-haspopup="dialog" aria-expanded="false" data-act="net">
+        <span class="dot" aria-hidden="true"></span><span id="netpill-t">内网</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5"/></svg>
+      </button>
+    </header>
+
+    <main class="main" id="main">
+      <div class="main-in">
+        <section class="hero" aria-label="时间">
+          <div>
+            <p class="clock num" id="clock" aria-live="off"><span id="hh">21</span><span class="col">:</span><span id="mm">47</span><span class="sec" id="ss">08</span></p>
+            <div class="dateline"><p class="greet" id="greet">晚上好，jingbo</p><p class="date" id="date">10月8日 星期四</p></div>
+          </div>
+          <div class="sp-title" aria-live="polite">
+            <small>当前空间</small>
+            <h1 id="sp-name">全部</h1>
+            <p id="sp-sub">6 个分组，18 项服务</p>
+          </div>
+          <a class="mstat" href="#obs" aria-label="查看观测记录">
+            <svg class="ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="bg" cx="20" cy="20" r="16"/><circle class="fg" id="mring" cx="20" cy="20" r="16" stroke-dasharray="100.5" stroke-dashoffset="12"/></svg>
+            <span><b id="mstat-n">16/18</b><small>在线</small></span>
+          </a>
+        </section>
+
+        <form class="search" role="search" id="search">
+          <label class="bar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+            <span class="vh">搜索网页</span>
+            <input id="q" type="search" placeholder="用 Google 搜索，或输入网址" autocomplete="off" enterkeyhint="search" />
+            <button class="kbd" type="button" data-act="palette" aria-label="打开快速打开（Ctrl K）"><span id="kbd-k">Ctrl K</span>快速打开</button>
+          </label>
+        </form>
+        <div class="engines" role="group" aria-label="搜索引擎" id="engines">
+          <span class="lbl">搜索引擎</span>
+        </div>
+
+        <div class="view" id="view"></div>
+      </div>
+    </main>
+
+    <aside class="obs" id="obs" aria-label="观测记录">
+      <div class="obs-wrap">
+        <div class="obs-h"><h2>观测记录</h2><span class="sim" title="预览中的在线状态与延迟均为模拟数据">模拟数据</span></div>
+        <div class="obs-body">
+          <div class="obs-sum">
+            <svg class="ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="bg" cx="20" cy="20" r="17"/><circle class="fg" id="ring" cx="20" cy="20" r="17" stroke-dasharray="106.8" stroke-dashoffset="12"/></svg>
+            <div><p class="big" id="obs-n">16<small>/ 18 在线</small></p><p id="obs-p">本空间 2 项离线，最近检测 21:46</p></div>
+          </div>
+          <section class="obs-sec"><h3 id="lat-h">响应延迟</h3><ul class="lat-list" id="lat"></ul></section>
+          <section class="obs-sec"><h3>最近使用</h3><ul class="recent" id="recent"></ul></section>
+          <p class="obs-note">预览中的在线状态与延迟为模拟数据；正式版沿用 V1.1 的真实服务端检测。</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 手机：空间切换器 + dock -->
+  <nav class="mdock" aria-label="底部导航">
+    <div class="mdock-in">
+      <div class="sws" id="sws" role="tablist" aria-label="空间"></div>
+      <div class="dock">
+        <button type="button" data-act="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>搜索</button>
+        <button type="button" data-act="palette"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6L13 3z"/></svg>快速打开</button>
+        <button type="button" data-act="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>编辑</button>
+        <button type="button" data-act="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>设置</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="ebar" role="status"><span>编辑模式：拖动排序、点按编辑项目</span><button class="btn pri" type="button" data-act="edit-done">完成</button></div>
+
+  <!-- 浮层 -->
+  <div class="scrim" id="scrim" hidden></div>
+
+  <div class="layer panel netmenu" id="netmenu" role="dialog" aria-modal="true" aria-labelledby="nm-h" hidden>
+    <h3 id="nm-h">访问方式</h3>
+    <div role="radiogroup" aria-labelledby="nm-h" id="netopts"></div>
+    <p class="probe" id="probe"></p>
+  </div>
+
+  <div class="layer panel pal" id="pal" role="dialog" aria-modal="true" aria-label="快速打开" hidden>
+    <div class="pal-in">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+      <input id="pq" type="text" placeholder="搜索全部空间的项目，或输入 > 执行操作" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="plist" aria-autocomplete="list" enterkeyhint="go" />
+      <button class="pal-x" type="button" data-act="close">取消</button>
+    </div>
+    <div class="pal-list" id="plist" role="listbox" aria-label="结果"></div>
+    <div class="pal-foot"><span><kbd>↑↓</kbd>选择</span><span><kbd>Enter</kbd>打开</span><span><kbd>&gt;</kbd>操作模式</span><span><kbd>Esc</kbd>关闭</span></div>
+  </div>
+
+  <div class="layer panel sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sh-h" hidden>
+    <div class="sheet-h"><h2 id="sh-h">管理空间</h2><button class="xbtn" type="button" data-act="close" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sheet-b" id="sheet-b"></div>
+    <div class="sheet-f" id="sheet-f"></div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!--v2:js--><script src="v2.js"></script><!--/v2:js-->
+</body>
+</html>
