@@ -31,8 +31,15 @@
   var ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
   var THEMES = ["default", "dawn", "dusk", "frost"]; // 默认（中性午夜蓝）/ 晨光琥珀 / 深靛紫 / 冷霜青
   var DENSITIES = ["comfortable", "poster", "compact"]; // 舒适 / 海报卡 / 紧凑行
-  var KEYS = { id: 1, name: 1, groupIds: 1, itemIds: 1, theme: 1, density: 1 };
   var CTRL = /[\u0000-\u001f\u007f\u2028\u2029]/;
+
+  /* id 字典一律用无原型对象 + 自有属性判断：id / 引用 / 字段名可以是 constructor、toString、__proto__、hasOwnProperty、valueOf、prototype
+   * （ID_RE 和引用规则都允许），绝不能和 Object.prototype 上的成员撞上（误判重复 / 误判存在 / 改掉字典的原型 / 调用到函数）。 */
+  var HOP = Object.prototype.hasOwnProperty;
+  function dict() { return Object.create(null); }
+  function has(o, k) { return HOP.call(o, k); }
+  function setOf(list) { var d = dict(); for (var i = 0; i < list.length; i++) d[list[i]] = true; return d; }
+  var KEYS = setOf(["id", "name", "groupIds", "itemIds", "theme", "density"]);
 
   function len(s) { return Array.from(s).length; }
   function isObj(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
@@ -47,20 +54,20 @@
     var sp = data.spaces;
     if (!Array.isArray(sp)) return [{ where: "spaces", problem: "必须是数组" }];
     if (sp.length > MAX_SPACES) bad.push({ where: "spaces", problem: "最多 " + MAX_SPACES + " 个空间" });
-    var ids = {}, names = {};
+    var ids = dict(), names = dict();
     for (var i = 0; i < sp.length && bad.length < 50; i++) {
       var s = sp[i], w = "第 " + (i + 1) + " 个空间";
       if (!isObj(s)) { bad.push({ where: w, problem: "必须是对象" }); continue; }
-      for (var k in s) if (Object.prototype.hasOwnProperty.call(s, k) && !KEYS[k]) { bad.push({ where: w, problem: "未知字段 " + String(k).slice(0, 32) }); break; }
+      for (var k in s) if (has(s, k) && !has(KEYS, k)) { bad.push({ where: w, problem: "未知字段 " + String(k).slice(0, 32) }); break; }
       if (typeof s.id !== "string" || !ID_RE.test(s.id)) bad.push({ where: w, problem: "id 只能是 1–40 位字母、数字、_ -" });
       else if (s.id === ALL) bad.push({ where: w, problem: "id \"all\" 是「全部」保留的" });
-      else if (ids[s.id]) bad.push({ where: w, problem: "id 重复" });
-      else ids[s.id] = 1;
+      else if (has(ids, s.id)) bad.push({ where: w, problem: "id 重复" });
+      else ids[s.id] = true;
       if (typeof s.name !== "string" || !s.name.trim()) bad.push({ where: w, problem: "名称不能为空" });
       else if (len(s.name) > NAME_MAX) bad.push({ where: w, problem: "名称最多 " + NAME_MAX + " 个字" });
       else if (CTRL.test(s.name)) bad.push({ where: w, problem: "名称含控制字符" });
-      else if (!lenient && (nameKey(s.name) === ALL_NAME || names[nameKey(s.name)])) bad.push({ where: w, problem: "名称「" + s.name.trim() + "」重复" });
-      else names[nameKey(s.name)] = 1;
+      else if (!lenient && (nameKey(s.name) === ALL_NAME || has(names, nameKey(s.name)))) bad.push({ where: w, problem: "名称「" + s.name.trim() + "」重复" });
+      else names[nameKey(s.name)] = true;
       ["groupIds", "itemIds"].forEach(function (f) {
         var v = s[f];
         if (v === undefined && f === "itemIds") return;
@@ -76,7 +83,7 @@
 
   /* ------------------------------------------------------------ 引用 */
   function index(data) {
-    var g = {}, it = {};
+    var g = dict(), it = dict();
     var groups = isObj(data) && Array.isArray(data.groups) ? data.groups : [];
     for (var i = 0; i < groups.length; i++) {
       var x = groups[i]; if (!isObj(x) || x.id == null) continue;
@@ -87,8 +94,8 @@
     return { groups: g, items: it };
   }
   function cleanRefs(list, exists) {
-    var seen = {}, out = [];
-    for (var i = 0; i < list.length; i++) { var v = list[i]; if (typeof v !== "string" || seen[v] || !exists[v]) continue; seen[v] = 1; out.push(v); }
+    var seen = dict(), out = [];
+    for (var i = 0; i < list.length; i++) { var v = list[i]; if (typeof v !== "string" || has(seen, v) || !has(exists, v)) continue; seen[v] = true; out.push(v); }
     return out;
   }
   /** 清掉悬空 / 重复的引用（被删的分组、被删的项目）。原地修改，返回清掉的引用个数。没有 spaces 字段时什么也不做。
@@ -114,16 +121,16 @@
     if (!isObj(data) || data.spaces === undefined) return false;
     var before = JSON.stringify(data.spaces);
     if (!Array.isArray(data.spaces)) { delete data.spaces; return true; }
-    var ids = {}, names = {}, out = [];
+    var ids = dict(), names = dict(), out = [];
     data.spaces.forEach(function (s) {
-      if (out.length >= MAX_SPACES || !isObj(s) || typeof s.id !== "string" || !ID_RE.test(s.id) || s.id === ALL || ids[s.id]) return;
-      ids[s.id] = 1;
+      if (out.length >= MAX_SPACES || !isObj(s) || typeof s.id !== "string" || !ID_RE.test(s.id) || s.id === ALL || has(ids, s.id)) return;
+      ids[s.id] = true;
       var name = typeof s.name === "string" ? s.name.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, "").trim() : "";
       if (len(name) > NAME_MAX) name = Array.from(name).slice(0, NAME_MAX).join("").trim();
       if (!name) name = "未命名空间";
       var base = name, k = 2;
-      while (nameKey(name) === ALL_NAME || names[nameKey(name)]) { var suf = " " + k++; name = Array.from(base).slice(0, NAME_MAX - suf.length).join("").trim() + suf; }
-      names[nameKey(name)] = 1;
+      while (nameKey(name) === ALL_NAME || has(names, nameKey(name))) { var suf = " " + k++; name = Array.from(base).slice(0, NAME_MAX - suf.length).join("").trim() + suf; }
+      names[nameKey(name)] = true;
       var x = { id: s.id, name: name, groupIds: Array.isArray(s.groupIds) ? s.groupIds.slice(0, MAX_REFS) : [] };
       if (Array.isArray(s.itemIds)) x.itemIds = s.itemIds.slice(0, MAX_REFS);
       if (THEMES.indexOf(s.theme) > -1) x.theme = s.theme;
@@ -146,32 +153,39 @@
     var groups = isObj(data) && Array.isArray(data.groups) ? data.groups : [];
     var s = get(data, id);
     if (!s) return groups.filter(isObj).map(function (g) { return { group: g, items: Array.isArray(g.items) ? g.items : [], whole: true }; });
-    var gs = {}, is = {};
-    (Array.isArray(s.groupIds) ? s.groupIds : []).forEach(function (x) { gs[x] = 1; });
-    (Array.isArray(s.itemIds) ? s.itemIds : []).forEach(function (x) { is[x] = 1; });
+    var gs = dict(), is = dict();
+    (Array.isArray(s.groupIds) ? s.groupIds : []).forEach(function (x) { if (typeof x === "string") gs[x] = true; });
+    (Array.isArray(s.itemIds) ? s.itemIds : []).forEach(function (x) { if (typeof x === "string") is[x] = true; });
     var out = [];
     groups.forEach(function (g) {
       if (!isObj(g)) return;
       var items = Array.isArray(g.items) ? g.items : [];
-      if (gs[String(g.id)]) out.push({ group: g, items: items, whole: true });
+      if (g.id != null && has(gs, String(g.id))) out.push({ group: g, items: items, whole: true });
       else {
-        var pick = items.filter(function (i) { return isObj(i) && is[String(i.id)]; });
+        var pick = items.filter(function (i) { return isObj(i) && i.id != null && has(is, String(i.id)); });
         if (pick.length) out.push({ group: g, items: pick, whole: false });
       }
     });
     return out;
   }
-  /** 每个分组出现在哪些自定义空间里：{groupId: [spaceId…]}（管理界面「出现在 N 个空间」用） */
+  /** 每个分组出现在哪些自定义空间里：{groupId: [spaceId…]}（管理界面「出现在 N 个空间」用）。
+   *  返回无原型对象：m["constructor"] 只在真有这个分组 id 时才有值。 */
   function membership(data) {
-    var m = {};
-    list(data).forEach(function (s) { (s.groupIds || []).forEach(function (g) { (m[g] = m[g] || []).push(s.id); }); });
+    var m = dict();
+    list(data).forEach(function (s) {
+      (Array.isArray(s.groupIds) ? s.groupIds : []).forEach(function (g) {
+        if (typeof g !== "string") return;
+        if (!has(m, g)) m[g] = [];
+        if (m[g].indexOf(s.id) < 0) m[g].push(s.id);
+      });
+    });
     return m;
   }
 
   /* ------------------------------------------------------------ 修改（在 App.commit 里调用，可撤销） */
   function newId(data) {
-    var used = {}; list(data).forEach(function (s) { used[s.id] = 1; });
-    for (;;) { var id = "s" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3); if (!used[id]) return id; }
+    var used = dict(); list(data).forEach(function (s) { if (typeof s.id === "string") used[s.id] = true; });
+    for (;;) { var id = "s" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3); if (!has(used, id) && id !== ALL) return id; }
   }
   function err(m) { var e = new Error(m); e.code = "bad_space"; return e; }
   function cleanName(data, name, exceptId) {
@@ -218,8 +232,8 @@
   function setLook(data, id, look) {
     var s = get(data, id); if (!s) throw err("空间不存在");
     look = look || {};
-    if ("theme" in look) { if (look.theme == null) delete s.theme; else if (THEMES.indexOf(look.theme) > -1) s.theme = look.theme; else throw err("theme 不合法"); }
-    if ("density" in look) { if (look.density == null) delete s.density; else if (DENSITIES.indexOf(look.density) > -1) s.density = look.density; else throw err("density 不合法"); }
+    if (has(look, "theme")) { if (look.theme == null) delete s.theme; else if (THEMES.indexOf(look.theme) > -1) s.theme = look.theme; else throw err("theme 不合法"); }
+    if (has(look, "density")) { if (look.density == null) delete s.density; else if (DENSITIES.indexOf(look.density) > -1) s.density = look.density; else throw err("density 不合法"); }
   }
 
   /* ------------------------------------------------------------ 本机当前空间（不同步） */
