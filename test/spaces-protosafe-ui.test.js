@@ -17,8 +17,8 @@ function data() {
   return JSON.parse(JSON.stringify({
     settings: { title: "夜曲", subtitle: "Nocturne", user: "T", cols: 4, engine: "google", engines: [{ id: "google", name: "Google", url: "https://www.google.com/search?q=%s", on: true }] },
     groups: [
-      { id: "g-a", name: "甲组", style: "icon", items: NAMES.slice(0, 3).map((n, i) => ({ id: n, title: "服务" + n, desc: "", lan: "", wan: "https://s" + i + ".invalid", icon: { type: "text", value: "S" + i } })) },
-      { id: "constructor", name: "构造组", style: "icon", items: NAMES.slice(3).map((n, i) => ({ id: n, title: "服务" + n, desc: "", lan: "", wan: "https://t" + i + ".invalid", icon: { type: "text", value: "T" + i } })) },
+      { id: "g-a", name: "甲组", style: "icon", items: NAMES.slice(0, 3).map((n, i) => ({ id: n, title: "服务" + n, desc: "", lan: "", wan: "https://s" + i + ".nocturne-test.net", icon: { type: "text", value: "S" + i } })) },
+      { id: "constructor", name: "构造组", style: "icon", items: NAMES.slice(3).map((n, i) => ({ id: n, title: "服务" + n, desc: "", lan: "", wan: "https://t" + i + ".nocturne-test.net", icon: { type: "text", value: "T" + i } })) },
     ],
     recent: ["constructor", "__proto__", "valueOf"],
     spaces: [{ id: "toString", name: "原型空间", groupIds: ["constructor"], itemIds: ["__proto__"] }],
@@ -58,6 +58,7 @@ test("index.html (static, file://): render, status count, palette (recent / sear
   assert.deepEqual(ids, NAMES.slice(0, 3).concat(NAMES.slice(3)), "every item rendered once (全部)");
   await sleep(300);
   assert.match(doc.querySelector(".x-side .x-cnt").textContent, /\/ 6/, "status total counts all 6 items (dict lookups)");
+  assert.match(doc.querySelector(".x-side .x-cnt").textContent, /可能在线/, "browser probes are never reported as definitely online (阶段 3)");
   // palette: empty query → recent rows are exactly the recent ids
   A.palette.open("");
   const rows = () => [...doc.querySelectorAll(".x-cmdk-row")].map((r) => r.textContent);
