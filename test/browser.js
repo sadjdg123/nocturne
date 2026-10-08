@@ -102,4 +102,73 @@ function importFile(page, obj) {
   input.dispatchEvent(new win.Event("change", { bubbles: true }));
 }
 
-module.exports = { openPage, importFile, SKIP, jsdom, sleep, ROOT: path.join(__dirname, "..") };
+/**
+ * 纯静态模式（没有 window.NOCTURNE）：opts.url = "file:///…/public/index.html"（直接读磁盘）或 "http://127.0.0.1:<port>/index.html"（python http.server）。
+ * opts.storage：这台设备的 localStorage；返回值与 openPage 相同（reqs 里只会有浏览器端状态探测，测试里一律当作连不上）。
+ */
+async function openStatic(opts = {}) {
+  const fs = require("node:fs");
+  const { JSDOM, ResourceLoader, VirtualConsole } = jsdom;
+  const errors = [], reqs = [];
+  let closed = false;
+  const u = new URL(opts.url);
+  const read = async (href) => {
+    const x = new URL(href);
+    if (x.protocol === "file:") return fs.readFileSync(decodeURIComponent(x.pathname));
+    const r = await fetch(href); return Buffer.from(await r.arrayBuffer());
+  };
+  class Loader extends ResourceLoader {
+    fetch(url, o) {
+      if (!o || !o.element || o.element.localName !== "script") return Promise.resolve(Buffer.from(""));
+      return read(url);
+    }
+  }
+  const html = (await read(opts.url)).toString("utf8");
+  const vc = new VirtualConsole();
+  vc.on("jsdomError", (e) => errors.push(String(e && (e.stack || e.message) || e)));
+  vc.on("error", (e) => errors.push("console.error " + String(e && (e.stack || e.message) || e)));
+  const dom = new JSDOM(html, {
+    url: opts.url, runScripts: "dangerously", resources: new Loader(), pretendToBeVisual: true, virtualConsole: vc,
+    beforeParse(win) {
+      if (!win.localStorage) { // jsdom 的 file:// 是不透明源、没有 localStorage；Chrome / Safari 的 file:// 有。这里给一个等价的内存实现
+        const m = new Map();
+        const ls = { getItem: (k) => (m.has(String(k)) ? m.get(String(k)) : null), setItem: (k, v) => { m.set(String(k), String(v)); }, removeItem: (k) => { m.delete(String(k)); },
+          clear: () => m.clear(), key: (i) => [...m.keys()][i] ?? null, get length() { return m.size; } };
+        Object.defineProperty(win, "localStorage", { configurable: true, get: () => ls });
+      }
+      for (const [k, v] of Object.entries(opts.storage || {})) win.localStorage.setItem(k, v);
+      win.structuredClone = (v) => structuredClone(v);
+      win.TextEncoder = TextEncoder;
+      win.matchMedia = win.matchMedia || ((q) => ({ matches: false, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
+      win.ResizeObserver = win.ResizeObserver || class { observe() {} unobserve() {} disconnect() {} };
+      win.IntersectionObserver = win.IntersectionObserver || class { observe() {} unobserve() {} disconnect() {} };
+      win.scrollTo = () => {};
+      win.HTMLElement.prototype.scrollIntoView = function () {};
+      win.URL.createObjectURL = (blob) => { (win.__downloads = win.__downloads || []).push(blob); return "blob:test/" + win.__downloads.length; };
+      win.URL.revokeObjectURL = () => {};
+      win.HTMLAnchorElement.prototype.click = function () { (win.__clicked = win.__clicked || []).push(this.download || this.href); };
+      win.open = (x) => { (win.__opened = win.__opened || []).push(String(x)); return null; };
+      win.fetch = async (x, o = {}) => { // 静态页只会探测项目地址：一律当作连不上，不真的发出去
+        reqs.push({ method: (o && o.method) || "GET", path: String(x) });
+        await sleep(5); if (closed) return new Promise(() => {});
+        throw new TypeError("Failed to fetch (blocked in test)");
+      };
+    },
+  });
+  const win = dom.window;
+  await new Promise((r) => { if (win.document.readyState === "complete") r(); else win.addEventListener("load", r); });
+  await sleep(opts.settle == null ? 200 : opts.settle);
+  return {
+    win, dom, reqs, errors, origin: u.origin,
+    get A() { return win.App; },
+    storage() { const o = {}; for (let i = 0; i < win.localStorage.length; i++) { const k = win.localStorage.key(i); o[k] = win.localStorage.getItem(k); } return o; },
+    puts() { return []; },
+    async idle(ms = 300) { await sleep(ms); },
+    async close() { closed = true; await sleep(50); try { win.close(); } catch (e) { /* ignore */ } },
+  };
+}
+
+/** 页面里按可见文字找按钮 / 链接 */
+function byText(root, sel, text) { return [...root.querySelectorAll(sel)].find((el) => el.textContent.trim() === text || el.textContent.includes(text)); }
+
+module.exports = { openPage, openStatic, importFile, byText, SKIP, jsdom, sleep, ROOT: path.join(__dirname, "..") };
