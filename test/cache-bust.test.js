@@ -1,7 +1,10 @@
 "use strict";
 /* V2.0 RC · 部署后更新能不能到达浏览器：
  *  1. index.html 引用的每个本地脚本 / 样式：内容和 V1.1（main@3e6da3c，按 blob SHA）不同 → ?v= 也必须不同（否则升级后浏览器最多一天还在用 V1.1 的缓存文件）
- *  2. 缓存头：index.html no-store；字体文件 immutable；fonts.css 与其他静态文件 1 天后重新校验 + ETag / 304 */
+ *  2. 对每个已发布版本（V1.1 / RC.1 / RC.2 / RC.3，清单 test/fixtures/released-assets.json，由 tools/gen-released-assets.js 从远程提交生成）：
+ *     浏览器会按固定 URL 缓存的每个本地静态文件（index.html 的 src / href / url()、css 里的 url()、manifest 图标），
+ *     现在的 URL（路径 + ?v=）若和该版本用过的相同，内容必须逐字节相同；内容变了就必须换 ?v=。清单不依赖 git，CI 有完整历史时再按提交核对清单本身。
+ *  3. 缓存头：index.html no-store；字体文件 immutable；fonts.css 与其他静态文件 1 天后重新校验 + ETag / 304 */
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
@@ -9,6 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { startServer, client } = require("./helpers");
+const { collectRefs, sha256, gitBlob } = require("./asset-refs");
 
 const ROOT = path.join(__dirname, "..");
 const V11_INDEX = "cbc42170a30b33c6a4f20c3afb0dc2ab0160ddbe";
@@ -47,6 +51,58 @@ test("every asset whose content changed since V1.1 has a new ?v= in index.html",
   assert.ok(Object.keys(V11_ASSETS).every((p) => old.has(p)), "V1.1 table matches V1.1 index.html");
 });
 
+const MANIFEST = require("./fixtures/released-assets.json");
+const PUB = path.join(ROOT, "public");
+const readPub = (p) => { const f = path.join(PUB, p); return fs.existsSync(f) && fs.statSync(f).isFile() ? fs.readFileSync(f) : null; };
+function git(args) { try { return execFileSync("git", ["-C", ROOT, ...args], { stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 << 20 }); } catch (e) { return null; } }
+
+test("released-assets manifest covers every released version", () => {
+  assert.deepEqual(MANIFEST.releases.map((r) => r.name), ["V1.1", "RC.1", "RC.2", "RC.3"]);
+  const commits = { "V1.1": "3e6da3c", "RC.1": "2ee0983", "RC.2": "3d5beaf", "RC.3": "e4de70b" };
+  for (const r of MANIFEST.releases) {
+    assert.ok(r.commit.startsWith(commits[r.name]), r.name + " commit");
+    assert.ok(r.image.endsWith(":sha-" + commits[r.name]), r.name + " image");
+    assert.ok(Object.keys(r.assets).some((u) => u.startsWith("nocturne.js?v=")), r.name + " has nocturne.js");
+    assert.ok(Object.keys(r.assets).length >= 20, r.name + " URL count");
+  }
+});
+
+for (const rel of MANIFEST.releases) {
+  test("same URL as " + rel.name + " (" + rel.commit.slice(0, 7) + ") ⇒ same content (changed asset needs a new ?v=)", () => {
+    const now = collectRefs(readPub);
+    assert.ok(now.size >= 20, "found " + now.size + " cacheable URLs in index.html / css / manifest");
+    const stale = [];
+    let shared = 0;
+    for (const [url, ref] of now) {
+      const old = rel.assets[url];
+      if (!old) continue;
+      shared++;
+      if (sha256(readPub(ref.path)) !== old.sha256) stale.push(url);
+    }
+    assert.deepEqual(stale, [], "content changed since " + rel.name + " but URL unchanged (browser may serve the cached " + rel.name + " file for up to 86400s): " + stale.join(", "));
+    assert.ok(shared >= 10, "compared " + shared + " URLs with " + rel.name);
+  });
+}
+
+test("manifest matches the released commits (git objects; required in CI with fetch-depth: 0)", (t) => {
+  let commitsSeen = 0, blobsSeen = 0;
+  for (const rel of MANIFEST.releases) {
+    for (const [url, a] of Object.entries(rel.assets)) {
+      const buf = git(["cat-file", "blob", a.blob]);
+      if (buf) { blobsSeen++; assert.equal(gitBlob(buf), a.blob); assert.equal(sha256(buf), a.sha256, rel.name + " " + url + " sha256"); }
+    }
+    const idx = git(["rev-parse", rel.commit + ":public/index.html"]);
+    if (!idx) continue;
+    commitsSeen++;
+    assert.equal(idx.toString().trim(), rel.indexBlob, rel.name + " index.html blob");
+    for (const [url, a] of Object.entries(rel.assets)) {
+      assert.equal(git(["rev-parse", rel.commit + ":public/" + a.path]).toString().trim(), a.blob, rel.name + " " + url + " blob");
+    }
+  }
+  if (process.env.CI) assert.equal(commitsSeen, MANIFEST.releases.length, "CI must have every released commit (fetch-depth: 0)");
+  if (!commitsSeen) t.diagnostic("released commits not in local git (remote commit SHAs differ from local); checked " + blobsSeen + " blobs only");
+});
+
 test("cache headers: index no-store; woff2 immutable; fonts.css and scripts revalidate with ETag / 304", async (t) => {
   const srv = await startServer();
   t.after(() => srv.stop());
@@ -57,9 +113,9 @@ test("cache headers: index no-store; woff2 immutable; fonts.css and scripts reva
   assert.match((await c.get("/fonts/" + font)).headers.get("cache-control"), /immutable/);
   const css = await c.get("/fonts/fonts.css");
   assert.equal(css.headers.get("cache-control"), "public, max-age=86400, must-revalidate", "fonts.css is not pinned for a year");
-  const js = await c.get("/nocturne.js?v=8");
+  const jsUrl = "/" + idx.body.toString("utf8").match(/<script src="(nocturne\.js\?v=\d+)"/)[1];
+  const js = await c.get(jsUrl);
   assert.equal(js.headers.get("cache-control"), "public, max-age=86400, must-revalidate");
   const etag = js.headers.get("etag"); assert.ok(etag);
-  assert.equal((await c.get("/nocturne.js?v=8", { "If-None-Match": etag })).status, 304);
-  assert.match(idx.body.toString("utf8"), /nocturne\.js\?v=8/);
+  assert.equal((await c.get(jsUrl, { "If-None-Match": etag })).status, 304);
 });
