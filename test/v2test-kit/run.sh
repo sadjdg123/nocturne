@@ -2,7 +2,7 @@
 # tools/v2test 沙盒端到端自测（不在 npm test 里：需要本机回环上有一个 RFC1918 别名地址）。
 #   sudo ip addr add 192.168.77.10/32 dev lo     # 一次性；测试站会真的监听 192.168.77.10:8089
 #   sh test/v2test-kit/run.sh [dash] [busybox]    # 默认两个 shell 都跑
-# 假的 docker / ip / ss / hostname 放在 test/v2test-kit/bin（PATH 最前面）；「容器」是真实的 node server.js（本仓库，2.0.0-rc.1），
+# 假的 docker / ip / ss / hostname 放在 test/v2test-kit/bin（PATH 最前面）；「容器」是真实的 node server.js（本仓库，2.0.0-rc.2），
 # 「生产」data 由真实的 V1.1 基线 server.js 生成（test/v11.js）。全部是假数据。
 # shellcheck disable=SC2012,SC2015
 set -u
@@ -58,7 +58,7 @@ require("fs").writeFileSync(f, JSON.stringify(s, null, 2));' "$FD/state.json" "$
 no_prod_ops() { ! grep -Eq '^(stop|restart|start|rm|kill|pause)( -f)? nocturne$' "$FD/calls.log"; }
 prod_same() { [ "$(prodsum)" = "$PROD_SUM" ]; }
 only_known_hex() { # 报告里 64 位十六进制只允许：镜像 digest、备份归档 sha256
-  _arch=$(sed -n 's/^  归档 sha256：//p' "$1"); grep -oE '[0-9a-f]{64}' "$1" | sort -u | grep -vx "85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa" | grep -vx "$_arch" | grep -q . && return 1; return 0; }
+  _arch=$(sed -n 's/^  归档 sha256：//p' "$1"); grep -oE '[0-9a-f]{64}' "$1" | sort -u | grep -vx "08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e" | grep -vx "$_arch" | grep -q . && return 1; return 0; }
 
 export FAKE_DOCKER_DIR="$FD" FAKE_SERVER_ROOT="$REPO" V2TEST_ALLOW_NONROOT=1 V2TEST_WAIT_STEP=1 V2TEST_WAIT_SECS=40 TMPDIR="$T/tmp"
 PATH="$HERE/bin:$PATH"; export PATH
@@ -77,7 +77,7 @@ for SHN in $SHELLS; do
   REP=$(ls "$TR"/v2test-report-*.txt 2>/dev/null | head -n 1)
   check "报告文件存在且 600" sh -c "[ -f '$REP' ] && [ \"\$(stat -c %a '$REP')\" = 600 ]"
   check "报告：结果通过" has "结果：通过" "$REP"
-  check "报告：health version 2.0.0-rc.1 auth=true" has "version=2.0.0-rc.1 auth=true" "$REP"
+  check "报告：health version 2.0.0-rc.2 auth=true" has "version=2.0.0-rc.2 auth=true" "$REP"
   check "报告：唯一挂载是测试目录" has "唯一的挂载：$TR/data → /data" "$REP"
   check "报告：端口只绑内网 IP" has "端口绑定 $LANIP:8089" "$REP"
   check "报告：会话 3 条 / 已知设备 3 条已清除" has "会话 3 条、已知设备 3 条" "$REP"
@@ -88,11 +88,12 @@ for SHN in $SHELLS; do
   check "报告：不含密码 / scrypt / 明文口令 / 令牌" sh -c "! grep -Eq 'scrypt|admin-pass|bob-pass' '$REP' && ! grep -oE '[A-Za-z0-9_-]{43,}' '$REP' | grep -vqE '^[0-9a-f]{64}\$'"
   check "报告：不含生产 / 副本里任何会话键与设备哈希" sh -c "! grep -qFf '$T/secrets.txt' '$REP' && ! grep -qFf '$T/secrets.txt' '$T/deploy-$SHN.out'"
   check "报告：64 位十六进制只有镜像 digest 与归档 sha256" only_known_hex "$REP"
-  check "compose：$LANIP:8089:8080、固定镜像、无 docker.sock、无 NO_AUTH、PUID 1026" sh -c "grep -q '\"$LANIP:8089:8080\"' '$TR/docker-compose.yml' && grep -q 'image: ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa' '$TR/docker-compose.yml' && ! grep -v '^ *#' '$TR/docker-compose.yml' | grep -q 'docker.sock\|NO_AUTH' && grep -q 'PUID=1026' '$TR/docker-compose.yml'"
+  check "compose：$LANIP:8089:8080、固定镜像、无 docker.sock、无 NO_AUTH、PUID 1026" sh -c "grep -q '\"$LANIP:8089:8080\"' '$TR/docker-compose.yml' && grep -q 'image: ghcr.io/sadjdg123/nocturne:sha-3d5beaf@sha256:08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e' '$TR/docker-compose.yml' && ! grep -v '^ *#' '$TR/docker-compose.yml' | grep -q 'docker.sock\|NO_AUTH' && grep -q 'PUID=1026' '$TR/docker-compose.yml'"
   check "副本：sessions.json 为空、没有已知设备" node -e 'const d=process.argv[1],fs=require("fs");const s=JSON.parse(fs.readFileSync(d+"/sessions.json"));const u=JSON.parse(fs.readFileSync(d+"/users.json"));if(Object.keys(s).length)process.exit(1);if(u.users.some(x=>x.devices&&x.devices.length))process.exit(1);if(u.users.length!==2||!u.users.every(x=>/^scrypt\$/.test(x.hash)))process.exit(1)' "$TR/data"
   check "生产：会话与已知设备都还在" node -e 'const d=process.argv[1],fs=require("fs");const s=JSON.parse(fs.readFileSync(d+"/sessions.json"));const u=JSON.parse(fs.readFileSync(d+"/users.json"));process.exit(Object.keys(s).length===3&&u.users.reduce((n,x)=>n+(x.devices||[]).length,0)===3?0:1)' "$PROD"
   check "副本：V2 首次启动写了固定快照" sh -c "ls -d '$TR'/data/pre-v2-snapshot-* >/dev/null"
   check "测试站拒绝生产站的旧会话 / 已知设备 cookie" node "$HERE/user.js" old-cookies "http://$LANIP:8089" "$T/cookies.json"
+  check "测试站 cookie 前缀 nocturne_v2test_（compose 环境变量 + 登录响应的 Set-Cookie 名）" sh -c "grep -q 'NOCTURNE_COOKIE_PREFIX=nocturne_v2test_' '$TR/docker-compose.yml' && curl -fsS -o /dev/null -D - -H 'Content-Type: application/json' --data '{\"name\":\"admin\",\"password\":\"admin-pass-1\"}' 'http://$LANIP:8089/api/login' | grep -qi '^set-cookie: nocturne_v2test_sid='"
   check "生产 data 逐字节未变" prod_same
   check "从未对生产容器执行 stop / restart / start / rm" no_prod_ops
   check "备份是热备份（没有 --stop）" sh -c "! grep -q -- '--stop' '$FD/calls.log' && grep -q '停容器：no' '$REP'"
