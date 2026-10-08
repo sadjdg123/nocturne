@@ -44,7 +44,7 @@ test("check(): names / ids / unknown keys named like Object.prototype members �
     // unknown field named like a prototype member must be rejected (KEYS lookup must not see Object.prototype)
     const extra = J({ groups: [], spaces: [Object.assign({ id: "a", name: "a", groupIds: [] }, { [P(n)]: 1 })] });
     assert.ok(Object.prototype.hasOwnProperty.call(extra.spaces[0], n), "own key " + n);
-    assert.deepEqual(S.check(extra).map((x) => x.problem), ["未知字段 " + n], "unknown key " + n + " rejected");
+    assert.deepEqual(S.check(extra).map((x) => x.problem), ["未知字段 " + n + "（字段名不合法）"], "unknown key " + n + " rejected (not a valid extension field name)");
   }
 });
 
@@ -144,7 +144,7 @@ test("server: prototype-ish space / group / item ids validate, store and prune c
     const ex = JSON.stringify({ baseVersion: cur.version, data: Object.assign(structuredClone(cur.data), { spaces: [{ id: "a", name: "a", groupIds: [] }] }), caps: CAPS })
       .replace('"groupIds":[]}', '"groupIds":[],' + JSON.stringify(n) + ':1}');
     const re = await putRaw(a, ex);
-    assert.equal(re.status, 400, "unknown key " + n); assert.equal(re.json.code, "bad_spaces"); assert.equal(re.json.spaces[0].problem, "未知字段 " + n);
+    assert.equal(re.status, 400, "unknown key " + n); assert.equal(re.json.code, "bad_spaces"); assert.equal(re.json.spaces[0].problem, "未知字段 " + n + "（字段名不合法）");
     const st = await a.req("POST", "/api/config/stash", Buffer.from(ex.replace('"caps"', '"x"')), { "Content-Type": "application/json" });
     assert.equal(st.status, 400, "stash validates too");
   }
