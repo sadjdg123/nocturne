@@ -119,6 +119,22 @@
     ind.style.transform = "translate(" + cur.offsetLeft + "px," + cur.offsetTop + "px)";
     if (instant) { void ind.offsetWidth; ind.classList.remove("is-instant"); }
   }
+  /* 横向滚动区两端的渐隐只在那一侧还有被藏住的分段时出现（is-ovl / is-ovr），渐隐只作用在滚动区自身，不压到左右按钮 */
+  var fadeTrack = null;
+  function syncFade() {
+    var t = nav && nav.querySelector(".x-sp-track"); if (!t) return;
+    var max = t.scrollWidth - t.clientWidth;
+    t.classList.toggle("is-ovl", max > 1 && t.scrollLeft > 1);
+    t.classList.toggle("is-ovr", max > 1 && t.scrollLeft < max - 1);
+  }
+  function reveal(smooth) {
+    var t = nav && nav.querySelector(".x-sp-track");
+    if (t && t !== fadeTrack) { fadeTrack = t; t.addEventListener("scroll", syncFade, { passive: true }); }
+    if (SPC && SPC.reveal) SPC.reveal(smooth);
+    syncFade();
+  }
+  /* 底栏后面的一层局部暗化（固定在视口底部、不接收点按）：正文 / 卡片 / 亮色壁纸从底栏下面经过时先被压暗，再被底栏材质盖住 */
+  if (dock && !document.querySelector(".mn-dockscrim")) { var scrim = document.createElement("div"); scrim.className = "mn-dockscrim"; scrim.setAttribute("aria-hidden", "true"); dock.before(scrim); }
   function placeNav() {
     if (!nav || !dock) return;
     var merge = v2() && mobile();
@@ -143,13 +159,16 @@
       }
       var got = select0.call(SPC, id);
       if (ghost) {
-        groupsEl.classList.remove("mn-swap"); void groupsEl.offsetWidth; groupsEl.classList.add("mn-swap");
-        requestAnimationFrame(function () { ghost.classList.add("is-go"); });
+        /* 重启入场动画只需要一次样式计算（不读 offsetWidth，免得在同步路径里强制整页布局） */
+        groupsEl.classList.remove("mn-swap"); void getComputedStyle(groupsEl).animationName; groupsEl.classList.add("mn-swap");
+        requestAnimationFrame(function () {
+          ghost.classList.add("is-go");
+          /* 只有已经滚过分组顶部时才回到分组顶部（下一帧再读位置，浏览器这一帧本来就要排版） */
+          var top = groupsEl.getBoundingClientRect().top;
+          if (top < 0) window.scrollTo({ top: Math.max(0, scrollY + top - 16), behavior: "smooth" });
+        });
         setTimeout(function () { ghost.remove(); groupsEl.style.minHeight = ""; }, 320);
         setTimeout(function () { groupsEl.classList.remove("mn-swap"); }, 700);
-        /* 只有已经滚过分组顶部时才回到分组顶部 */
-        var top = groupsEl.getBoundingClientRect().top;
-        if (top < 0) window.scrollTo({ top: Math.max(0, scrollY + top - 16), behavior: "smooth" });
       }
       return got;
     };
@@ -202,12 +221,18 @@
   function onRender() {
     applyAppearance(); placeNav(); drawTitle(); syncDate();
     var sid = SPC ? SPC.selected() : "all";
-    applyLook(lastSpace !== null && sid !== lastSpace); lastSpace = sid;
-    placeInd(false); syncSettings();
+    lastMoved = lastSpace !== null && sid !== lastSpace;
+    applyLook(lastMoved); lastSpace = sid;
+    syncSettings();
+    /* 切换空间时，指示条与横向滚动放到下一帧再读布局（同一帧里浏览器本来就要排版），同步路径少一次强制整页布局 */
+    if (lastMoved && window.requestAnimationFrame) requestAnimationFrame(function () { placeInd(false); reveal(true); });
+    else { placeInd(false); reveal(false); }
   }
+  var lastMoved = false;
   A.on("render", onRender);
-  window.addEventListener("resize", function () { placeNav(); placeInd(true); });
-  if (window.matchMedia) { var m = window.matchMedia("(max-width: 767px)"); if (m.addEventListener) m.addEventListener("change", function () { placeNav(); placeInd(true); }); }
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { placeInd(true); });
-  onRender(); placeInd(true); boot();
+  function relayout() { placeNav(); placeInd(true); reveal(false); }
+  window.addEventListener("resize", relayout);
+  if (window.matchMedia) { var m = window.matchMedia("(max-width: 767px)"); if (m.addEventListener) m.addEventListener("change", relayout); }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { placeInd(true); reveal(false); });
+  onRender(); placeInd(true); reveal(false); boot();
 })();
