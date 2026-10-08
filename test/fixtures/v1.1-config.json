@@ -1,0 +1,35 @@
+{
+  "settings": {
+    "title": "夜曲", "subtitle": "Nocturne", "user": "Jingbo", "cols": 4, "engine": "google",
+    "engines": [
+      { "id": "google", "name": "Google", "url": "https://www.google.com/search?q=%s", "on": true },
+      { "id": "bing", "name": "Bing", "url": "https://www.bing.com/search?q=%s", "on": false },
+      { "id": "k3xq9a", "name": "豆瓣", "url": "https://www.douban.com/search?q=%s", "on": true }
+    ],
+    "wallpaper": { "id": "custom", "file": true, "v": 1759900000000, "url": "", "dim": 0.35, "blur": 2 },
+    "show": { "clock": true, "sec": false, "date": true, "greet": true, "search": true, "status": true, "recent": true },
+    "net": "lan"
+  },
+  "groups": [
+    { "id": "mzq1a0lq8x2", "name": "影音", "style": "icon", "items": [
+      { "id": "e7h2kq9b1m", "title": "Emby", "desc": "媒体服务器", "lan": "http://192.168.1.20:8096", "wan": "https://emby.home.arpa", "icon": { "type": "iconify", "value": "selfhst:emby", "bg": "" }, "aliases": ["影视", "em"], "container": "emby" },
+      { "id": "p1x0c4n8vz", "title": "Plex", "desc": "媒体库", "lan": "http://192.168.1.20:32400", "wan": "", "icon": { "type": "iconify", "value": "selfhst:plex", "bg": "#1F1F1F" } },
+      { "id": "jf00000001", "title": "Jellyfin", "desc": "", "lan": "http://nas.local:8097", "wan": "", "icon": { "type": "image", "value": "api/icons/AbCdEfGhIjKlMnOp1234", "bg": "" } }
+    ] },
+    { "id": "dl92kfa0q1z", "name": "下载", "style": "icon", "items": [
+      { "id": "mp7r2x0k1a", "title": "MoviePilot", "desc": "影视订阅", "lan": "http://192.168.1.21:3000", "wan": "https://mp.home.arpa", "icon": { "type": "emoji", "value": "🧭", "bg": "" }, "aliases": ["mp"] },
+      { "id": "qb5t1z8w0e", "title": "qBittorrent", "desc": "下载器", "lan": "http://192.168.1.21:8080", "wan": "", "icon": { "type": "iconify", "value": "selfhst:qbittorrent", "bg": "" } }
+    ] },
+    { "id": "st0rage9kq2", "name": "存储与监控", "style": "icon", "items": [
+      { "id": "syn920plus", "title": "白群晖", "desc": "DS920+ 主存储", "lan": "http://192.168.1.10:5000", "wan": "https://nas.home.arpa", "icon": { "type": "iconify", "value": "selfhst:synology", "bg": "" } },
+      { "id": "uk3001xyzq", "title": "Uptime Kuma", "desc": "服务监控", "lan": "http://192.168.1.30:3001", "wan": "", "icon": { "type": "text", "value": "UK", "bg": "#5CDD8B" } }
+    ] },
+    { "id": "chips00daily", "name": "常用", "style": "chip", "items": [
+      { "id": "gh0000chip", "title": "GitHub", "desc": "", "lan": "", "wan": "https://github.com", "icon": { "type": "iconify", "value": "selfhst:github", "bg": "" } },
+      { "id": "cf0000chip", "title": "Cloudflare", "desc": "", "lan": "", "wan": "https://dash.cloudflare.com", "icon": { "type": "iconify", "value": "selfhst:cloudflare", "bg": "" } },
+      { "id": "ai0000chip", "title": "ChatGPT", "desc": "", "lan": "", "wan": "https://chatgpt.com", "icon": { "type": "text", "value": "AI", "bg": "#0B6E55" } }
+    ] },
+    { "id": "emptygrp001", "name": "空分组", "style": "icon", "items": [] }
+  ],
+  "recent": ["mp7r2x0k1a", "e7h2kq9b1m"]
+}
