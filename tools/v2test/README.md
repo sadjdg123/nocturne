@@ -13,6 +13,9 @@
 
 依赖同目录上一级的 `tools/backup.sh`、`tools/verify-backup.sh`、`tools/restore.sh`，请把整个 `tools/` 一起放到 NAS 上。
 
+> 测试站的检查用脚本探测到的局域网 IP（`http://<LAN_IP>:8089/api/health`），不用 `127.0.0.1`。要手动看**生产**的健康状态：生产端口绑定在 `192.168.50.141:8088`，
+> 用 `NAS_IP=${NAS_IP:-192.168.50.141}; curl -s "http://$NAS_IP:8088/api/health"`（以 `sudo docker port nocturne 8080/tcp` 的输出为准）；`127.0.0.1:8088` / `localhost:8088` 连不上。
+
 ## 1. 把套件放到 NAS
 
 仓库是私有的，NAS 上不需要 git：
