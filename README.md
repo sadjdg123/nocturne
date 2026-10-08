@@ -68,6 +68,16 @@
 
 > 如果 8088 端口被占用，把 compose 里的 `"8088:8080"` 左边的数字改成别的端口。
 
+> **健康检查用哪个地址**：`ports` 若绑定到具体 IP（例如本项目生产环境是 `"192.168.50.141:8088:8080"`），NAS 上访问 `127.0.0.1:8088` / `localhost:8088`
+> 会被拒绝（不代表容器坏了），要用绑定的那个 IP：
+>
+> ```sh
+> NAS_IP=${NAS_IP:-192.168.50.141}      # 以 sudo docker port nocturne 8080/tcp 的输出为准（例：8080/tcp -> 192.168.50.141:8088）
+> curl -s "http://$NAS_IP:8088/api/health"
+> ```
+>
+> 下文所有「检查 `/api/health`」都指这条命令（输出 `0.0.0.0:8088` 时表示绑定所有地址，用 NAS 的内网 IP 即可）。
+
 > **数据文件的属主**：容器默认以 uid/gid `1000:1000` 写 `data/`（文件权限 0600）。如果你想用 File Station / SMB
 > 直接复制或查看 `data/`，可以在 compose 的 `environment` 里加上你自己的 uid/gid，群晖常见是：
 > ```yaml
@@ -224,7 +234,7 @@
 
 | 部署方式 | 夜曲看到的直连地址（通常） | 建议填写 |
 | --- | --- | --- |
-| 群晖 DSM 反向代理 → `localhost:8088`（bridge 网络） | Docker bridge 网关，例如 `172.17.0.1`；自定义 compose 网络常见 `172.18.0.1`、`172.19.0.1`… | 诊断里显示的那个网关地址 |
+| 群晖 DSM 反向代理 → `localhost:8088`（bridge 网络；仅当 `ports` 没有绑定具体 IP 时可用，绑定了如 `192.168.50.141:8088` 就要填那个 IP，见下一行） | Docker bridge 网关，例如 `172.17.0.1`；自定义 compose 网络常见 `172.18.0.1`、`172.19.0.1`… | 诊断里显示的那个网关地址 |
 | 群晖 DSM 反向代理 → `NAS的IP:8088` | NAS 自己的内网 IP（如 `192.168.1.10`），有时也是网关地址 | 诊断里显示的地址 |
 | Lucky（host 网络 / 套件）| 同上：网关地址或 NAS IP | 诊断里显示的地址 |
 | Cloudflare Tunnel（cloudflared 容器在同一 compose 网络） | cloudflared 容器的 IP（如 `172.20.0.3`，重建后可能变化） | 那个网段，例如 `172.20.0.0/16`（只放代理所在的网段） |
@@ -307,14 +317,14 @@ CI 只有在 `npm run check && npm test` 通过后才会构建、推送镜像。
 
 1. **先备份**：停止项目，复制整个 `data/` 文件夹（如 `cp -a data data.bak-$(date +%Y%m%d)`）。
 2. 把 compose 里的镜像标签改成新版本（记下旧标签），`sudo docker compose pull && sudo docker compose up -d`。
-3. 验证：`/api/health` 返回 `ok`；用浏览器登录，看配置、壁纸、图标和状态点是否正常；反向代理用户检查「连接诊断」。
+3. 验证：`curl -s "http://$NAS_IP:8088/api/health"`（`NAS_IP` 见「群晖 Container Manager」一节的健康检查说明，生产默认 `192.168.50.141`）返回 `ok`；用浏览器登录，看配置、壁纸、图标和状态点是否正常；反向代理用户检查「连接诊断」。
 
 回滚：
 
 1. 停止项目；
 2. compose 里改回旧标签（或旧的 digest）；
 3. 如果新版本已经写过数据而旧版本读不了 / 需要回到升级前的状态：用第 1 步备份的 `data.bak-…` 替换 `data/`；
-4. `sudo docker compose up -d`，再次检查 `/api/health`。
+4. `sudo docker compose up -d`，再次 `curl -s "http://$NAS_IP:8088/api/health"`。
 
 > 本版本的数据格式向后兼容：配置文件只是多了 `ops`（最近的操作 ID）字段、快照文件名多了类型后缀，旧版本读取时会忽略它们，
 > 所以回滚到旧镜像**一般不需要**恢复 `data/`；旧版本不认识的 `-auto` / `-local` 等快照它仍能列出和恢复。
@@ -323,7 +333,7 @@ CI 只有在 `npm run check && npm test` 通过后才会构建、推送镜像。
 
 1. 停止项目，**先备份** `data/`：`cp -a data data.bak-v11-$(date +%Y%m%d)`；
 2. compose 里改成 `image: ghcr.io/sadjdg123/nocturne:sha-4d85cf3`，`sudo docker compose pull && sudo docker compose up -d`；
-3. 检查 `/api/health`，登录确认配置正常。
+3. `curl -s "http://$NAS_IP:8088/api/health"` 检查版本，登录确认配置正常。
 
 V1.1 只新增了项目上的 `aliases` 字段，`data/` 布局不变。回滚后：旧版本会**保留**配置里的 `aliases`（旧版编辑、复制、移动、拖动项目时都原样保留，
 实测通过），只是不显示、不参与搜索、也不校验；再升级回来别名仍在。浏览器里存的网络模式若是「自动」，旧版会把它当作无效值改回「外网」；
