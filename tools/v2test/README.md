@@ -76,7 +76,7 @@ sudo sh tools/v2test/deploy.sh --from-backup /volume1/docker/nocturne-v2test/bac
 
 ## 3. 打开测试站（重要）
 
-两个版本的 cookie 名一样（`nocturne_sid` 登录、`nocturne_dev` 已知设备），**cookie 不按端口区分**。在同一个主机名下打开 8089，会覆盖你在 8088 的登录和「已知设备」。所以：
+**cookie 不按端口区分。** 2.0.0-rc.2 起 cookie 名前缀可配置：`deploy.sh` 生成的测试 compose 里设置了 `NOCTURNE_COOKIE_PREFIX=nocturne_v2test_`，测试站的 cookie 叫 `nocturne_v2test_sid` / `nocturne_v2test_dev`，与生产的 `nocturne_sid` / `nocturne_dev` 互不覆盖。镜像是 2.0.0-rc.1 时这个变量不起作用：两个版本的 cookie 名一样，在同一个主机名下打开 8089 会覆盖你在 8088 的登录和「已知设备」。稳妥起见仍建议：
 
 - 生产站用 IP 打开（`http://192.168.x.x:8088`）→ 测试站用 `http://<NAS主机名>.local:8089`；生产站用主机名 / 域名打开 → 测试站用 `http://<内网IP>:8089`。脚本会打印推荐网址。
 - 并且在 **Safari 无痕窗口**里打开测试站（单独的 cookie）。
