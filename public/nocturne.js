@@ -201,7 +201,36 @@
     s.recent = Array.isArray(cur.recent) ? cur.recent.slice() : [];
     return s;
   }
-  function hashStr(str) { var h = 5381; for (var i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + "." + str.length.toString(36); }
+  /** SHA-256(UTF-8) → hex。纯 JS、同步：http:// 内网访问（非安全上下文）没有 crypto.subtle，两种情况结果一致。
+   *  用来判断「这份内容是不是上次那次推送」→ 复用 opId；弱哈希会让不同内容撞上同一个 opId，被服务器当成重复推送吞掉。 */
+  var SHA_K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+  function sha256(str) {
+    var b = new TextEncoder().encode(str), n = b.length, len = ((n + 9 + 63) >> 6) << 6, m = new Uint8Array(len), w = new Int32Array(64);
+    m.set(b); m[n] = 0x80;
+    var bits = n * 8; for (var j = 0; j < 8; j++) { m[len - 1 - j] = bits & 255; bits = Math.floor(bits / 256); }
+    var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    for (var o = 0; o < len; o += 64) {
+      for (var i = 0; i < 16; i++) w[i] = (m[o + i * 4] << 24) | (m[o + i * 4 + 1] << 16) | (m[o + i * 4 + 2] << 8) | m[o + i * 4 + 3];
+      for (i = 16; i < 64; i++) {
+        var x = w[i - 15], y = w[i - 2];
+        var s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3), s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      var a = H[0], bb = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (i = 0; i < 64; i++) {
+        var t1 = (h + (((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))) + ((e & f) ^ (~e & g)) + SHA_K[i] + w[i]) | 0;
+        var t2 = ((((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))) + ((a & bb) ^ (a & c) ^ (bb & c))) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = bb; bb = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + bb) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    return H.map(function (v) { return ("0000000" + (v >>> 0).toString(16)).slice(-8); }).join("");
+  }
+  var hashMemo = { s: null, h: null };
+  function hashStr(str) { if (hashMemo.s !== str) { hashMemo.s = str; hashMemo.h = sha256(str); } return hashMemo.h; }
   function newOpId() {
     var a = new Uint8Array(12);
     try { crypto.getRandomValues(a); } catch (e) { for (var i = 0; i < a.length; i++) a[i] = Math.random() * 256; }
@@ -215,6 +244,8 @@
     var id = newOpId(); ls("set", OP, JSON.stringify({ id: id, h: h }));
     return id;
   }
+  /** 服务器说这个 opId 对应的是另一份内容（opid_mismatch）：作废它，下次推送换一个新的 */
+  function opReset() { ls("del", OP); }
   function opDone(raw) { try { var o = JSON.parse(ls("get", OP) || "null"); if (o && o.h === hashStr(raw)) ls("del", OP); } catch (e) { /* ignore */ } }
   /* 持久化的「本机有没推上去的修改」标记：页面被关掉 / NAS 连不上时，下次打开据此补推，而不是当成已同步 */
   function markDirty() { if (lastSent === null || snapshot() !== lastSent) ls("set", DIRTY, "1"); }
@@ -260,6 +291,9 @@
       if (restore) restoreNext = true;
       if (e.status === 401) return expired();
       if (e.status === 409 && e.data && e.data.conflict) return conflict(e.data);
+      if (e.status === 422 && e.data && e.data.code === "opid_mismatch") { // opId 被另一份内容占用：换新 opId 正常重推（照样判冲突）
+        opReset(); if (force) forceNext = force; dirty = true; return;
+      }
       if (e.status === 400 && e.data && e.data.invalid) { // 有不安全的地址：改了再推，不自动重试
         if (!badWarned) { badWarned = true; A.toast("有 " + e.data.invalid.length + " 个地址无效（只支持 http/https），未同步：" + e.data.invalid.slice(0, 2).map(function (x) { return x.where; }).join("、"), { duration: 8000 }); }
         return;
@@ -636,7 +670,7 @@
         if (bytes(str) >= KEEPALIVE_MAX) return; // 太大发不出 keepalive：留着脏标记，下次打开补推
         try {
           fetch("api/config", { method: "PUT", keepalive: true, credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: str })
-            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (r) { if (r.status === 422) opReset(); return r.ok ? r.json() : null; })
             .then(function (d) { if (d && d.version) { markSynced(d.version, raw); opDone(raw); } }) // 页面若进了 bfcache，恢复后这里会接着跑
             .catch(function () {});
         } catch (e) { /* 同步抛错（极少数浏览器）：下次打开靠脏标记补推 */ }
