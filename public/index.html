@@ -423,7 +423,7 @@
     <script src="Sortable.min.js"></script>
     <script src="urlcheck.js?v=3"></script>
     <script src="netmode.js?v=1"></script>
-    <script src="cmdrank.js?v=1"></script>
+    <script src="cmdrank.js?v=2"></script>
     <script>
       (function () {
         "use strict";
@@ -2217,7 +2217,7 @@
             { k: "net:auto", t: "自动网络", d: (nm("auto") ? "当前模式 · " : "") + "按本页访问地址判断 · 会优先" + (window.NocturneNet && N ? N.names[NocturneNet.decide(location.hostname)] : "外网"), g: "⇄", kw: "自动 网络 auto network 内网 外网 lan wan" },
             { k: "net:lan", t: "优先内网", d: nm("lan") || "优先用内网地址打开", g: "⌂", kw: "内网 lan 局域网 network 网络 切换" },
             { k: "net:wan", t: "优先外网", d: nm("wan") || "优先用外网地址打开", g: "◍", kw: "外网 wan 公网 network 网络 切换" },
-            { k: "recheck", t: "重新检测状态", d: window.NOCTURNE ? "重新读取 NAS 的检测结果" : "在这个浏览器里重新检测", g: "↻", kw: "重新检测 状态 刷新 在线 离线 status refresh recheck" },
+            (function () { var sa = statusText(); return { k: "recheck", t: sa.t, d: sa.d, g: "↻", kw: "刷新状态 重新检测 状态 刷新 在线 离线 status refresh recheck" }; })(),
             { k: "edit", t: editing ? "退出编辑" : "进入编辑", d: MOD + "E", g: "✎", kw: "编辑 edit 排序 拖动" },
             { k: "settings", t: "打开设置", d: MOD + ",", g: "⚙", kw: "设置 settings 壁纸 外观 preferences" },
             { k: "add", t: "添加项目", d: "新建一个服务或链接", g: "+", kw: "添加 新建 add new item" }
@@ -2376,12 +2376,19 @@
           }
         }
 
-        /* 重新检测：等真正检测完再报结果；有 NAS 后端时先重新读取 NAS 的检测结果，读取失败就如实说 */
+        /* 状态动作：NAS 模式 =「刷新状态」，只读取 NAS 最近一次后台检测的结果，不触发新的检测；
+           纯静态模式 =「重新检测状态」，在浏览器里真的重新检测。等结果真正到了再提示，读取失败就如实说 */
+        function nasMode() { return !!(window.NOCTURNE && A.refreshStatus); }
+        function statusText() { return window.NocturneRank && NocturneRank.statusAction ? NocturneRank.statusAction(nasMode()) : { t: "重新检测状态", d: "", busy: "正在重新检测…" }; }
         function recheck() {
           if (!A.recheck) { A.toast("状态检测不可用"); return; }
-          A.toast("正在重新检测…", { duration: 8000 });
-          var report = function (d) { A.toast("检测完成：" + d.on + " 个在线，" + d.off + " 个离线" + (window.NOCTURNE ? "（NAS 侧检测）" : "（浏览器检测，仅供参考）")); };
-          (A.refreshStatus ? A.refreshStatus() : Promise.resolve()).then(function () { A.recheck(true, report); }, function (e) {
+          var nas = nasMode(), R = window.NocturneRank;
+          A.toast(statusText().busy, { duration: 8000 });
+          if (!nas) { A.recheck(true, function (d) { A.toast(R.statusReport(false, d)); }); return; }
+          A.refreshStatus().then(function (map) {
+            var at = R.latestCheck(map);
+            A.recheck(true, function (d) { A.toast(R.statusReport(true, d, at)); });
+          }, function (e) {
             A.toast("无法从 NAS 读取状态：" + (e && e.message ? e.message : "网络错误"));
           });
         }
