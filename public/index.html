@@ -408,11 +408,13 @@
     <div class="x-toast x-glass" id="x-toast" role="status" aria-live="polite"><span id="x-toast-msg"></span><button type="button" id="x-toast-act" hidden></button></div>
 
     <script src="Sortable.min.js"></script>
+    <script src="urlcheck.js?v=2"></script>
     <script>
       (function () {
         "use strict";
         var KEY = "yeqv.v1";
         var $ = function (id) { return document.getElementById(id); };
+        var U = window.NocturneURL; /* urlcheck.js：统一的 URL 白名单校验 */
 
         function uid() { return Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4); }
         function esc(s) {
@@ -517,7 +519,7 @@
             if (failed[src]) return '<span class="x-ic"' + bg + '><span class="x-fb">' + letter + "</span></span>";
             return '<span class="x-ic"' + bg + '><img src="' + src + '" loading="lazy" alt=""' + fail + "></span>";
           }
-          if (icon.type === "image" && v && failed[v]) return '<span class="x-ic"' + bg + '><span class="x-fb">' + letter + "</span></span>";
+          if (icon.type === "image" && v && (failed[v] || !U.image(v))) return '<span class="x-ic"' + bg + '><span class="x-fb">' + letter + "</span></span>";
           if (icon.type === "emoji" && v) return '<span class="x-ic"' + bg + '><span class="x-emoji">' + esc(v) + "</span></span>";
           if (icon.type === "text" && v) return '<span class="x-ic"' + bg + ">" + esc(v.slice(0, 3)) + "</span>";
           if (icon.type === "image" && v) return '<span class="x-ic"' + bg + '><img class="x-full" src="' + esc(v) + '" loading="lazy" alt=""' + fail + "></span>";
@@ -533,7 +535,7 @@
         }
 
         function itemHTML(g, item) {
-          var href = esc(item.wan || item.lan || "#");
+          var href = esc(U.safeNav(item.wan) || U.safeNav(item.lan) || "#"); /* 非 http(s) 地址一律当作没有地址，不可点击 */
           var attrs = ' href="' + href + '" target="_blank" rel="noopener" data-id="' + esc(item.id) + '" data-gid="' + esc(g.id) + '"';
           if (g.style === "chip") {
             return '<a class="x-chip x-glass"' + attrs + ">" + iconHTML(item.icon, item.title) + "<span>" + esc(item.title) + "</span></a>";
@@ -603,6 +605,7 @@
           var q = $("x-q").value.trim();
           if (!q) return;
           var eng = state.settings.engines.filter(function (x) { return x.id === state.settings.engine; })[0] || state.settings.engines[0];
+          if (eng && !U.engine(eng.url)) { toast("搜索引擎「" + eng.name + "」的网址模板无效（只支持 http/https）"); return; }
           if (eng) window.open(eng.url.replace("%s", encodeURIComponent(q)), "_blank", "noopener");
           $("x-q").value = "";
         });
@@ -632,14 +635,14 @@
           defaults: defaults,
           save: save, commit: commit, undo: undo, render: render,
           on: on, emit: emit, toast: toast,
-          util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail }
+          util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U }
         };
 
         render();
         setInterval(tick, 1000);
       })();
     </script>
-    <script src="nocturne.js"></script>
+    <script src="nocturne.js?v=2"></script>
     <script>
       /* Stage 2a · edit mode. Uses only the App API.
          "edit-item" / "add-item" listeners set d.handled = true; otherwise a 即将上线 toast shows. */
@@ -1004,7 +1007,9 @@
           var lan = isIP(hn) || hn === "localhost" || /\.(local|lan)$/.test(hn) || /:\d+$/.test(h);
           return (lan ? "http://" : "https://") + v;
         }
+        var U = window.NocturneURL;
         function parse(v) {
+          if (!U.http(norm(v))) return null; /* 严格白名单：只收 http(s)，不含控制字符 / 首尾空白 */
           try { var u = new URL(norm(v)); return /^https?:$/.test(u.protocol) && /^[\w.-]+$|^\[/.test(u.hostname) && (u.hostname.indexOf(".") > 0 || u.hostname === "localhost" || /^\[/.test(u.hostname)) ? u : null; }
           catch (e) { return null; }
         }
@@ -1078,7 +1083,7 @@
           ["url", "lan", "wan"].forEach(function (k) {
             var v = F[k].value.trim(), u = v ? parse(v) : null, e = sh.querySelector('[data-err="' + k + '"]');
             if (u) any = true;
-            var msg = v && !u ? "地址格式不对，例如 nas.local:5000 或 https://example.com" : "";
+            var msg = v && !u ? (/^[a-z][\w+.-]*:(?!\d)/i.test(v) && !/^https?:\/\//i.test(v) ? "地址无效：只支持 http:// 或 https:// 开头的地址，请修改或清空" : "地址格式不对，例如 nas.local:5000 或 https://example.com") : "";
             if (k === "url" && !msg && s.touched && !F.url.value.trim() && !F.lan.value.trim() && !F.wan.value.trim()) msg = "至少填写一个地址";
             if (v && !u) bad = true;
             e.textContent = msg; e.hidden = !msg; F[k].classList.toggle("is-bad", !!msg); F[k].setAttribute("aria-invalid", String(!!msg));
@@ -1181,6 +1186,7 @@
         function save() {
           syncUrl(); s.touched = true;
           if (!validate()) return;
+          if (s.mode === "image" && F.image.value.trim() && !U.image(F.image.value.trim())) { A.toast("图片网址无效：只支持 http:// 或 https:// 开头的地址"); return; }
           var lan = F.lan.value.trim() ? norm(F.lan.value) : "", wan = F.wan.value.trim() ? norm(F.wan.value) : "";
           var title = F.nm.value.trim() || s.hint || "未命名", id = s.id, gid0 = s.gid0, gid = s.gid, ng = F.newg.value.trim() || "新分组";
           var data = { title: title, desc: F.desc.value.trim(), lan: lan, wan: wan, icon: curIcon() };
@@ -1263,7 +1269,8 @@
         function mode() { return A.state.settings.net === "lan" ? "lan" : "wan"; }
         A.url = function (item) {
           if (!item) return "#";
-          return (mode() === "lan" ? item.lan || item.wan : item.wan || item.lan) || "#";
+          var U = A.util.url, lan = U.safeNav(item.lan), wan = U.safeNav(item.wan); /* 无效地址（非 http/https）按没填处理 */
+          return (mode() === "lan" ? lan || wan : wan || lan) || "#";
         };
 
         /* ---- UI ---- */
@@ -1388,6 +1395,15 @@
         }
         document.addEventListener("click", track);
         document.addEventListener("auxclick", track);
+        /* 没有地址 / 地址无效的项目不可点击：不再打开一个空白的新标签页 */
+        document.addEventListener("click", function (e) {
+          if (body.classList.contains("editing")) return;
+          var a = e.target.closest && e.target.closest("#x-groups a[data-id], .x-side a[data-rid]");
+          if (!a || a.getAttribute("href") !== "#") return;
+          e.preventDefault();
+          var r = all()[a.getAttribute("data-id") || a.getAttribute("data-rid")], i = r && r.item;
+          A.toast(i && (i.lan || i.wan) ? "「" + i.title + "」的地址无效，请在编辑里修改" : "这个项目还没有地址");
+        }, true);
         A.on("render", refresh);
         A.on("change", function (d) {
           if (!d || d.label !== "undo") return;
@@ -1489,7 +1505,7 @@
         }
         function applyWp(w) {
           // file:true → 存在 NAS 上的自定义壁纸（/api/wallpaper）；纯静态页没有后端时退回默认壁纸
-          var src = w.id !== "custom" ? "" : w.file ? (A.wallpaperUrl ? A.wallpaperUrl(w) : "") : w.url;
+          var src = w.id !== "custom" ? "" : w.file ? (A.wallpaperUrl ? A.wallpaperUrl(w) : "") : A.util.url.wallpaper(w.url) ? w.url : "";
           // 新图还没加载好：先保留正在显示的那张（没有就显示默认壁纸）
           if (src && !wpReady(src, !!w.file)) src = wpShown && wpState[wpShown] === "ok" && w.id === "custom" ? wpShown : "";
           wpShown = src;
@@ -1618,7 +1634,7 @@
           else if ((k = t.getAttribute("data-show"))) { var on = t.checked; set(function (s) { s.show = show(); s.show[k] = on; }, "show"); }
           else if (t.hasAttribute("data-wpurl")) {
             var u = t.value.trim();
-            if (u && !/^https?:\/\//i.test(u)) { A.toast("请输入 http(s) 开头的图片网址"); return; }
+            if (u && !A.util.url.http(u)) { A.toast("请输入 http(s) 开头的图片网址"); return; }
             set(function (s) { s.wallpaper = Object.assign(wp(), u ? { id: "custom", url: u, file: false } : { id: "star", url: "", file: false }); }, "wallpaper");
           } else if (t.type === "file") { pick(t.files && t.files[0]); t.value = ""; }
         });
@@ -1718,7 +1734,7 @@
           '<p class="x-hint">用 %s 代表搜索词</p><div class="x-acts"><button type="button" class="x-pb" data-s="cancel">取消</button><button type="button" class="x-pb is-amber" data-s="save" disabled>添加</button></div></div></div>';
         var list = S.querySelector("[data-elist]"), form = S.querySelector("[data-form]"), addBtn = S.querySelector('[data-s="add"]');
         var fName = S.querySelector('[data-f="name"]'), fUrl = S.querySelector('[data-f="url"]'), fSave = S.querySelector('[data-s="save"]');
-        function okUrl(u) { return /^https?:\/\//i.test(u) && u.indexOf("%s") > -1; }
+        function okUrl(u) { return A.util.url.engine(u); }
         function drawEngines() {
           var st = A.state.settings;
           list.innerHTML = (st.engines || []).map(function (e) {
@@ -1799,6 +1815,8 @@
           f.text().then(function (txt) {
             var data; try { data = JSON.parse(txt); } catch (x) { data = null; }
             if (!valid(data)) return showErr("文件不是有效的夜曲配置");
+            var bad = A.util.url.checkConfig(data);
+            if (bad.length) return showErr("文件里有 " + bad.length + " 个不安全的地址（只支持 http/https），未导入：" + bad.slice(0, 3).map(function (x) { return x.where + "「" + A.util.url.show(x.value) + "」"; }).join("；"));
             showErr("");
             download("yeqv-before-import-" + stamp(true) + ".json");
             var base = structuredClone(A.defaults), merged = Object.assign(base, data);
@@ -2128,6 +2146,7 @@
         }
         function go(url, newTab) {
           if (!url || url === "#") { A.toast("这个项目还没有地址"); return; }
+          if (!A.util.url.http(url)) { A.toast("地址无效：只支持 http:// 或 https://"); return; }
           if (newTab) window.open(url, "_blank", "noopener"); else location.assign(url);
         }
         function run(r, newTab) {
