@@ -453,7 +453,7 @@
     /* 「恢复较早的版本」：列出 NAS 上的环形备份（被别的设备覆盖 / 被替换掉的配置），选一份恢复 */
     var BK_HTML = '<p class="x-gt">数据</p><div class="x-gl nc-ul nc-bk" data-bk><div class="x-row"><span>恢复较早的版本</span><button type="button" class="nc-mini" data-u="bk">查看</button></div></div>' +
       '<p class="x-hint">NAS 会定期（每 30 分钟或每 20 个版本）给配置留一份快照，冲突时被替换的版本也会先存下来，最多保留 30 份。恢复前当前版本也会先存一份，随时可以换回来。壁纸图片不在版本历史里。</p>';
-    var KIND = { auto: "定期快照", replaced: "被覆盖前", restore: "恢复前", local: "冲突时的本机版本" };
+    var KIND = { auto: "定期快照", replaced: "被覆盖前", restore: "恢复前", local: "冲突时的本机版本", guard: "自动找回空间前" };
     function fmtTime(t) {
       var d = new Date(t); if (isNaN(d)) return "";
       var p = function (n) { return (n < 10 ? "0" : "") + n; }, now = new Date();
@@ -678,6 +678,12 @@
       start = Promise.resolve();
     }
     start.then(function () {
+      // 回滚写保护：服务器刚从旁路文件自动找回了回滚期间被旧版覆盖掉的空间 → 每台设备提示一次
+      var rec = N.recovered;
+      if (rec && rec.at && ls("get", "nocturne.recovered") !== rec.at) {
+        ls("set", "nocturne.recovered", rec.at);
+        A.toast("回滚期间被旧版覆盖掉的 " + rec.spaces + " 个空间已自动找回 · 找回前的版本已存入「较早的版本」", { duration: 12000 });
+      }
       A.on("change", schedule);
       A.on("render", schedule);
       var save = A.save;
