@@ -1,9 +1,41 @@
 # 夜曲 Nocturne · 开发交接（Codex / 接手者阅读）
 
 一句话：群晖 NAS 自托管起始页。后端 `server.js` 单文件、零依赖（Node 22 内置模块），前端是 `public/` 里的原生 JS / HTML / CSS，没有构建步骤。
-当前开发分支 `v2`（V2.0 Midnight Edition，候选版 `2.0.0-rc.3`）；`main` = V1.1（生产 `:latest`）。
+当前开发分支 `v2`（V2.0 Midnight Edition，候选版 **`2.0.0-rc.4`**，最终 RC 交接）；`main` = V1.1（生产 `:latest`）。
 
 **三条红线**：不改 `main`（合并需要用户明确批准）；永远不碰生产数据 / NAS（Hark 与开发环境都没有 NAS 访问权，部署由用户自己在群晖上做）；不覆盖已发布的镜像标签。
+
+## 0. 交接摘要（RC.4，2026-10-09）
+
+### 0.1 版本 / 镜像 / digest
+
+| 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
+|------|---------|-----------------------|----|
+| **RC.4 `2.0.0-rc.4`（推荐候选）** | `v2@f51662961ba7a86782cb863104917d75fb587553` | `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f` | [37849652604](https://github.com/sadjdg123/nocturne/actions/runs/37849652604)（test 210 / 210 → build） |
+| RC.3 `2.0.0-rc.3` | `v2@e4de70bc25df4bce6b586bdff523a269bae105eb` | `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b` | 37843878107（204 / 204） |
+| RC.2 `2.0.0-rc.2` | `v2@3d5beaf4c5327d02312ab9096e9ba4dc9e095db2` | `ghcr.io/sadjdg123/nocturne:sha-3d5beaf@sha256:08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e` | 37838079107（180 / 180） |
+| RC.1 `2.0.0-rc.1`（**生产在用**） | `v2@2ee09835ea780cc2885f389a62b9cde188b13f2e` | `ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa` | — |
+| V1.1 `1.1.x` | `main@3e6da3cf80c59fda12fa0a719afb8745829679b4` | `ghcr.io/sadjdg123/nocturne:sha-3e6da3c@sha256:58a4c8349242ca80ca4a46681410eafcbbb41e0411c3567e3cbef9abff19e861` | — |
+
+RC.4 构建后用 GHCR 匿名查询复核过：旧标签仍指向上表的 digest。RC.4 相对 RC.3：`nocturne.js?v=8 → ?v=9`（缓存刷新），按已发布版本检查的缓存刷新测试，健康检查文档改用 `NAS_IP`。`server.js` 和数据格式都没变。详见 `docs/v2.0-rc4-report.md`。
+
+### 0.2 先读这些文件
+
+1. `docs/v2.0-rc4-report.md`：RC.4 改了什么、测试、镜像、风险
+2. 本文第 1–2 节（架构、data 目录、兼容约束）和第 8 节（约定）
+3. `docs/v2.0-upgrade-rc.md`：RC 之间的升级 / 回滚，以及健康检查用的 `NAS_IP`
+4. `docs/v2.0-upgrade-rollback.md`：V1.1 ↔ V2
+5. `docs/v2.0-rc3-report.md`、`docs/v2.0-rc2-report.md`：回滚写保护（旁路）的来龙去脉
+6. `test/cache-bust.test.js`、`test/asset-refs.js`、`tools/gen-released-assets.js`、`test/fixtures/released-assets.json`：缓存刷新规则
+7. `docs/v2.0-manual-acceptance.md`：还要人工验收的项目
+
+### 0.3 Codex 下一步
+
+1. **用户确认前不合并 `main`、不打 `v2.0.0` tag。** 用户先在 `tools/v2test` 测试站（8089）试 RC.4（`lib.sh` 已固定为 RC.4 镜像），完成人工验收后，再按 `docs/v2.0-upgrade-rc.md` 把生产从 RC.1 升到 RC.4。
+2. 生产健康检查用 `curl -s "http://$NAS_IP:8088/api/health"`，`NAS_IP` 默认 `192.168.50.141`，以 `sudo docker port nocturne` 为准。**不要用 `127.0.0.1:8088`**，那个地址连不上。
+3. 下次改代码（或正式版发布）时，先把 RC.4 加进 `tools/gen-released-assets.js` 的 `RELEASES`：`{ name: "RC.4", commit: "f51662961ba7a86782cb863104917d75fb587553", image: "ghcr.io/sadjdg123/nocturne:sha-f516629" }`。然后运行 `node tools/gen-released-assets.js`，把 `test/cache-bust.test.js` 里的版本列表 / 提交对照表一起改掉。以后每发一个版本都照做。改了 `public/` 下任何被引用的文件，都要把它的 `?v=` 加一，测试会检查。
+4. 有条件的环境（有 `ip` 命令和 sudo）补跑 `sh test/v2test-kit/run.sh dash`。期望 50 / 50，busybox 轮次见第 7 节。
+5. 正式版：用户同意后再决定 `2.0.0` 的版本号、合并方式和 tag，按第 5 节的流程走，并核对镜像对应的那个提交。
 
 ---
 
@@ -79,7 +111,7 @@ data/
 - `hist` 条目：旧版本原样复制 `cur.hist.slice()`，所以条目上的新标记（`g:2`）能活过回滚。不要改 `canonical` / `dataHash` 算法（指纹跨版本比较）。
 - 不要改 cookie 默认名（`nocturne_sid` / `nocturne_dev`），否则升级 / 回滚会让所有设备掉登录。
 - 快照环文件名格式、`kind` 后缀集合、`BACKUP_ID` 正则不要改（旧版本列 / 读快照）。
-- 版本号：`package.json` `version` → `/api/health`、启动日志、`writer.v`。V1.1 = `1.1.x`（`main@3e6da3c`，镜像 `sha-3e6da3c`），RC.1 = `2.0.0-rc.1`（远端 `v2@2ee0983`），RC.2 = `2.0.0-rc.2`（`v2@3d5beaf`），RC.3 = `2.0.0-rc.3`。
+- 版本号：`package.json` `version` → `/api/health`、启动日志、`writer.v`。V1.1 = `1.1.x`（`main@3e6da3c`，镜像 `sha-3e6da3c`），RC.1 = `2.0.0-rc.1`（远端 `v2@2ee0983`），RC.2 = `2.0.0-rc.2`（`v2@3d5beaf`），RC.3 = `2.0.0-rc.3`（`v2@e4de70b`），RC.4 = `2.0.0-rc.4`（`v2@f516629`）。
 - 兼容测试按 **blob SHA** 从 git 历史取旧版本代码运行（`test/v11.js`、`test/rc1.js`），需要完整历史（CI `fetch-depth: 0`）。
 
 ## 3. 开发环境
@@ -100,7 +132,8 @@ sh test/v2test-kit/run.sh [dash] [busybox]   # tools/v2test 套件沙盒自测�
 python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归；另有 rollback_drill.py / restore_drill.py / rc_perf.py / https_proxy.py
 ```
 
-- RC.3 时：`npm test` 204 项全过；套件自测 dash 50 项（本沙盒的 busybox 静态版会优先用内置 ip / hostname，绕过假命令，busybox 轮次 39 / 50，RC.2 代码上同样如此）。
+- RC.4：`npm test` **210 项**全过（本地和 CI）。套件自测在 RC.3 时 dash 50 / 50，busybox 39 / 50（11 项失败）：本沙盒的 busybox 静态版会优先用内置的 ip / hostname，绕过了假命令，RC.2 代码上也一样。RC.4 时沙盒没有 `ip` 命令也没有 sudo，自测直接 SKIP，没有重跑。
+- 缓存刷新（RC.4 起）：`test/cache-bust.test.js` 对每个已发布版本检查：URL（路径 + `?v=`）相同，内容就必须相同。清单 `test/fixtures/released-assets.json` 由 `node tools/gen-released-assets.js` 生成，`--check` 只核对。
 - v2test 套件的固定镜像 / 期望版本统一在 `tools/v2test/lib.sh`（`IMAGE_TAG` / `IMAGE_DIGEST` / `EXPECT_VERSION`），套件自测会核对 `EXPECT_VERSION` 与 `package.json` 一致——**发新 RC 后要更新 lib.sh**。
 
 ## 5. CI/CD
@@ -120,13 +153,15 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
 3. compose `image:` 写 `标签@digest`，重建；`curl -s "http://$NAS_IP:8088/api/health"` 检查版本（生产端口绑定在 `192.168.50.141:8088`，`NAS_IP` 默认它、以 `sudo docker port nocturne` 为准；**不要用 `127.0.0.1:8088` / `localhost:8088`**，连不上），再登录看空间。
 4. 回滚：image 改回上一版的 `标签@digest`；一般不用换 data。
 - RC 之间：`docs/v2.0-upgrade-rc.md`；V1.1 ↔ V2：`docs/v2.0-upgrade-rollback.md`；人工验收：`docs/v2.0-manual-acceptance.md`。
-- 生产当前：RC.1 `sha-2ee0983@sha256:85ee7ab4…77fa`（Synology Container Manager，真实数据）。
-- 候选版镜像：RC.3 `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b`（CI 37843878107）；RC.2 `sha-3d5beaf@sha256:08ff9c08…444e`。
+- 生产当前：RC.1 `sha-2ee0983@sha256:85ee7ab4…77fa`（Synology Container Manager，真实数据），端口绑定 `192.168.50.141:8088`。
+- 候选版镜像：**RC.4** `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f`（CI 37849652604）。所有版本见第 0.1 节。
 
 ## 7. 已知风险 / 待办
 
 - 真机 Safari（iPhone / Mac）、真实 HTTPS 反代、群晖实机的人工验收仍待用户完成（`docs/v2.0-manual-acceptance.md`）。
-- 自动找回只覆盖「最近 20 个版本」内的情况；`RC.1 → V1.1 → 直接升 RC.3` 不会自动找回（RC.1 旧格式旁路不用），需手动「恢复较早的版本」。RC.1 期间的写入在 `hist` 里没有 `g:2`，无法与 V1.1 写入区分。
+- v2test 套件 busybox 自测 39 / 50（11 项失败），原因是沙盒 busybox 内置的 ip / hostname 绕过了假命令，跟代码无关；真实群晖上的 DSM `/bin/sh` 还没实测过这个套件。RC.4 没有重跑套件自测（沙盒缺 `ip` 和 sudo）。
+- 自动找回只覆盖「最近 20 个版本」内的情况；`RC.1 → V1.1 → 直接升 RC.3 / RC.4` 不会自动找回（RC.1 旧格式旁路不用），需手动「恢复较早的版本」。
+- 缓存刷新清单只记录到 RC.3，RC.4 还没加进去（见第 0.3 节第 3 步）。没有 `?v=` 的资源（字体、图标、manifest、`fonts.css`）靠「内容不变」保证，改它们时要加 `?v=` 或改文件名。RC.1 期间的写入在 `hist` 里没有 `g:2`，无法与 V1.1 写入区分。
 - 管理员旁路提示依赖内存诊断（`guardIssues`）：容器重启后诊断清空（启动自愈会重写旁路；若仍写不进去会再次记录）。
 - 未启用 CSP（内联脚本多）；`tools/*.sh` 远端无可执行位。
 - `main` 建议开启分支保护（需要 GitHub 套餐支持）。
