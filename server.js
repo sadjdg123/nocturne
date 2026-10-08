@@ -391,6 +391,8 @@ async function snapshotDue(name, cur) {
   const b = path.basename(all[0], ".json"), at = +b.slice(0, 15), m = /-v(\d+)/.exec(b);
   return Date.now() - at >= SNAPSHOT_EVERY_MS || (cur.version || 0) - (m ? +m[1] : 0) >= SNAPSHOT_EVERY_VERSIONS;
 }
+/** 空间个数（备份列表 / 409 用）：没有 spaces 字段 → null（只有「全部」，V1.1 及更早的配置）；spaces: [] → 0（用户删光了自定义空间） */
+function spacesCount(data) { return data && Array.isArray(data.spaces) ? data.spaces.length : null; }
 /** 备份 id = 文件名去掉 .json（时间戳-序号-v版本）；只认 listBackups 里真实存在的 */
 const BACKUP_ID = /^\d{15}-[\w-]+$/;
 async function backupSummaries(name) {
@@ -402,7 +404,7 @@ async function backupSummaries(name) {
     const at = +id.slice(0, 15); // 进备份（被替换）的时间
     const km = /-(auto|replaced|restore|local|legacy)$/.exec(id);
     out.push({ id, version: d.version || 0, updatedAt: d.updatedAt || null, at: new Date(at).toISOString(), time: Date.parse(d.updatedAt) || at, // time：这个版本保存的时间（毫秒）
-      groups: groups.length, items: allItems(d.data).length, spaces: Array.isArray(d.data.spaces) ? d.data.spaces.length : 0, kind: d.kind || (km ? km[1] : null) });
+      groups: groups.length, items: allItems(d.data).length, spaces: spacesCount(d.data), kind: d.kind || (km ? km[1] : null) });
   }
   return out;
 }
@@ -470,13 +472,14 @@ function spacesError(d) {
   return { error: "空间定义不合法（" + bad[0].where + "：" + bad[0].problem + "），未保存", code: "bad_spaces", spaces: bad.slice(0, 20) };
 }
 /** 保存前整理空间（必须在 withUserLock 里、拿到当前版本 cur 之后调用）。原地修改 body.data，返回 {kept, pruned}。
- *  1. 旧版前端保护：请求体没有 caps:["spaces"]（V1.1 前端不认识空间）且 data 里没有 spaces 字段，而服务器当前版本有空间定义
- *     → 沿用服务器上的空间定义（kept）。V2 前端总是带 caps，所以它明确删光空间 / 恢复默认时不会被「保护」回来。
+ *  1. 旧版前端保护：请求体没有 caps:["spaces"]（V1.1 前端不认识空间）且 data 里没有 spaces 字段，而服务器当前版本有 spaces 字段
+ *     → 沿用服务器上的空间定义（kept）。包括 spaces: []（用户明确删光了自定义空间）：照样保留空数组，不会退回「没有这个字段」。
+ *     V2 前端总是带 caps，所以它明确删光空间 / 恢复默认时不会被「保护」回来。
  *  2. 悬空引用规则：groupIds / itemIds 里指向已不存在的分组 / 项目的 id 一律删掉（pruned = 删掉的个数）；空间本身保留（可以是空空间）。 */
 function reconcileSpaces(body, cur) {
   const data = body.data, aware = Array.isArray(body.caps) && body.caps.includes("spaces");
   let kept = false;
-  if (!aware && data.spaces === undefined && cur && cur.data && Array.isArray(cur.data.spaces) && cur.data.spaces.length) {
+  if (!aware && data.spaces === undefined && cur && cur.data && Array.isArray(cur.data.spaces)) { // [] 也算「有」：区分「删光了」和「从没有过」
     data.spaces = JSON.parse(JSON.stringify(cur.data.spaces));
     kept = true;
   }
@@ -927,8 +930,9 @@ async function runProbes(onlyNew) {
 let soonTimer = null;
 function probeSoon() { clearTimeout(soonTimer); soonTimer = setTimeout(() => runProbes(true), 800); }
 
+/** 每个项目的检测状态 {itemId: {...}}。项目 id 由用户配置决定（可能叫 __proto__ / constructor），所以用无原型对象，避免改掉原型或漏项。 */
 function statusFor(name) {
-  const admin = isAdminName(name), out = {}, byName = new Map(docker.containers.map((c) => [c.name.toLowerCase(), c]));
+  const admin = isAdminName(name), out = Object.create(null), byName = new Map(docker.containers.map((c) => [c.name.toLowerCase(), c]));
   for (const it of itemsOf(readConfig(name))) {
     const t = probeTarget(it);
     let r = null;
@@ -1375,7 +1379,7 @@ async function api(req, res, url) {
         if (mismatch && !forced) {
           const groups = Array.isArray(cur.data.groups) ? cur.data.groups.length : 0;
           return { status: 409, error: "另一台设备在这之后改过配置，未覆盖", conflict: true, version: curV, updatedAt: cur.updatedAt,
-            groups, items: allItems(cur.data).length, spaces: Array.isArray(cur.data.spaces) ? cur.data.spaces.length : 0, unchanged: true };
+            groups, items: allItems(cur.data).length, spaces: spacesCount(cur.data), unchanged: true };
         }
         const migrated = await migrateData(me.name, b.data);
         if (migrated && same()) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, migrated: true, ...spInfo };
