@@ -119,7 +119,8 @@
   A.statusFor = function (it, local) {
     return statusReady().then(function (m) {
       var r = m && Object.prototype.hasOwnProperty.call(m, it.id) ? m[it.id] : null; // 项目 id 可能叫 constructor / __proto__：只认自有属性
-      if (r) return { ok: !!r.up, ms: r.ms != null ? r.ms : null, code: r.code || null, auth: !!r.auth, blocked: r.status === "blocked" };
+      /* 服务器真的探测过：原样交给 status.js 判定（只有这里的 ms / checkedAt 会显示出来） */
+      if (r) return { source: "server", up: !!r.up, status: r.status || (r.up ? "up" : "down"), ms: typeof r.ms === "number" ? r.ms : null, checkedAt: r.checkedAt || null, code: r.code || null, auth: !!r.auth, ok: !!r.up, blocked: r.status === "blocked" };
       return local(); // 服务器还没检测过（刚添加的项目）：先用浏览器探测
     });
   };
