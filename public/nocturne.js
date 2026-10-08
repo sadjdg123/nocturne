@@ -195,6 +195,8 @@
   var serverVer = N.version || 0, lastSent = null, timer = null, inflight = false, dirty = false, warned = false, bigWarned = false, badWarned = false;
   var restoreNext = false, forceNext = null, conflictInfo = null;
   var OP = "nocturne.op";
+  /* 这个前端认识 data.spaces（V2.0）：推送时带上，服务器据此区分「明确没有空间」和「旧版前端不认识空间」（后者沿用服务器上的空间定义） */
+  var CAPS = window.NocturneSpaces ? ["spaces"] : [];
   /** 参与同步的内容：去掉设备本地的 settings.net 与 recent */
   function snapshot() {
     var st = A.state;
@@ -285,7 +287,7 @@
     inflight = true; dirty = false;
     var restore = restoreNext; restoreNext = false;
     var force = forceNext; forceNext = null;
-    var body = { baseVersion: serverVer, opId: opFor(raw), data: JSON.parse(raw) };
+    var body = { baseVersion: serverVer, opId: opFor(raw), data: JSON.parse(raw), caps: CAPS };
     if (restore) body.restore = true; // 恢复较早的版本：服务器先把当前版本存一份快照再写入
     if (force) { body.force = true; body.expectVersion = force.expect; } // 用户明确选择「用本机版覆盖」
     var str = JSON.stringify(body), size = bytes(str);
@@ -320,6 +322,7 @@
   function normalize(s) {
     s.settings = Object.assign(structuredClone(A.defaults.settings), s.settings || {});
     s.groups = Array.isArray(s.groups) ? s.groups : [];
+    if (window.NocturneSpaces) window.NocturneSpaces.normalize(s); // 空间：清悬空引用（例如回滚到旧版期间删掉的分组）；没有 spaces 字段时不动
     return s;
   }
   /** 从服务器拉取（启动时缓存过期、或切回页面时其他设备改过）。本机有未同步的修改时（非 force）不拉，绝不丢本机修改 */
@@ -473,6 +476,7 @@
       api("GET", "config?backup=" + encodeURIComponent(id)).then(function (d) {
         if (!d || !d.data) throw new Error("这个版本已经不在了");
         restoreNext = true; // 推上去时带 restore:true：当前版本先进服务器备份，可以再换回来
+        if (d.data.spaces === undefined && Array.isArray(A.state.spaces)) d.data.spaces = structuredClone(A.state.spaces); // 恢复 V2 之前的备份：保留现有空间定义（悬空引用随后清掉）
         A.state = adopt(d.data); A.save(); A.render(); // 内网/外网、最近使用是这台设备自己的，不跟着恢复
         bkClose();
         A.toast("已恢复到 " + label + "的版本");
@@ -680,7 +684,7 @@
       window.addEventListener("pageshow", function (e) { if (e.persisted) { pull(false).then(null, function () {}); pullStatus(); } });
       window.addEventListener("pagehide", function () {
         if (snapshot() === lastSent || conflictInfo) return; // 冲突未处理时不发；正在发的那次可能会被页面卸载中断：照样补发（同一个 opId，服务器不会重复记版本）
-        var raw = snapshot(), str = JSON.stringify({ baseVersion: serverVer, opId: opFor(raw), data: JSON.parse(raw) });
+        var raw = snapshot(), str = JSON.stringify({ baseVersion: serverVer, opId: opFor(raw), data: JSON.parse(raw), caps: CAPS });
         markDirty();
         if (bytes(str) >= KEEPALIVE_MAX) return; // 太大发不出 keepalive：留着脏标记，下次打开补推
         try {
