@@ -527,13 +527,15 @@ sh tools/restore.sh [--force] <备份.tar.gz> <目标 data 目录>
 `ghcr.io/sadjdg123/nocturne:sha-3e6da3c@sha256:58a4c8349242ca80ca4a46681410eafcbbb41e0411c3567e3cbef9abff19e861`，
 V2 RC（2.0.0-rc.1）为
 `ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa`。RC.2（2.0.0-rc.2）见 `docs/v2.0-rc2-report.md`；
-**RC.3（2.0.0-rc.3，当前推荐）**为 `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b`，见 `docs/v2.0-rc3-report.md`。
+RC.3（2.0.0-rc.3）为 `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b`，见 `docs/v2.0-rc3-report.md`；
+**RC.4（2.0.0-rc.4，当前推荐）**为 `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f`，见 `docs/v2.0-rc4-report.md`。
 **已经在跑 RC.1 的 NAS 升级 / 回滚、以及全新安装，按 `docs/v2.0-upgrade-rc.md`**；V1.1 ↔ V2 按 `docs/v2.0-upgrade-rollback.md`。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
 回滚到 V1.1 一般不需要替换 `data/`。
 
 文档：
 
 - `docs/v2.0-upgrade-rc.md` —— **RC.1 → RC.2 / RC.3 升级与回滚**（已部署 RC.1 的群晖：热备份 + 校验、查旁路写入失败日志、按 digest 改镜像、检查、按 digest 回滚 RC.1）+ 全新安装
+- `docs/v2.0-rc4-report.md` —— RC.4 报告：`nocturne.js` 缓存刷新（`?v=9`）、按已发布版本检查的缓存刷新测试、健康检查地址（`NAS_IP`，生产 `192.168.50.141:8088`）、镜像 / CI / 远端核对、全部版本的 digest
 - `docs/v2.0-rc3-report.md` —— RC.3 修复报告：旁路格式校验（P-2 补强）、临时文件撞名（P-3 补强）、管理员提示、镜像 / CI / 远端核对
 - `docs/HANDOFF-CODEX.md` —— 开发交接：架构、data 目录与兼容约束、开发 / 测试、CI/CD、部署流程、已知风险、约定
 - `docs/v2.0-rc2-report.md` —— RC.2 稳定性修复报告：cookie 名前缀（P-1）、回滚写保护旁路一致性（P-2）、原子写入临时文件（P-3）、RC.1 → RC.2 兼容
