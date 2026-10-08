@@ -219,6 +219,6 @@ test("写坏的旁路 + 已被 V1.1 写过的配置（不能自愈）：再升�
   fs.writeFileSync(path.join(T.dir, "spaces-guard/admin.json"), JSON.stringify({ version: 1, spaces: SPACES_A })); // 伪造一份过期的旧格式旁路
   await rollbackDrop(T, true);
   const r = await reupgrade(T);
-  assert.equal(r.back.data.spaces, undefined, "旧旁路 v1 之后有 V2 写的 v2 → 过期；快照环里的 v2 是 [] → 不找回");
-  assert.match(r.log, /spaces guard: stale admin config v2 was written by V2 after guard v1/);
+  assert.equal(r.back.data.spaces, undefined, "旧格式旁路不用（RC.3）；快照环里的 v2 是 [] → 不找回");
+  assert.match(r.log, /spaces guard: stale admin guard v1 has an old or invalid format/);
 });
