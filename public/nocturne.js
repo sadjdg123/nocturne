@@ -118,7 +118,7 @@
   function statusReady() { return statusMap ? Promise.resolve(statusMap) : new Promise(function (r) { statusWaiters.push(r); }); }
   A.statusFor = function (it, local) {
     return statusReady().then(function (m) {
-      var r = m[it.id];
+      var r = m && Object.prototype.hasOwnProperty.call(m, it.id) ? m[it.id] : null; // 项目 id 可能叫 constructor / __proto__：只认自有属性
       if (r) return { ok: !!r.up, ms: r.ms != null ? r.ms : null, code: r.code || null, auth: !!r.auth, blocked: r.status === "blocked" };
       return local(); // 服务器还没检测过（刚添加的项目）：先用浏览器探测
     });
@@ -194,6 +194,9 @@
    * 设备本地状态不参与同步：内网/外网切换（settings.net）和「最近使用」（recent）只存在这台设备上，切换 / 点击不会产生新版本或冲突。 */
   var serverVer = N.version || 0, lastSent = null, timer = null, inflight = false, dirty = false, warned = false, bigWarned = false, badWarned = false;
   var restoreNext = false, forceNext = null, conflictInfo = null;
+  /* 服务器以 400 bad_spaces 拒收的那份内容（snapshot 字符串）：同一份内容不再自动推送（防抖、切后台、pagehide、online、15 秒重试都跳过），
+   * 本机修改与脏标记照常保留；内容再变（用户又改了）或用户点「重试」才重新推送。只在内存里：重新打开页面会补推一次。 */
+  var rejectedRaw = null;
   var OP = "nocturne.op";
   /* 这个前端认识 data.spaces（V2.0）：推送时带上，服务器据此区分「明确没有空间」和「旧版前端不认识空间」（后者沿用服务器上的空间定义） */
   var CAPS = window.NocturneSpaces ? ["spaces"] : [];
@@ -270,7 +273,7 @@
   function schedule() { if (!N.user) return; markDirty(); clearTimeout(timer); timer = setTimeout(push, 800); }
   /** opts.keepalive：页面切到后台时用，body 不超过 60KB 才带 keepalive（超过会被浏览器直接拒绝） */
   function push(opts) {
-    opts = opts && opts.keepalive ? opts : {};
+    opts = opts && typeof opts === "object" && (opts.keepalive || opts.retry) ? opts : {};
     if (inflight) { dirty = true; return; }
     if (conflictInfo) return; // 冲突还没处理：先不推，本机修改照常存在本机（脏标记保留）
     if (wpMigrating) { dirty = true; return; }
@@ -284,6 +287,8 @@
     }
     var raw = snapshot();
     if (raw === lastSent) return;
+    if (raw === rejectedRaw && !opts.retry) return; // 服务器已拒收这份空间设置：不自动重推，等用户再改或点「重试」
+    rejectedRaw = null;
     inflight = true; dirty = false;
     var restore = restoreNext; restoreNext = false;
     var force = forceNext; forceNext = null;
@@ -306,6 +311,11 @@
       if (e.status === 409 && e.data && e.data.conflict) return conflict(e.data);
       if (e.status === 422 && e.data && e.data.code === "opid_mismatch") { // opId 被另一份内容占用：换新 opId 正常重推（照样判冲突）
         opReset(); if (force) forceNext = force; dirty = true; return;
+      }
+      if (e.status === 400 && e.data && e.data.code === "bad_spaces") { // 空间设置格式不对：保留本机修改，停止自动重试
+        rejectedRaw = raw;
+        A.toast("空间设置格式有误，服务器未保存。本机修改已保留，改动后会再同步", { duration: 12000, action: "重试", onAction: function () { push({ retry: true }); } });
+        return;
       }
       if (e.status === 400 && e.data && e.data.code === "bad_aliases") { // 别名不合法：改了再推，不自动重试
         if (!badWarned) { badWarned = true; A.toast(e.data.error || "项目别名不合法，未同步", { duration: 8000 }); }
@@ -683,7 +693,7 @@
       // 从往返缓存（bfcache）恢复：serverVer 可能已过时，先刷新，避免误报冲突
       window.addEventListener("pageshow", function (e) { if (e.persisted) { pull(false).then(null, function () {}); pullStatus(); } });
       window.addEventListener("pagehide", function () {
-        if (snapshot() === lastSent || conflictInfo) return; // 冲突未处理时不发；正在发的那次可能会被页面卸载中断：照样补发（同一个 opId，服务器不会重复记版本）
+        if (snapshot() === lastSent || conflictInfo || snapshot() === rejectedRaw) return; // 冲突未处理 / 服务器已拒收这份空间设置时不发；正在发的那次可能会被页面卸载中断：照样补发（同一个 opId，服务器不会重复记版本）
         var raw = snapshot(), str = JSON.stringify({ baseVersion: serverVer, opId: opFor(raw), data: JSON.parse(raw), caps: CAPS });
         markDirty();
         if (bytes(str) >= KEEPALIVE_MAX) return; // 太大发不出 keepalive：留着脏标记，下次打开补推
