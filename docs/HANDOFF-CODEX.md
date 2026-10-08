@@ -84,7 +84,7 @@ data/
 
 ## 3. 开发环境
 
-- Node 22（`engines >=20`），**没有 npm 依赖**；`npm install` 不需要。本地运行：`DATA_DIR=./data node server.js` → `http://localhost:8080`。
+- Node 22（`engines >=20`），**没有 npm 依赖**；`npm install` 不需要。本地运行（开发机，不是 NAS）：`DATA_DIR=./data node server.js` → `http://localhost:8080`。
 - jsdom：不是依赖。CI 临时 `npm install --no-save jsdom@24`；本地用 `JSDOM_PATH=<…/node_modules/jsdom>`（沙盒里是 `/workspace/work/jsdom-env/node_modules/jsdom`）。找不到时本地跳过、CI 里失败。
 - Chromium / Playwright（只给 `tools/e2e/*.py`、`tools/stage*_*.py` 截图 / 端到端用）：沙盒里由 `/workspace/work/.tools/setup.sh` 解出 Debian arm64 的 chromium + CJK 字体 + `pip --target` 的 playwright；需要 `PYTHONPATH=/workspace/work/.tools/py`。
 - 故障注入：`test/fsfail.js`（`NODE_OPTIONS=--require`，控制文件 `FSFAIL_CTL` 每行 `<enospc|partial|open|rename> <路径正则>`，运行中可开关）。
@@ -117,7 +117,7 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
 
 1. 先在 `tools/v2test` 测试站试（另一个端口 8089 + 生产数据的热备份副本，不碰生产 data；见 `tools/v2test/README.md`）。
 2. 生产升级前 `tools/backup.sh`（热备份或 `--stop`）+ `verify-backup.sh`。
-3. compose `image:` 写 `标签@digest`，重建；检查 `/api/health` 版本、登录、空间。
+3. compose `image:` 写 `标签@digest`，重建；`curl -s "http://$NAS_IP:8088/api/health"` 检查版本（生产端口绑定在 `192.168.50.141:8088`，`NAS_IP` 默认它、以 `sudo docker port nocturne` 为准；**不要用 `127.0.0.1:8088` / `localhost:8088`**，连不上），再登录看空间。
 4. 回滚：image 改回上一版的 `标签@digest`；一般不用换 data。
 - RC 之间：`docs/v2.0-upgrade-rc.md`；V1.1 ↔ V2：`docs/v2.0-upgrade-rollback.md`；人工验收：`docs/v2.0-manual-acceptance.md`。
 - 生产当前：RC.1 `sha-2ee0983@sha256:85ee7ab4…77fa`（Synology Container Manager，真实数据）。
