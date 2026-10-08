@@ -81,6 +81,50 @@
     });
     return out;
   }
+  /* ---------------- 项目搜索别名 item.aliases（V1.1）：只作搜索文本，从不当作 URL / 脚本 / 命令解释 ---------------- */
+  var ALIAS_MAX = 10, ALIAS_LEN = 32;
+  function chars(x) { return Array.from(x).length; }
+  /** 把输入（字符串：逗号 / 中文逗号 / 顿号 / 换行分隔；或数组）整理成别名数组：去首尾空白、去空、大小写不敏感去重（保留第一次出现）。不截断 */
+  function normAliases(v) {
+    var parts = Array.isArray(v) ? v : typeof v === "string" ? v.split(/[,，、\n\r]+/) : [];
+    var out = [], seen = {};
+    parts.forEach(function (x) {
+      if (typeof x !== "string") return;
+      x = x.replace(/\s+/g, " ").trim();
+      var k = x.toLowerCase();
+      if (!x || seen[k]) return;
+      seen[k] = 1; out.push(x);
+    });
+    return out;
+  }
+  /** 单个项目的别名是否合法：没有（undefined）合法；否则必须是 ≤10 个、每个 1–32 字、无控制字符、无首尾空白的字符串数组。返回错误说明或 "" */
+  function aliasProblem(v) {
+    if (v === undefined) return "";
+    if (!Array.isArray(v)) return "必须是字符串数组";
+    if (v.length > ALIAS_MAX) return "最多 " + ALIAS_MAX + " 个";
+    for (var i = 0; i < v.length; i++) {
+      var x = v[i];
+      if (typeof x !== "string") return "必须是字符串";
+      if (!x.trim() || x !== x.trim()) return "不能为空或带首尾空格";
+      if (chars(x) > ALIAS_LEN) return "每个最多 " + ALIAS_LEN + " 个字";
+      if (BAD_CHARS.test(x.replace(/ /g, "a"))) return "含有不可见字符";
+    }
+    return "";
+  }
+  /** 整份配置里不合法的别名：[{where, id, problem}]（空数组 = 全部合法） */
+  function checkAliases(d) {
+    var out = [];
+    (d && Array.isArray(d.groups) ? d.groups : []).forEach(function (g) {
+      if (!g || typeof g !== "object") return;
+      (Array.isArray(g.items) ? g.items : []).forEach(function (it) {
+        if (!it || typeof it !== "object") return;
+        var p = aliasProblem(it.aliases);
+        if (p) out.push({ where: String(g.name || "").slice(0, 20) + " / " + String(it.title || "未命名").slice(0, 20) + " · 别名", id: it.id, problem: p });
+      });
+    });
+    return out;
+  }
+
   /** 便于提示的简短展示（截断、去掉控制字符） */
   function show(v) {
     var s = typeof v === "string" ? v : JSON.stringify(v);
@@ -88,5 +132,6 @@
     return s.length > 60 ? s.slice(0, 57) + "…" : s;
   }
 
-  return { http: http, nav: nav, safeNav: safeNav, engine: engine, image: image, wallpaper: wallpaper, dataImage: dataImage, checkConfig: checkConfig, show: show };
+  return { http: http, nav: nav, safeNav: safeNav, engine: engine, image: image, wallpaper: wallpaper, dataImage: dataImage, checkConfig: checkConfig, show: show,
+    ALIAS_MAX: ALIAS_MAX, ALIAS_LEN: ALIAS_LEN, normAliases: normAliases, aliasProblem: aliasProblem, checkAliases: checkAliases };
 });
