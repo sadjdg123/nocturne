@@ -118,7 +118,7 @@ function portsStr(c) { const out = []; for (const [p, bs] of Object.entries(c.Ho
 let argv = process.argv.slice(2);
 function takeFmt(a) { const i = a.findIndex((x) => x === "-f" || x === "--format"); if (i < 0) return { fmt: null, rest: a }; const fmt = a[i + 1]; return { fmt, rest: a.slice(0, i).concat(a.slice(i + 2)) }; }
 const cmd = argv.shift();
-const IMG_REPO = "ghcr.io/sadjdg123/nocturne", IMG_DIGEST = "sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa";
+const IMG_REPO = "ghcr.io/sadjdg123/nocturne", IMG_DIGEST = "sha256:08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e";
 const imgKey = (ref) => { const m = /^(.*?)(?::[\w.-]+)?@(sha256:[0-9a-f]{64})$/.exec(ref); return m ? m[1] + "@" + m[2] : ref; };
 switch (cmd) {
   case "version": console.log("Client: fake 24.0\nServer: fake 24.0"); break;
