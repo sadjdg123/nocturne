@@ -73,28 +73,65 @@ function ensureDirs() {
 function readJSON(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; }
 }
-/** 原子写入：先写临时文件，再 rename 覆盖。按文件串行，避免并发写交错。 */
+/* 原子写入：先写同目录下的临时文件 <目标>.<pid>.<8 位随机十六进制>.tmp，fsync 后 rename 覆盖目标。
+ * 任何一步失败（磁盘满 ENOSPC、只写了一半、rename 失败……）：只删除**这一次自己创建的**临时文件，绝不动目标文件（保持写入前的完整内容）。
+ * 正在写的临时文件记在 ownTmps 里，启动时的残留清理（sweepStaleTmp）不会碰它们。 */
+const TMP_RE = /^(.+)\.(\d{1,10})\.([0-9a-f]{8})\.tmp$/;
+const ownTmps = new Set();
+const tmpName = (file) => file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
+async function atomicWrite(file, body) {
+  const tmp = tmpName(file);
+  ownTmps.add(tmp);
+  let done = false;
+  try {
+    const fh = await fsp.open(tmp, "wx", 0o600); // wx：临时文件名已存在（极小概率）就失败，不覆盖别人的文件
+    try { await fh.writeFile(body); await fh.sync(); } finally { await fh.close(); }
+    await fsp.rename(tmp, file);
+    done = true;
+  } finally {
+    if (!done) await fsp.rm(tmp, { force: true }).catch(() => {}); // 只删自己的临时文件
+    ownTmps.delete(tmp);
+  }
+}
+/** 原子写 JSON。按文件串行，避免并发写交错。 */
 const writeQueues = new Map();
 function writeJSON(file, data) {
   const body = JSON.stringify(data, null, 2);
   const prev = writeQueues.get(file) || Promise.resolve();
-  const next = prev.catch(() => {}).then(async () => {
-    const tmp = file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-    const fh = await fsp.open(tmp, "w", 0o600);
-    try { await fh.writeFile(body); await fh.sync(); } finally { await fh.close(); }
-    await fsp.rename(tmp, file);
-  });
+  const next = prev.catch(() => {}).then(() => atomicWrite(file, body));
   writeQueues.set(file, next);
   next.finally(() => { if (writeQueues.get(file) === next) writeQueues.delete(file); }).catch(() => {});
   return next;
 }
-async function writeFileAtomic(file, buf) {
-  const tmp = file + "." + process.pid + "." + crypto.randomBytes(4).toString("hex") + ".tmp";
-  try {
-    const fh = await fsp.open(tmp, "w", 0o600);
-    try { await fh.writeFile(buf); await fh.sync(); } finally { await fh.close(); }
-    await fsp.rename(tmp, file);
-  } catch (e) { await fsp.rm(tmp, { force: true }).catch(() => {}); throw e; } // 失败不留临时文件
+const writeFileAtomic = (file, buf) => atomicWrite(file, buf);
+/** 启动时清理中断留下的临时文件：只删文件名完全符合 <名字>.<pid>.<8 位十六进制>.tmp、是普通文件、修改时间早于 TMP_STALE_MS、
+ *  而且不属于任何仍在运行的进程的（pid 是本进程时：不在 ownTmps 里且早于本进程启动，即上一次运行留下的——容器里 pid 常常相同）。
+ *  只扫描本程序写这类文件的目录；data/cache 另有自己的清理。返回删掉的个数。 */
+const TMP_STALE_MS = 3600e3;
+const START_MS = Date.now() - Math.round(process.uptime() * 1000);
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } // EPERM：进程在、只是不属于我们
+}
+async function sweepStaleTmp(now = Date.now()) {
+  const dirs = [DATA_DIR, CONFIG_DIR, GUARD_DIR, WALLPAPER_DIR];
+  for (const parent of [BACKUP_DIR, ICONS_DIR]) {
+    dirs.push(parent);
+    try { for (const d of await fsp.readdir(parent, { withFileTypes: true })) if (d.isDirectory()) dirs.push(path.join(parent, d.name)); } catch (e) { /* 没有这个目录 */ }
+  }
+  let removed = 0;
+  for (const dir of dirs) {
+    let names; try { names = await fsp.readdir(dir); } catch (e) { continue; }
+    for (const f of names) {
+      const m = TMP_RE.exec(f); if (!m) continue;
+      const full = path.join(dir, f), pid = +m[2];
+      if (ownTmps.has(full)) continue;
+      let st; try { st = await fsp.lstat(full); } catch (e) { continue; }
+      if (!st.isFile() || now - st.mtimeMs < TMP_STALE_MS) continue;
+      if (pid === process.pid ? st.mtimeMs >= START_MS : pidAlive(pid)) continue;
+      try { await fsp.rm(full); removed++; log("stale tmp removed", path.relative(DATA_DIR, full)); } catch (e) { /* 别的进程刚删掉 / 没有权限：不管 */ }
+    }
+  }
+  return removed;
 }
 /** 按用户串行：配置的「迁移 → 读 → 判冲突 → 备份 → 写」、壁纸 / 图标写入、删除用户都在这把锁里，避免并发交错 */
 const userLocks = new Map();
@@ -184,7 +221,20 @@ function parseCookies(req) {
   }
   return out;
 }
-const COOKIE = "nocturne_sid";
+/* Cookie 名（RC.2，P-1）：NOCTURNE_COOKIE_PREFIX（默认 nocturne_）→ 会话 <前缀>sid、已知设备 <前缀>dev。
+ * 浏览器的 cookie 不按端口区分：同一主机名下跑两个实例（例如 8088 生产、8089 测试）时给其中一个换前缀，登录 / 已知设备就互不覆盖。
+ * 只允许字母、数字、_ . -（1–32 个字符，必须以字母或数字开头——这样也就排除了 __Host- / __Secure- 这类浏览器特殊前缀：
+ * 它们要求每个响应都带 Secure，而本程序只在 HTTPS 请求上加 Secure，用了会让 HTTP 下登录静默失效）。不合法 → 启动时报错退出。 */
+const COOKIE_PREFIX_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$/;
+function cookieNames(raw) {
+  const v = raw == null ? "" : String(raw).trim();
+  if (!v) return { prefix: "nocturne_", sid: "nocturne_sid", dev: "nocturne_dev" };
+  if (/^__(host|secure)-/i.test(v)) return { error: "NOCTURNE_COOKIE_PREFIX 不能以 __Host- / __Secure- 开头（这类前缀要求所有响应都带 Secure；本程序只在 HTTPS 请求上加 Secure）" };
+  if (!COOKIE_PREFIX_RE.test(v)) return { error: "NOCTURNE_COOKIE_PREFIX 不合法：只能用字母、数字、_ . -，1–32 个字符，以字母或数字开头（例如 nocturne_v2test_）" };
+  return { prefix: v, sid: v + "sid", dev: v + "dev" };
+}
+const COOKIE_CFG = cookieNames(process.env.NOCTURNE_COOKIE_PREFIX);
+const COOKIE = COOKIE_CFG.sid || "nocturne_sid";
 /** HTTPS 判定：只有直连对端是可信代理（TRUSTED_PROXY_CIDRS）时才看 X-Forwarded-Proto，否则只认本连接是否加密 */
 function isHttps(req) { return clientInfo(req).https; }
 /** 追加一条 Set-Cookie（同一响应可以设多个 cookie） */
@@ -201,7 +251,7 @@ function setCookie(req, res, token, maxAge) {
 /* 「已知设备」：登录成功时发一个长效 HttpOnly cookie，服务器只在 users.json 里存它的 sha256（每人最多 DEVICE_MAX 个）。
  * 带着它的登录请求不受「按用户名封禁」限制（只保留逐步变慢），这样别人反复试你的用户名也锁不住你自己的设备。
  * 修改 / 重置密码、删除用户时全部作废。 */
-const DEV_COOKIE = "nocturne_dev", DEVICE_DAYS = 365, DEVICE_MAX = 20, DEV_RE = /^[A-Za-z0-9_-]{43}$/;
+const DEV_COOKIE = COOKIE_CFG.dev || "nocturne_dev", DEVICE_DAYS = 365, DEVICE_MAX = 20, DEV_RE = /^[A-Za-z0-9_-]{43}$/;
 function knownDevice(req, u) {
   if (!u || !Array.isArray(u.devices)) return false;
   const t = parseCookies(req)[DEV_COOKIE];
@@ -451,14 +501,17 @@ async function writeConfig(name, data, opId, opHash) {
   const version = (cur.version || 0) + 1;
   let hist = Array.isArray(cur.hist) ? cur.hist.slice() : [];
   if (cur.data && !hist.some((x) => x.v === cur.version)) hist.push({ v: cur.version || 0, h: dataHash(cur.data) }); // 旧文档：补上当前版本
-  hist.push({ v: version, h: dataHash(data) });
+  hist.push({ v: version, h: dataHash(data), g: 2 }); // g:2 = 这个版本是 V2 写的（V1.1 / RC.1 的 writeConfig 原样复制旧 hist 条目，所以标记会留下来）
   hist = hist.slice(-HIST_KEEP);
   let ops = Array.isArray(cur.ops) ? cur.ops.slice() : [];
   if (opId) ops = ops.filter((o) => o.id !== opId).concat({ id: opId, v: version, h: opHash || dataHash(data) }).slice(-OPS_KEEP); // h：这次推送收到的内容指纹（迁移前）
   const doc = { version, updatedAt: new Date().toISOString(), data, hist, ...(ops.length ? { ops } : {}), writer: WRITER };
   await writeJSON(configFile(name), doc);
   configCache.delete(configFile(name));
-  await writeGuard(name, doc).catch((e) => log("spaces guard write", name, e.message));
+  // 旁路写入失败不影响这次保存（配置已经写好），但绝不静默：作废旧旁路（删掉，作废不了时由版本 + 指纹校验兜底）、记错误日志、
+  // 管理员 /api/health 里能看到，这次保存的响应带 guardWarning。
+  const gw = await writeGuard(name, doc).then(() => { guardIssues.delete(name.toLowerCase()); return null; }, (e) => guardWriteFailed(name, e));
+  if (gw) Object.defineProperty(doc, "guardWarning", { value: gw }); // 不可枚举：不会被写进文件 / 返回给 GET
   return doc;
 }
 
@@ -476,34 +529,105 @@ const WRITER = Object.freeze({ app: "nocturne", v: VERSION, gen: 2 });
 const v2Written = (doc) => !!(doc && doc.writer && doc.writer.app === "nocturne" && +doc.writer.gen >= 2);
 const guardFile = (name) => path.join(GUARD_DIR, name.toLowerCase() + ".json");
 const GUARD_NOTICE_MS = 14 * 864e5; // 自动找回后，页面在 14 天内（每台设备一次）提示
+/* RC.2：旁路记录和它对应的那个配置版本绑定——fmt:2 + version + h（那个版本 data 的指纹，与 hist 里的 h 相同）。
+ * 配置的 hist 里 V2 写的版本带 g:2。找回前要求：旁路版本在 hist 里、指纹一致、而且 hist 里没有比它新的 V2 版本
+ * （有 = 旁路写入失败过、已过期）。校验不过就不用旁路；改为在快照环里找「最后一个 V2 版本」（版本号 + 指纹都对上）那一份的空间，
+ * 找不到就不找回（只记日志 + 管理员诊断）——宁可不找回，也不复活删掉的空间、不换回旧空间。
+ * guardIssues：内存里的诊断（每个账户最近一次旁路写入失败 / 过期），只给管理员看（/api/health 的 guard 字段），该账户下次旁路写成功即清除。 */
+const guardIssues = new Map(); // lname -> {user, kind: "write_failed" | "stale", at, error?, detail?}
 async function writeGuard(name, doc) {
   const data = doc && doc.data;
   if (!data || typeof data !== "object") return;
   const prev = readJSON(guardFile(name), null);
-  const g = { version: doc.version, updatedAt: doc.updatedAt, writer: WRITER,
+  const g = { fmt: 2, version: doc.version, h: dataHash(data), updatedAt: doc.updatedAt, writer: WRITER,
     spaces: Array.isArray(data.spaces) ? data.spaces : null, ...(typeof data.spacesVersion === "number" ? { spacesVersion: data.spacesVersion } : {}),
     ...(prev && prev.recovered ? { recovered: prev.recovered } : {}) };
   await fsp.mkdir(GUARD_DIR, { recursive: true });
   await writeJSON(guardFile(name), g);
+}
+/** 旁路写不进去：删掉旧旁路（磁盘满时删除照样能成功；目录不可写时删不掉，由找回前的版本 + 指纹校验拦住），记错误日志和诊断。返回给保存响应的警告码。 */
+async function guardWriteFailed(name, e) {
+  const code = (e && e.code) || "EIO";
+  let invalidated = false;
+  try { await fsp.rm(guardFile(name)); invalidated = true; } catch (x) { invalidated = x.code === "ENOENT"; }
+  guardIssues.set(name.toLowerCase(), { user: name, kind: "write_failed", at: new Date().toISOString(), error: code, invalidated });
+  log("ERROR spaces guard write failed", name, code, invalidated ? "(old guard removed; spaces auto-recovery off until the next successful write)" : "(old guard could not be removed; it is now stale and will be rejected by the version/hash check)");
+  return "spaces_guard_write_failed";
+}
+/** 旁路是否对得上当前配置历史：{ok} 或 {ok:false, reason} */
+function guardMatches(g, cur) {
+  const hist = Array.isArray(cur.hist) ? cur.hist : [];
+  const at = hist.find((x) => x && x.v === g.version);
+  if (!at) return { ok: false, reason: "guard v" + g.version + " is not in the config history" };
+  if (g.h != null && at.h !== g.h) return { ok: false, reason: "guard v" + g.version + " hash does not match the config history" };
+  const later = hist.find((x) => x && +x.g >= 2 && x.v > g.version);
+  if (later) return { ok: false, reason: "config v" + later.v + " was written by V2 after guard v" + g.version + " (guard write failed back then)" };
+  return { ok: true };
+}
+/** 旁路校验不过时的后备：快照环里正好是「hist 里最新的 V2 版本」（版本号 + 指纹一致）的那一份 */
+async function lastV2FromBackups(name, cur) {
+  const hist = Array.isArray(cur.hist) ? cur.hist : [];
+  const last = hist.filter((x) => x && +x.g >= 2).sort((a, b) => b.v - a.v)[0];
+  if (!last) return null;
+  for (const f of await listBackups(name)) {
+    const d = readJSON(f, null);
+    if (d && d.version === last.v && d.data && typeof d.data === "object" && dataHash(d.data) === last.h) return { version: d.version, spaces: Array.isArray(d.data.spaces) ? d.data.spaces : null, spacesVersion: d.data.spacesVersion, from: "backup" };
+  }
+  return { version: last.v, missing: true };
+}
+/** 同一账户、同一配置版本的「过期 / 找不到」日志只记一次（GET /api/config 每次都会检查） */
+const guardLogged = new Map();
+function guardLogOnce(name, cur, ...a) {
+  const k = name.toLowerCase() + "|" + a[0], v = (cur.version || 0) + "|" + (cur.updatedAt || "");
+  if (guardLogged.get(k) === v) return;
+  guardLogged.set(k, v);
+  log(...a);
 }
 /** 必须在 withUserLock 里调用。找回了 → {at, spaces, fromVersion, version, pruned}，否则 null */
 async function guardRecover(name) {
   const cur = readConfig(name);
   if (!cur.data || typeof cur.data !== "object" || v2Written(cur) || cur.data.spaces !== undefined) return null;
   const g = readJSON(guardFile(name), null);
-  if (!g || !Array.isArray(g.spaces) || !g.spaces.length) return null;
-  if (!((cur.version || 0) > (g.version || 0))) { log("spaces guard: skipped", name, "config v" + (cur.version || 0) + " is not newer than guard v" + (g.version || 0)); return null; }
+  let src = null;
+  if (g && typeof g === "object" && Number.isSafeInteger(g.version)) {
+    if (!((cur.version || 0) > g.version)) { log("spaces guard: skipped", name, "config v" + (cur.version || 0) + " is not newer than guard v" + g.version); return null; }
+    const m = guardMatches(g, cur);
+    if (m.ok) src = { version: g.version, spaces: g.spaces, spacesVersion: g.spacesVersion, from: "guard" };
+    else {
+      guardLogOnce(name, cur, "spaces guard: stale", name, m.reason, "- not using it");
+      guardIssues.set(name.toLowerCase(), { user: name, kind: "stale", at: new Date().toISOString(), detail: m.reason });
+    }
+  }
+  if (!src) {
+    const b = await lastV2FromBackups(name, cur);
+    if (!b) return null; // 没有 V2 写过的版本可对照：什么都不做
+    if (b.missing) { guardLogOnce(name, cur, "spaces guard: skipped", name, "last V2 version v" + b.version + " is not in the backup ring either; nothing recovered (see 恢复较早的版本)"); return null; }
+    src = b;
+  }
+  if (!Array.isArray(src.spaces) || !src.spaces.length) return null; // V2 最后的状态就是没有空间 / 删光了：不找回
   const data = JSON.parse(JSON.stringify(cur.data));
-  data.spaces = JSON.parse(JSON.stringify(g.spaces));
-  if (typeof g.spacesVersion === "number" && !(typeof data.spacesVersion === "number" && data.spacesVersion >= g.spacesVersion)) data.spacesVersion = g.spacesVersion;
+  data.spaces = JSON.parse(JSON.stringify(src.spaces));
+  if (typeof src.spacesVersion === "number" && !(typeof data.spacesVersion === "number" && data.spacesVersion >= src.spacesVersion)) data.spacesVersion = src.spacesVersion;
   if (SPACES.check(data).length) { log("spaces guard: skipped", name, "saved spaces no longer valid"); return null; }
   const pruned = SPACES.prune(data);
   await addBackup(name, cur, "guard");
   const doc = await writeConfig(name, data);
   const rec = { at: doc.updatedAt, spaces: data.spaces.length, fromVersion: cur.version || 0, version: doc.version, pruned };
-  await writeJSON(guardFile(name), Object.assign(readJSON(guardFile(name), {}), { recovered: rec }));
-  log("spaces guard: restored", name, rec.spaces, "spaces", "v" + rec.fromVersion + " -> v" + rec.version, "(last write was not by V2 and dropped them; previous version kept as backup -guard; pruned refs " + pruned + ")");
+  if (!doc.guardWarning) await writeJSON(guardFile(name), Object.assign(readJSON(guardFile(name), {}), { recovered: rec }));
+  log("spaces guard: restored", name, rec.spaces, "spaces", "v" + rec.fromVersion + " -> v" + rec.version, "(last write was not by V2 and dropped them; source: " + src.from + " v" + src.version + "; previous version kept as backup -guard; pruned refs " + pruned + ")");
   return rec;
+}
+/** 启动自愈：最后一次是 V2 写的配置，旁路缺失 / 损坏 / 旧格式 / 版本或指纹对不上 → 按当前配置重写旁路。必须在 withUserLock 里调用。 */
+async function guardHeal(name) {
+  const cur = readConfig(name);
+  if (!cur.data || typeof cur.data !== "object" || !v2Written(cur)) return false;
+  const g = readJSON(guardFile(name), null), h = dataHash(cur.data);
+  if (g && g.fmt >= 2 && g.version === cur.version && g.h === h) return false;
+  const why = !g ? (fs.existsSync(guardFile(name)) ? "unreadable" : "missing") : !(g.fmt >= 2) ? "old format" : g.version !== cur.version ? "guard v" + g.version + " != config v" + cur.version : "hash mismatch";
+  try { await writeGuard(name, cur); } catch (e) { await guardWriteFailed(name, e); return false; }
+  guardIssues.delete(name.toLowerCase());
+  log("spaces guard: healed", name, "v" + cur.version, "(" + why + ")");
+  return true;
 }
 /** 页面提示用：最近 14 天内自动找回过 → {at, spaces}，否则 null */
 function guardNotice(name) {
@@ -801,6 +925,7 @@ async function migrateData(name, data) {
 async function migrateAll() {
   for (const name of allUserNames()) {
     await withUserLock(name, async () => {
+      await guardHeal(name).catch((e) => log("spaces guard heal", name, e.message));
       await guardRecover(name).catch((e) => log("spaces guard", name, e.message));
       const cur = readConfig(name);
       if (cur.data && await migrateData(name, cur.data)) await writeConfig(name, cur.data);
@@ -1330,6 +1455,8 @@ async function api(req, res, url) {
       out.client = { peer: c.peer, ip: c.ip, https: c.https, forwardedHeaders: c.forwarded, trustedPeer: c.trustedPeer, lan: lanClient(req),
         xForwardedFor: String(req.headers["x-forwarded-for"] || "").slice(0, 300) || null, xRealIp: String(req.headers["x-real-ip"] || "").slice(0, 60) || null,
         trustedProxies: trustedProxies().list };
+      // 回滚写保护旁路的状态（RC.2）：ok = 本次运行以来没有未解决的旁路写入失败 / 过期
+      out.guard = { ok: guardIssues.size === 0, issues: [...guardIssues.values()].slice(0, 20) };
     }
     return json(res, 200, out);
   }
@@ -1520,7 +1647,7 @@ async function api(req, res, url) {
         }
         const doc = await writeConfig(me.name, b.data, opId, inHash);
         await cleanupIcons(me.name).catch((e) => log("icon cleanup", me.name, e.message));
-        return { version: doc.version, updatedAt: doc.updatedAt, overwrote: forced, ...(forced ? { forced: true } : {}), ...(migrated ? { migrated: true } : {}), ...spInfo };
+        return { version: doc.version, updatedAt: doc.updatedAt, overwrote: forced, ...(forced ? { forced: true } : {}), ...(migrated ? { migrated: true } : {}), ...spInfo, ...(doc.guardWarning ? { guardWarning: doc.guardWarning } : {}) };
       });
       if (!r.unchanged) probeSoon();
       delete r.unchanged;
@@ -1670,6 +1797,7 @@ async function api(req, res, url) {
           await fsp.rm(backupDir(target.name), { recursive: true, force: true });
           await fsp.rm(iconDir(target.name), { recursive: true, force: true });
           await fsp.rm(guardFile(target.name), { force: true }); // 回滚写保护旁路文件随用户删除（固定的升级前快照不动）
+          guardIssues.delete(target.name.toLowerCase());
           configCache.delete(configFile(target.name));
         });
         return json(res, 200, { ok: true });
@@ -1701,12 +1829,14 @@ const server = http.createServer(async (req, res) => {
 });
 
 function main() {
+  if (COOKIE_CFG.error) { console.error(stamp(), "配置错误：" + COOKIE_CFG.error); process.exit(2); }
   ensureDirs();
   loadState();
   preV2Snapshot();
+  sweepStaleTmp().catch((e) => log("tmp sweep", e.message));
   migrateAll().catch((e) => log("migrate", e.message));
   server.listen(PORT, HOST, () => {
-    log(`夜曲 Nocturne v${VERSION} 已启动 http://${HOST}:${PORT}  data=${DATA_DIR}  auth=${NO_AUTH ? "off" : "on"}  users=${users.users.length}  trusted-proxies=${trustedProxies().list.join(",") || "none"}`);
+    log(`夜曲 Nocturne v${VERSION} 已启动 http://${HOST}:${PORT}  data=${DATA_DIR}  auth=${NO_AUTH ? "off" : "on"}  users=${users.users.length}  cookies=${COOKIE}/${DEV_COOKIE}  trusted-proxies=${trustedProxies().list.join(",") || "none"}`);
     if (!NO_AUTH && !users.users.length) log("尚未创建账户：打开网页创建管理员");
   });
   runProbes(false);
@@ -1719,5 +1849,5 @@ function main() {
 }
 if (require.main === module) main();
 else module.exports = { // 供 test/ 下的单元测试使用；作为程序运行时不导出
-  normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo, forwardedProto, legacyKey,
+  cookieNames, normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo, forwardedProto, legacyKey,
 };
