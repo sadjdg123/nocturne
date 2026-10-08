@@ -23,7 +23,21 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # 先跑语法检查和自动化测试；失败则 build 不会运行，不会推送新镜像
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm run check && npm test
+        run: npm run check && npm test
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,11 +61,12 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
+            # :latest 只跟 main；生产部署建议固定到 sha-xxxxxxx 或 vX.Y.Z（见 README「版本与回滚」）
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
+            type=sha,prefix=sha-,format=short
 
       - uses: docker/build-push-action@v6
         with:
