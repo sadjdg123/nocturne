@@ -123,7 +123,7 @@ test("frontend: [] is never treated as missing — adopt, local cache reload, pu
   p.A.commit((s) => { s.settings.title = "改标题"; }, "title");
   await p.idle();
   const put = p.puts().at(-1);
-  assert.equal(put.status, 200); deq(put.body.data.spaces, []); deq(put.body.caps, ["spaces", "spaces:1"]); // 前端带上空间 schema 版本（阶段 2）
+  assert.equal(put.status, 200); deq(put.body.data.spaces, []); deq(put.body.caps, ["spaces", "spaces:2"]); // 前端带上空间 schema 版本（阶段 2）
   deq((await cur(a)).data.spaces, []);
   // create a space (so the current state is non-empty), then restore the [] version through the real UI
   p.A.commit((s) => { p.A.spaces.model.add(s, { name: "NAS", groupIds: ["st0rage9kq2"] }); }, "space-add");
