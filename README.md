@@ -397,6 +397,7 @@ data/
 | `STATUS_INTERVAL` | `30` | 服务状态检测间隔（秒，最小 10） |
 | `PROBE_TIMEOUT` | `4` | 单次检测超时（秒） |
 | `SESSION_DAYS` | `30` | 登录有效天数 |
+| `NOCTURNE_COOKIE_PREFIX` | `nocturne_` | Cookie 名前缀（2.0.0-rc.2 起）：会话 cookie 叫 `<前缀>sid`、已知设备 cookie 叫 `<前缀>dev`，默认就是原来的 `nocturne_sid` / `nocturne_dev`（改了前缀，所有设备要重新登录一次）。浏览器的 cookie **不按端口区分**：同一主机名下跑两个实例（例如生产 8088 + 测试 8089）时给其中一个换前缀（如 `nocturne_v2test_`），登录和「已知设备」就互不覆盖。只能用字母、数字、`_` `.` `-`，1–32 个字符、以字母或数字开头；不支持 `__Host-` / `__Secure-`（它们要求每个响应都带 `Secure`，本程序只在 HTTPS 请求上加）。不合法时启动报错退出。`HttpOnly` / `SameSite=Lax` / `Secure` 规则不变 |
 | `DOCKER_SOCK` | `/var/run/docker.sock` | Docker socket 路径，或 `tcp://主机:端口`（docker-socket-proxy） |
 | `PROBE_PRIVATE_ONLY` | 未设置 | 设为 `1` 时状态检测**只访问内网地址**（10/8、172.16/12、192.168/16、100.64/10、fc00::/7、回环；`.local` / `.lan` / `.home.arpa` 也必须解析到这些地址）。外网域名会显示为「未检测」。默认不限制，因为外网地址通常就是公网域名 |
 | `PROBE_TLS_STRICT` | 未设置 | 设为 `1` 时校验 HTTPS 证书；默认不校验（家里的自签名证书也算在线） |
@@ -436,10 +437,10 @@ data/
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用）；管理员登录时多一个 `client` 字段（直连对端 / 识别出的客户端 IP / 是否 HTTPS），用来确定 `TRUSTED_PROXY_CIDRS` |
+| GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用）；管理员登录时多一个 `client` 字段（直连对端 / 识别出的客户端 IP / 是否 HTTPS），用来确定 `TRUSTED_PROXY_CIDRS`；以及 `guard` 字段（2.0.0-rc.2 起）：`{ok, issues:[{user, kind: "write_failed" \| "stale", at, error?, detail?}]}`，回滚写保护旁路文件写入失败 / 过期时 `ok` 为 `false`（该账户下次写成功或重启自愈后清除） |
 | GET | `/api/me` | 当前登录状态 |
 | POST | `/api/setup` · `/api/login` · `/api/logout` | 初始化 / 登录 / 退出 |
-| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`）。PUT **必须**带 `baseVersion`（非负整数，缺失 / 不合法 → 400 `{code:"bad_base_version"}`；服务器还没有配置时任何值都可以，通常是 0）和 `opId`：版本对不上（另一台设备改过）→ **409** `{conflict, version, updatedAt, groups, items}`，不写入；`force: true` + `expectVersion`（409 里的版本）= 明确用本机版覆盖，服务器锁内复核后先存快照再写，又变了就再 409；重复的 `opId` 且内容（键排序后 JSON 的 SHA-256）完全相同 → `{duplicate: true, version, current}`，不产生新版本；同一个 `opId` 却是另一份内容 → **422** `{code:"opid_mismatch"}`，不写入（前端换新 `opId` 正常重推）；内容与服务器相同不升版本；`restore: true` 先存快照再写。导航地址只收 `http(s)`、搜索模板需 `http(s)` 且含 `%s`、图片地址另有白名单，新出现的不安全地址 → 400 `{invalid:[…]}`（旧值豁免只对「同一个项目 / 搜索引擎 id + 同一个字段 + 完全相同的原值」生效，依据当前配置和备份；新项目、别的字段抄这个值一律 400）。旧版前端的 `replay: true`（无 `opId`）仍按内容指纹返回 `{stale: true}`。`GET /api/config?prev=1` 取最新一份快照。同一用户的写入串行执行。JSON 请求体上限 2MB |
+| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`）。PUT **必须**带 `baseVersion`（非负整数，缺失 / 不合法 → 400 `{code:"bad_base_version"}`；服务器还没有配置时任何值都可以，通常是 0）和 `opId`：版本对不上（另一台设备改过）→ **409** `{conflict, version, updatedAt, groups, items}`，不写入；`force: true` + `expectVersion`（409 里的版本）= 明确用本机版覆盖，服务器锁内复核后先存快照再写，又变了就再 409；重复的 `opId` 且内容（键排序后 JSON 的 SHA-256）完全相同 → `{duplicate: true, version, current}`，不产生新版本；同一个 `opId` 却是另一份内容 → **422** `{code:"opid_mismatch"}`，不写入（前端换新 `opId` 正常重推）；内容与服务器相同不升版本；`restore: true` 先存快照再写。保存成功、但回滚写保护旁路文件写不进去（磁盘满 / 权限）时，响应多一个 `guardWarning: "spaces_guard_write_failed"`（2.0.0-rc.2 起；配置照常保存）。导航地址只收 `http(s)`、搜索模板需 `http(s)` 且含 `%s`、图片地址另有白名单，新出现的不安全地址 → 400 `{invalid:[…]}`（旧值豁免只对「同一个项目 / 搜索引擎 id + 同一个字段 + 完全相同的原值」生效，依据当前配置和备份；新项目、别的字段抄这个值一律 400）。旧版前端的 `replay: true`（无 `opId`）仍按内容指纹返回 `{stale: true}`。`GET /api/config?prev=1` 取最新一份快照。同一用户的写入串行执行。JSON 请求体上限 2MB |
 | POST | `/api/config/stash` | 冲突时「使用服务器版」前，把本机版本存成一份快照（不改当前配置） |
 | GET / PUT(POST) / DELETE | `/api/wallpaper` | 当前用户的自定义壁纸。PUT/POST 请求体为原始图片（`Content-Type` 为 `image/jpeg`、`image/png` 或 `image/webp`，≤15MB）；GET 带 ETag，`?v=` 版本号可长期缓存 |
 | GET | `/api/config/backups` · `/api/config?backup=<id>` | 快照列表（`id`、`version`、`updatedAt`、分组 / 项目数、`kind`：`auto` / `replaced` / `restore` / `local`，新的在前）/ 取其中一份 |
@@ -515,11 +516,12 @@ sh tools/restore.sh [--force] <备份.tar.gz> <目标 data 目录>
 升级 / 回滚请把镜像固定到 `标签@digest`：V1.1 为
 `ghcr.io/sadjdg123/nocturne:sha-3e6da3c@sha256:58a4c8349242ca80ca4a46681410eafcbbb41e0411c3567e3cbef9abff19e861`，
 V2 RC（2.0.0-rc.1）为
-`ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa`。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
+`ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa`。RC.2（2.0.0-rc.2）见 `docs/v2.0-rc2-report.md`。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
 回滚到 V1.1 一般不需要替换 `data/`。
 
 文档：
 
+- `docs/v2.0-rc2-report.md` —— RC.2 稳定性修复报告：cookie 名前缀（P-1）、回滚写保护旁路一致性（P-2）、原子写入临时文件（P-3）、RC.1 → RC.2 兼容
 - `docs/v2.0-rc-report.md` —— RC 报告：版本 / 镜像、测试、验证矩阵、数据清单、演练结果、性能、Blocking / Non-blocking
 - `docs/v2.0-upgrade-rollback.md` —— V1.1 → V2 升级 / 回滚 / 再升级操作手册（群晖 Container Manager）
 - `docs/v2.0-manual-acceptance.md` —— 人工验收清单（iPhone / Mac Safari、群晖 NAS、HTTPS）+ 并行测试部署提议
