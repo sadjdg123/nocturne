@@ -13,6 +13,12 @@
     <meta name="apple-mobile-web-app-title" content="夜曲" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="stylesheet" href="fonts/fonts.css" />
+    <script>
+      /* V2.0 阶段 3 · 本设备外观：新版（Midnight）/ 经典。只存本机 localStorage「nocturne.ui」，不进配置、不同步；
+         在首帧前设好 html[data-ui]，两种外观共用同一份 DOM、数据与逻辑。默认 = 新版（v2 分支）。 */
+      (function () { var v = null; try { v = localStorage.getItem("nocturne.ui"); } catch (e) { /* storage blocked */ }
+        document.documentElement.setAttribute("data-ui", v === "classic" ? "classic" : "v2"); })();
+    </script>
     <!--nocturne:boot-->
     <style>
       /* Nocturne backend · hide the app until signed in / config loaded (only when served by the NAS backend) */
@@ -120,6 +126,8 @@
       .x-name { font-size: 12.5px; line-height: 1.25; max-width: 100%; overflow-wrap: anywhere;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
       .x-desc { display: none; }
+      /* 新版外观才用到的元素（经典外观隐藏）：分组项目数、紧凑行的地址 / 状态、手机底栏的「快速打开」「更多」 */
+      .x-gcnt, .x-host, .x-st, .x-dk-pal, .x-dk-more { display: none; }
       .x-tile > .dot { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; padding: 0; border-radius: 50%; background: #5B6375; font-size: 0; gap: 0; }
       .x-tile > .dot::before { content: none; }
       .x-tile > .dot[data-s="up"] { background: #6FCF8E; } .x-tile > .dot[data-s="down"] { background: #E26D5A; }
@@ -246,6 +254,9 @@
       .x-row { display: flex; align-items: center; width: 100%; height: 52px; padding: 0 16px; border: 0; border-top: 1px solid var(--x-line); background: none; color: var(--x-text); font: 400 16px var(--x-ui); cursor: pointer; text-align: left; }
       .x-row:active, .x-row:hover { background: rgba(255, 255, 255, .05); }
       .x-row.is-red { color: #E26D5A; }
+      .x-row.has-sub { height: auto; min-height: 60px; padding-block: 10px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
+      .x-row .x-rs { font: 400 12.5px/1.45 var(--x-ui); color: var(--x-mist); white-space: normal; }
+      .x-sdesc { margin: -4px 16px 12px; text-align: center; font: 400 14px/1.6 var(--x-ui); color: var(--x-text); opacity: .86; }
       .x-row.is-cancel { margin-top: 8px; border: 0; border-radius: 16px; justify-content: center; font-weight: 600; background: rgba(255, 255, 255, .07); }
       .x-sheet input { width: 100%; height: 48px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .06); color: var(--x-text); font: 400 16px var(--x-ui); outline: none; }
       .x-sheet input:focus { border-color: rgba(233, 178, 106, .55); }
@@ -352,6 +363,11 @@
       .x-tile > .dot.off { background: #D66A5A; }
       .x-tile > .dot.checking { background: #8A90A0; }
       .x-tile > .dot.na { background: #5B6375; opacity: .7; }
+      /* 浏览器探测只能说「可能在线 / 无法确认」：空心环 / 灰点，不用确定的绿 / 红 */
+      .x-tile > .dot.maybe { background: transparent; box-shadow: inset 0 0 0 1.5px #8FC9D6; }
+      .x-tile > .dot.unknown { background: transparent; box-shadow: inset 0 0 0 1.5px #8A90A0; }
+      .x-sline.is-maybe { color: var(--x-mist); }
+      .x-snote { margin: 4px 0 0; font-size: 12px; color: var(--x-mist); }
       .x-tile > .dot.auth { background: var(--x-amber); box-shadow: 0 0 0 3px rgba(233, 178, 106, .16), 0 0 8px rgba(233, 178, 106, .55); }
       .x-sline.is-alloff { color: var(--x-mist); }
       @keyframes x-pulse { 50% { opacity: .3; } }
@@ -380,6 +396,7 @@
       @media (prefers-reduced-motion: no-preference) { .x-tile > .dot.checking { animation: x-pulse 1.2s ease-in-out infinite; } }
       @media (prefers-reduced-motion: reduce) { .x-ring .fg, .x-rt { transition: none; } }
     </style>
+    <link rel="stylesheet" href="midnight.css?v=1" />
   </head>
   <body class="x-body">
     <img class="x-bg x-bg--m" src="bg-mobile.jpg" alt="" />
@@ -413,9 +430,11 @@
     </div>
 
     <nav class="x-dock x-glass" aria-label="快捷操作">
+      <button type="button" data-act="palette" class="x-dk-pal" aria-label="快速打开"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><span>快速打开</span></button>
       <button type="button" data-act="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>搜索</button>
       <button type="button" data-act="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>编辑</button>
       <button type="button" data-act="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>设置</button>
+      <button type="button" data-act="more" class="x-dk-more" aria-label="更多：编辑、添加、管理空间、设置"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg><span>更多</span></button>
     </nav>
 
     <div class="x-toast x-glass" id="x-toast" role="status" aria-live="polite"><span id="x-toast-msg"></span><button type="button" id="x-toast-act" hidden></button></div>
@@ -423,8 +442,9 @@
     <script src="Sortable.min.js"></script>
     <script src="urlcheck.js?v=3"></script>
     <script src="netmode.js?v=1"></script>
-    <script src="cmdrank.js?v=2"></script>
-    <script src="spaces.js?v=2"></script>
+    <script src="cmdrank.js?v=3"></script>
+    <script src="spaces.js?v=3"></script>
+    <script src="status.js?v=1"></script>
     <script>
       (function () {
         "use strict";
@@ -531,10 +551,13 @@
           return true;
         }
 
+        function hue(t) { var h = 0; String(t || "").split("").forEach(function (c) { h = (h * 31 + c.charCodeAt(0)) % 360; }); return h; }
         function iconHTML(icon, title) {
           icon = icon || {};
-          var letter = esc((String(title || "?").trim()[0] || "?").toUpperCase());
-          var bg = icon.bg ? ' style="background:' + esc(icon.bg) + '"' : "";
+          var letter = esc((Array.from(String(title || "?").trim())[0] || "?").toUpperCase());
+          /* --h：按名称算的色相，新版外观里给字母徽记（只在没有真实图标时出现）一个稳定、克制的底色 */
+          var h = hue(title);
+          var bg = ' style="--h:' + h + (icon.bg ? ";background:" + esc(icon.bg) : "") + '"';
           var fail = ' data-l="' + letter + '" onerror="App.util._fail(this)"';
           var v = String(icon.value || "");
           if (icon.type === "iconify" && v.indexOf(":") > 0) {
@@ -546,7 +569,7 @@
           if (icon.type === "emoji" && v) return '<span class="x-ic"' + bg + '><span class="x-emoji">' + esc(v) + "</span></span>";
           if (icon.type === "text" && v) return '<span class="x-ic"' + bg + ">" + esc(v.slice(0, 3)) + "</span>";
           if (icon.type === "image" && v) return '<span class="x-ic"' + bg + '><img class="x-full" src="' + esc(v) + '" loading="lazy" alt=""' + fail + "></span>";
-          return '<span class="x-ic x-fb">' + letter + "</span>";
+          return '<span class="x-ic x-fb"' + bg + ">" + letter + "</span>";
         }
         var failed = dict();
         function iconFail(img) {
@@ -557,16 +580,19 @@
           img.replaceWith(s);
         }
 
+        function hostOf(item) { var u = window.App && App.url ? App.url(item) : U.safeNav(item.wan) || U.safeNav(item.lan) || ""; try { return u && u !== "#" ? new URL(u).host : ""; } catch (e) { return ""; } }
         function itemHTML(g, item) {
           var href = esc(U.safeNav(item.wan) || U.safeNav(item.lan) || "#"); /* 非 http(s) 地址一律当作没有地址，不可点击 */
           var attrs = ' href="' + href + '" target="_blank" rel="noopener" data-id="' + esc(item.id) + '" data-gid="' + esc(g.id) + '"';
           if (g.style === "chip") {
             return '<a class="x-chip x-glass"' + attrs + ">" + iconHTML(item.icon, item.title) + "<span>" + esc(item.title) + "</span></a>";
           }
-          return '<a class="x-tile x-glass"' + attrs + (item.desc ? ' title="' + esc(item.desc) + '"' : "") + ">" +
+          /* x-host / x-st：新版「紧凑行」显示地址与状态（经典外观里隐藏）；title 带完整名称，长名称在卡片上两行截断 */
+          return '<a class="x-tile x-glass"' + attrs + ' style="--h:' + hue(item.title) + '" title="' + esc([item.title, item.desc].filter(Boolean).join(" · ")) + '">' +
             '<span class="dot" aria-hidden="true"></span>' + iconHTML(item.icon, item.title) +
             '<span class="x-name">' + esc(item.title) + "</span>" +
-            (item.desc ? '<span class="x-desc">' + esc(item.desc) + "</span>" : "") + "</a>";
+            (item.desc ? '<span class="x-desc">' + esc(item.desc) + "</span>" : "") +
+            '<span class="x-host" aria-hidden="true">' + esc(hostOf(item)) + '</span><span class="x-st" aria-hidden="true"></span></a>';
         }
 
         function render() {
@@ -588,7 +614,7 @@
           $("x-groups").innerHTML = view.map(function (e) {
             var g = e.group, items = e.items.map(function (i) { return itemHTML(g, i); }).join("");
             return '<section class="x-group" data-gid="' + esc(g.id) + '"' + (e.whole ? "" : ' data-part="1"') + ' aria-label="' + esc(g.name) + '">' +
-              '<h2 class="x-gtitle">' + esc(g.name) + (e.whole ? "" : '<small class="x-gpart">单独添加的项目</small>') + "</h2>" +
+              '<h2 class="x-gtitle"><span class="x-gname">' + esc(g.name) + '</span><span class="x-gcnt" aria-hidden="true">' + e.items.length + " 项</span>" + (e.whole ? (e.hidden ? '<small class="x-gpart">本空间隐藏 ' + e.hidden + " 项</small>" : "") : '<small class="x-gpart">单独添加的项目</small>') + "</h2>" +
               '<div class="' + (g.style === "chip" ? "x-chips" : "x-grid") + '" data-gid="' + esc(g.id) + '">' + items + "</div></section>";
           }).join("") || emptyHTML(sid);
           tick();
@@ -609,6 +635,7 @@
         }
         function pad(n) { return (n < 10 ? "0" : "") + n; }
         function tick() {
+          if (document.hidden && $("x-clock").textContent !== "--:--") return; /* 标签页在后台：不更新（回到前台立刻补一次） */
           var d = new Date();
           $("x-clock").textContent = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
           $("x-date").textContent = (d.getMonth() + 1) + "月" + d.getDate() + "日 星期" + WEEK[d.getDay()];
@@ -661,7 +688,9 @@
             setTimeout(function () { bar.classList.remove("is-pulse"); }, 1200);
             $("x-q").focus({ preventScroll: true });
             window.scrollTo({ top: 0, behavior: "smooth" });
-          } else emitOrSoon(a);
+          } else if (a === "palette") { if (window.App && App.palette) App.palette.open(""); } /* 在这次点按里直接聚焦，iOS 软键盘才会弹出 */
+          else if (a === "more") emitOrSoon("menu");
+          else emitOrSoon(a);
         });
 
         window.App = {
@@ -733,9 +762,10 @@
 
         render();
         setInterval(tick, 1000);
+        document.addEventListener("visibilitychange", function () { if (!document.hidden) tick(); });
       })();
     </script>
-    <script src="nocturne.js?v=6"></script>
+    <script src="nocturne.js?v=7"></script>
     <script>
       /* Stage 2a · edit mode. Uses only the App API.
          "edit-item" / "add-item" listeners set d.handled = true; otherwise a 即将上线 toast shows. */
@@ -797,12 +827,37 @@
         /* 只改空间关系、不删分组 / 项目：从当前空间里移除整组或单独加进来的项目 */
         function unlink(kind, id, label) {
           var cs = SPC && SPC.current(); if (!cs) return;
+          var how = null;
           A.commit(function (s) {
             var sp = SPC.model.get(s, cs.id); if (!sp) return;
             if (kind === "group") SPC.model.setGroups(s, cs.id, (sp.groupIds || []).filter(function (x) { return x !== String(id); }));
-            else SPC.model.pin(s, cs.id, String(id), false);
+            else how = SPC.model.hide(s, cs.id, String(id)); /* 单独加入的 → 取消加入；随整组出现的 → 记一条排除（excludeItemIds） */
           }, "space-unlink");
-          A.toast("已从「" + cs.name + "」移除「" + label + "」（分组和项目都还在）", { action: "撤销", onAction: A.undo });
+          A.toast(kind === "group" ? "已从「" + cs.name + "」移除分组「" + label + "」（分组和项目都还在）"
+            : how && how.action === "hide" ? "已在「" + cs.name + "」隐藏「" + label + "」，它在「全部」和其他空间照常显示"
+            : "已从「" + cs.name + "」移除「" + label + "」（项目还在）", { action: "撤销", onAction: A.undo, duration: 6000 });
+        }
+        /* 编辑模式的减号：在「全部」里就是原来的直接删除（可撤销）；在自定义空间里先问清楚——默认只改本空间的关系，
+           「从所有空间删除」是红色的第二选项，还要再确认一次，并写明它出现在几个空间里 */
+        function removeFlow(gid, id) {
+          var f = find(A.state, gid, id); if (!f.item) return;
+          var cs = SPC && SPC.current();
+          if (!cs) { delItem(gid, id); return; }
+          var how = SPC.model.removal(A.state, cs.id, id), name = f.item.title || "未命名";
+          var rows = [];
+          if (how.action === "hide") rows.push({ label: "从「" + cs.name + "」移除", sub: "分组「" + f.g.name + "」整组在这个空间里：只在本空间隐藏这一项，分组、项目和其他空间都不变", fn: function () { unlink("item", id, name); } });
+          else if (how.action === "unpin") rows.push({ label: "从「" + cs.name + "」移除", sub: "它是单独加进来的：只取消加入，项目还在「全部」和原来的分组里", fn: function () { unlink("item", id, name); } });
+          rows.push({ label: "从所有空间删除…", red: true, keep: true, sub: "删除项目本身", fn: function () { confirmDelete(gid, id); } });
+          menu("「" + name + "」", rows, "要从哪里去掉它？");
+        }
+        function confirmDelete(gid, id) {
+          var f = find(A.state, gid, id); if (!f.item) return;
+          var spaces = SPC ? SPC.model.spacesWith(A.state, id) : [], n = spaces.length + 1;
+          var names = ["全部"].concat(spaces.map(function (s) { return s.name; }));
+          var where = names.length > 4 ? names.slice(0, 4).join("、") + " 等" : names.join("、");
+          menu("删除「" + (f.item.title || "未命名") + "」？", [
+            { label: "删除项目（" + n + " 个空间）", red: true, fn: function () { delItem(gid, id); } }
+          ], "它出现在 " + n + " 个空间里（" + where + "）。删除后所有空间都不再有它，图标和地址一并删除；之后几秒内可以撤销。");
         }
         function delGroup(gid) {
           var g = gr(A.state, gid); if (!g) return;
@@ -825,8 +880,10 @@
         }
 
         /* ---- sheets ---- */
+        var sheetPrev = null;
         function show(html, label) {
           clearTimeout(closeT);
+          if (!sheetOpen) sheetPrev = document.activeElement;
           sheet.innerHTML = html; sheet.setAttribute("aria-label", label);
           back.hidden = sheet.hidden = false; sheetOpen = true;
           void sheet.offsetWidth;
@@ -836,12 +893,15 @@
           if (!sheetOpen) return;
           sheetOpen = false; back.classList.remove("is-on"); sheet.classList.remove("is-on");
           closeT = setTimeout(function () { back.hidden = sheet.hidden = true; sheet.innerHTML = ""; }, 300);
+          /* 焦点回到打开它的按钮（被删掉的项目就不回了） */
+          if (sheetPrev && sheetPrev.focus && document.contains(sheetPrev) && sheet.contains(document.activeElement)) try { sheetPrev.focus({ preventScroll: true }); } catch (e) { /* gone */ }
         }
-        function menu(title, rows) {
+        function menu(title, rows, desc) {
           acts = rows;
-          show("<h3>" + esc(title) + "</h3>" + rows.map(function (r, i) {
-            return '<button type="button" class="x-row' + (r.red ? " is-red" : "") + '" data-i="' + i + '">' + esc(r.label) + "</button>";
-          }).join("") + '<button type="button" class="x-row is-cancel" data-i="-1">取消</button>', title);
+          show("<h3>" + esc(title) + "</h3>" + (desc ? '<p class="x-sdesc">' + esc(desc) + "</p>" : "") + rows.map(function (r, i) {
+            return '<button type="button" class="x-row' + (r.red ? " is-red" : "") + (r.sub ? " has-sub" : "") + '" data-i="' + i + '"><span class="x-rl">' + esc(r.label) + "</span>" +
+              (r.sub ? '<small class="x-rs">' + esc(r.sub) + "</small>" : "") + "</button>";
+          }).join("") + '<button type="button" class="x-row is-cancel" data-i="-1">取消</button>', desc ? title + "。" + desc : title);
           sheet.querySelector(".x-row").focus({ preventScroll: true });
         }
         function prompt(title, val, ok, ph, empty) {
@@ -869,7 +929,7 @@
             var h = k[2]; try { h = new URL(k[2]).host; } catch (e) { /* keep */ }
             alt.push({ label: "用" + k[1] + "地址打开 · " + h, fn: function () { window.open(k[2], "_blank", "noopener"); } });
           });
-          var cs = SPC && SPC.current(), pinnedHere = cs && Array.isArray(cs.itemIds) && cs.itemIds.indexOf(String(id)) > -1 && !SPC.model.groupInSpace(A.state, cs.id, gid);
+          var cs = SPC && SPC.current(), how = cs ? SPC.model.removal(A.state, cs.id, id) : null, pinnedHere = how && how.action !== "none";
           menu(f.item.title, alt.concat([
             { label: "编辑…", fn: function () { softEmit("edit-item", { gid: gid, id: id }); } },
             { label: "移到分组…", keep: others.length > 0, fn: function () {
@@ -878,7 +938,7 @@
             } },
             { label: "复制", fn: function () { dupItem(gid, id); } }
           ].concat(pinnedHere ? [{ label: "从「" + cs.name + "」移除", fn: function () { unlink("item", id, f.item.title); } }] : [])
-           .concat([{ label: cs ? "删除项目（所有空间）" : "删除", red: true, fn: function () { delItem(gid, id); } }])));
+           .concat([{ label: cs ? "从所有空间删除…" : "删除", red: true, keep: !!cs, fn: function () { if (cs) confirmDelete(gid, id); else delItem(gid, id); } }])));
         }
         function groupSheet(gid) {
           var g = gr(A.state, gid); if (!g) return;
@@ -897,7 +957,7 @@
           groupsEl.querySelectorAll(".x-tile[data-id], .x-chip[data-id]").forEach(function (el) {
             var b = document.createElement("button");
             b.type = "button"; b.className = "x-ebadge"; var it = find(A.state, el.getAttribute("data-gid"), el.getAttribute("data-id")).item;
-            b.setAttribute("aria-label", "删除 " + (it ? it.title : el.textContent.trim()));
+            b.setAttribute("aria-label", (SPC && SPC.current() ? "移除 " : "删除 ") + (it ? it.title : el.textContent.trim()));
             b.innerHTML = '<span aria-hidden="true">−</span>';
             el.setAttribute("draggable", "false"); el.prepend(b);
           });
@@ -936,7 +996,7 @@
           var t = e.target;
           if (t.closest("a")) e.preventDefault();
           var item = t.closest(".x-tile[data-id], .x-chip[data-id]");
-          if (item && t.closest(".x-ebadge")) { delItem(item.getAttribute("data-gid"), item.getAttribute("data-id")); return; }
+          if (item && t.closest(".x-ebadge")) { removeFlow(item.getAttribute("data-gid"), item.getAttribute("data-id")); return; }
           var add = t.closest("[data-add]");
           if (add) { softEmit("add-item", { gid: add.getAttribute("data-add") }); return; }
           if (item) { itemSheet(item.getAttribute("data-gid"), item.getAttribute("data-id")); return; }
@@ -1386,7 +1446,7 @@
         "use strict";
         var A = window.App, esc = A.util.esc, body = document.body;
         var groupsEl = document.getElementById("x-groups");
-        var NM = window.NocturneNet, NAMES = NM.NAMES;
+        var NM = window.NocturneNet, NAMES = NM.NAMES, ST = window.NocturneStatus;
         var s0 = A.state;
         /* 迁移：本机已存的 lan / wan 原样保留；新设备（本机没存过）或非法值 → auto（只按本页的访问主机名判断） */
         s0.settings.net = NM.migrate(s0.settings.net);
@@ -1433,7 +1493,7 @@
         var side = document.createElement("aside");
         side.className = "x-side"; side.setAttribute("aria-label", "状态与最近");
         side.innerHTML = '<section class="x-card x-glass"><h2>系统状态</h2><div class="x-stat"><svg class="x-ring" viewBox="0 0 40 40" aria-hidden="true">' +
-          '<circle class="bg" cx="20" cy="20" r="17"/><circle class="fg" cx="20" cy="20" r="17"/></svg><p class="x-cnt"></p></div><p class="x-sline"></p></section>' +
+          '<circle class="bg" cx="20" cy="20" r="17"/><circle class="fg" cx="20" cy="20" r="17"/></svg><p class="x-cnt"></p></div><p class="x-sline"></p><p class="x-snote" hidden></p></section>' +
           '<section class="x-card x-glass" data-recent hidden><h2>最近使用</h2><div class="x-recent"></div></section>';
         groupsEl.after(side);
         var live = document.createElement("div");
@@ -1454,30 +1514,36 @@
         function apply() {
           var m = all(), ids = [], on = 0, pend = 0, off = [], auth = 0, ok = inScope(), cs = A.spaces && A.spaces.current();
           side.querySelector(".x-card h2").textContent = cs ? "系统状态 · " + cs.name : "系统状态";
+          /* 可信标注（status.js）：服务器测到的才说在线 / 离线 / ms / 检测时间；浏览器探测只说「可能在线 / 无法确认」 */
           groupsEl.querySelectorAll(".x-tile[data-id], .x-chip[data-id]").forEach(function (el) {
             var e = m[el.getAttribute("data-id")]; if (!e) return;
             el.setAttribute("href", A.url(e.item));
             var d = el.querySelector(":scope > .dot"); if (!d) return;
-            var r = stat.get(e.item.id) || { s: "checking" };
-            var t = r.s === "on" ? "在线" + (r.ms != null ? " · " + r.ms + "ms" : "") : r.s === "auth" ? "在线 · 需登录" : r.s === "off" ? "离线" : r.s === "na" ? "未检测 · 服务器不探测这个地址" : "检测中";
-            d.className = "dot " + r.s; d.title = t;
-            el.title = (e.item.desc ? e.item.desc + " · " : "") + t;
+            var c = stat.get(e.item.id) || ST.classify(null), t = ST.text(c);
+            d.className = "dot " + c.s; d.title = t;
+            el.setAttribute("data-s", c.s);
+            var sx = el.querySelector(".x-st"); if (sx) { sx.textContent = ST.short(c); sx.setAttribute("data-s", c.s); }
+            var hx = el.querySelector(".x-host"), hu = A.url(e.item); if (hx) { try { hx.textContent = hu !== "#" ? new URL(hu).host : "没有地址"; } catch (er) { hx.textContent = ""; } }
+            el.title = [e.item.title, e.item.desc, t].filter(Boolean).join(" · ");
           });
+          var cs2 = [];
           Object.keys(m).forEach(function (id) {
             if (!m[id].icon || !ok(id)) return;
-            var r = stat.get(id);
-            if (r && r.s === "na") return; // 被服务器拦截不探测的地址：灰点，不计入总数和离线
-            ids.push(id);
-            if (!r || r.s === "checking") pend++; else if (r.s === "on") on++; else if (r.s === "auth") { on++; auth++; } else off.push(m[id].item.title);
+            var c = stat.get(id) || ST.classify(null); cs2.push(c);
+            if (c.s === "off") off.push(m[id].item.title);
           });
-          var total = ids.length, sl = side.querySelector(".x-sline");
-          side.querySelector(".x-cnt").innerHTML = total ? on + " / " + total + "<small>在线</small>" : "0<small>个服务</small>";
-          fg.style.strokeDashoffset = C * (1 - (total ? on / total : 0));
-          if (pend) { sl.className = "x-sline"; sl.textContent = "检测中…"; }
-          else if (off.length && off.length === total) { sl.className = "x-sline is-alloff"; sl.textContent = "全部离线——可能是地址还没填，或当前网络到不了这些服务"; }
-          else if (off.length) { sl.className = "x-sline is-off"; sl.textContent = "离线：" + off.join("、"); }
-          else { sl.className = "x-sline is-ok"; sl.textContent = total ? (auth ? "全部在线 · " + auth + " 个需登录" : "全部正常") : "还没有图标服务"; }
+          var sm = ST.summary(cs2), total = sm.total, sl = side.querySelector(".x-sline"), card = side.querySelector(".x-card");
+          lastSummary = sm;
+          card.setAttribute("data-mode", sm.mode);
+          side.querySelector(".x-cnt").innerHTML = !total ? "0<small>个服务</small>"
+            : sm.mode === "browser" ? sm.counts.maybe + " / " + total + "<small>可能在线</small>"
+            : sm.online + " / " + sm.certain + "<small>在线</small>";
+          fg.style.strokeDashoffset = C * (1 - (!total ? 0 : sm.mode === "browser" ? sm.counts.maybe / total : sm.certain ? sm.online / sm.certain : 0));
+          sl.className = "x-sline" + (sm.tone ? " is-" + sm.tone : "");
+          sl.textContent = sm.tone === "off" ? "离线：" + off.join("、") : sm.line;
+          var nt = side.querySelector(".x-snote"); if (nt) { nt.textContent = [sm.note, sm.mode === "browser" ? "纯静态页没有服务器检测" : ""].filter(Boolean).join(" · "); nt.hidden = !nt.textContent; }
         }
+        var lastSummary = null;
         function renderRecent() {
           var m = all(), rc = (A.state.recent || []).filter(function (id) { return m[id]; }).slice(0, 4);
           side.querySelector("[data-recent]").hidden = !rc.length;
@@ -1507,19 +1573,24 @@
         function check(reset) {
           var g = ++gen, m = all(), list = Object.keys(m).filter(function (id) { return m[id].icon; }).map(function (id) { return m[id].item; });
           lastCheck = Date.now();
-          if (reset) list.forEach(function (i) { stat.set(i.id, { s: "checking" }); });
+          if (reset) list.forEach(function (i) { stat.set(i.id, ST.classify(null)); });
           apply();
           var q = list.slice(), active = 0, left = q.length;
           function run(it) {
-            var t0 = performance.now(), u = A.url(it);
+            var u = A.url(it);
             active++;
-            function local() { return u === "#" || reserved(u) || (privHost(u) && mode() !== "lan" && !onLan()) ? Promise.resolve(false) : timed(u, 3000); }
-            /* Nocturne backend hook: A.statusFor(item, local) → Promise<bool | {ok, ms}> (server-side probes) */
+            /* 浏览器探测（no-cors）：只知道有没有网络错误 → {source:"browser", reachable}；不计时（测到的不是服务的响应时间） */
+            function local() {
+              if (u === "#") return Promise.resolve({ source: "none", reason: "noaddr" });
+              if (reserved(u)) return Promise.resolve({ source: "none", reason: "reserved" });
+              if (privHost(u) && mode() !== "lan" && !onLan()) return Promise.resolve({ source: "none", reason: "offlan" });
+              return timed(u, 3000).then(function (ok) { return { source: "browser", reachable: ok }; });
+            }
+            /* Nocturne backend hook: A.statusFor(item, local) → Promise<{source:"server", up, status, ms, checkedAt, code}>；服务器没给这一项时退回 local() */
             (A.statusFor ? A.statusFor(it, local) : local()).then(function (r) {
               if (g !== gen) return;
-              var ok = r && typeof r === "object" ? !!r.ok : !!r, ms = r && typeof r === "object" && r.ms != null ? r.ms : Math.round(performance.now() - t0);
-              var needLogin = r && typeof r === "object" && (r.auth || r.code === 401 || r.code === 403);
-              stat.set(it.id, ok ? { s: needLogin ? "auth" : "on", ms: ms } : r && r.blocked ? { s: "na" } : { s: "off" });
+              if (typeof r === "boolean") r = { source: "browser", reachable: r }; /* 旧接口兼容 */
+              stat.set(it.id, ST.classify(r));
               active--; left--; apply();
               if (left) next(); else finish();
             });
@@ -1528,13 +1599,17 @@
           if (left) next(); else finish();
         }
         function finish() {
-          var m = all(), on = 0, off = 0, ok = inScope();
-          Object.keys(m).forEach(function (id) { if (!m[id].icon || !ok(id)) return; var r = stat.get(id); if (r && (r.s === "on" || r.s === "auth")) on++; else off++; });
+          var m = all(), ok = inScope(), cs = [];
+          Object.keys(m).forEach(function (id) { if (!m[id].icon || !ok(id)) return; cs.push(stat.get(id) || ST.classify(null)); });
+          var sm = ST.summary(cs), n = sm.counts;
           live.textContent = "";
-          setTimeout(function () { live.textContent = on + " 个服务在线，" + off + " 个离线"; }, 50);
+          setTimeout(function () { live.textContent = ST.spoken(sm); }, 50);
           var w = doneWaiters; doneWaiters = [];
-          w.forEach(function (f) { try { f({ on: on, off: off }); } catch (e) { console.error(e); } });
+          var d = { on: sm.online, off: n.off, maybe: n.maybe, unknown: n.unknown, na: n.na, mode: sm.mode };
+          w.forEach(function (f) { try { f(d); } catch (e) { console.error(e); } });
         }
+        /** 某个项目当前的可信状态（compact 行、读屏、测试用） */
+        A.statusOf = function (id) { return stat.get(String(id)) || null; };
         var doneWaiters = [];
         function recheck() { if (Date.now() - lastCheck > 60000) check(false); }
         /* cb({on, off})：这一轮检测真正结束后回调（命令面板「重新检测状态」据此报告结果） */
@@ -2655,6 +2730,9 @@
       .x-spm-cf > div { display: flex; gap: 8px; }
       .x-spm-new { margin-top: 18px; padding: 14px; border-radius: 14px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .03); }
       .x-spm-new h4 { margin: 0; font: 500 15px/1.3 var(--x-serif); letter-spacing: .06em; }
+      .x-spm-look { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+      .x-spm-look button { min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .04); color: var(--x-mist); font: 500 13px var(--x-ui); cursor: pointer; }
+      .x-spm-look [aria-pressed="true"] { color: var(--x-text); border-color: rgba(255, 240, 220, .35); background: rgba(255, 255, 255, .1); }
       .x-spm-tpl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
       .x-spm-tpl button { min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .05); color: var(--x-text); font: 500 14px var(--x-ui); cursor: pointer; }
       .x-spm-tpl button:hover { border-color: rgba(233, 178, 106, .45); }
@@ -2724,11 +2802,11 @@
         var isOpen = false, expanded = null, confirmDel = null, newName = "", lastFocus = null, closeT = null, sortable = null;
 
         function groupsLine(s) {
-          var g = (s.groupIds || []).length, it = (s.itemIds || []).length;
-          return g || it ? [g ? g + " 个分组" : "", it ? it + " 个单独项目" : ""].filter(Boolean).join(" · ") : "还没有选分组";
+          var g = (s.groupIds || []).length, it = (s.itemIds || []).length, x = (s.excludeItemIds || []).length;
+          return g || it ? [g ? g + " 个分组" : "", it ? it + " 个单独项目" : "", x ? x + " 个已隐藏" : ""].filter(Boolean).join(" · ") : "还没有选分组";
         }
         function editorHTML(s) {
-          var st = A.state, mem = M.membership(st), gset = new Set(s.groupIds || []), iset = new Set(s.itemIds || []);
+          var st = A.state, mem = M.membership(st), gset = new Set(s.groupIds || []), iset = new Set(s.itemIds || []), xset = new Set(s.excludeItemIds || []);
           var groups = st.groups.map(function (g) {
             var others = (mem[g.id] || []).filter(function (x) { return x !== s.id; }).length;
             return '<label class="x-spm-ck"><input type="checkbox" data-sp-group="' + esc(g.id) + '"' + (gset.has(String(g.id)) ? " checked" : "") + ">" +
@@ -2737,20 +2815,32 @@
           var pins = st.groups.map(function (g) {
             var whole = gset.has(String(g.id)), items = g.items || [];
             if (!items.length) return "";
-            return '<p class="x-spm-ig">' + esc(g.name) + (whole ? " · 已整组包含" : "") + "</p>" + items.map(function (i) {
-              return '<label class="x-spm-ck' + (whole ? " is-dis" : "") + '"><input type="checkbox" data-sp-item="' + esc(i.id) + '"' + (whole || iset.has(String(i.id)) ? " checked" : "") + (whole ? " disabled" : "") + ">" +
-                "<span><b>" + esc(i.title || "未命名") + "</b></span></label>";
+            /* 整组包含的分组：取消勾选 = 只在本空间隐藏这一项（excludeItemIds），再勾上 = 取消隐藏 */
+            return '<p class="x-spm-ig">' + esc(g.name) + (whole ? " · 已整组包含，取消勾选可在本空间隐藏某一项" : "") + "</p>" + items.map(function (i) {
+              var on = whole ? !xset.has(String(i.id)) || iset.has(String(i.id)) : iset.has(String(i.id));
+              return '<label class="x-spm-ck' + (whole ? " is-whole" : "") + '"><input type="checkbox" data-sp-item="' + esc(i.id) + '"' + (whole ? ' data-whole="1"' : "") + (on ? " checked" : "") + ">" +
+                "<span><b>" + esc(i.title || "未命名") + "</b>" + (whole && !on ? "<small>已在本空间隐藏</small>" : "") + "</span></label>";
             }).join("");
           }).join("");
           return '<div class="x-spm-ed" data-ed="' + esc(s.id) + '">' +
             '<form class="x-spm-f" data-spm-rename="' + esc(s.id) + '" novalidate><input type="text" data-sp-name="' + esc(s.id) + '" value="' + esc(s.name) + '" maxlength="60" aria-label="空间名称" autocomplete="off" enterkeyhint="done">' +
             '<span class="x-spm-cnt" data-cnt-for="' + esc(s.id) + '">' + Array.from(s.name).length + "/" + M.NAME_MAX + '</span><button type="submit" class="x-spm-btn">改名</button></form>' +
-            '<p class="x-err" data-err-for="' + esc(s.id) + '" role="alert" hidden></p>' +
+            '<p class="x-err" data-err-for="' + esc(s.id) + '" role="alert" hidden></p>' + lookHTML(s) +
             '<p class="x-spm-lab" id="x-spm-gl-' + esc(s.id) + '">包含的分组（整组：以后加进这些分组的项目也会出现）</p><div class="x-spm-gl" role="group" aria-labelledby="x-spm-gl-' + esc(s.id) + '">' + groups + "</div>" +
-            (pins ? "<details" + ((s.itemIds || []).length ? " open" : "") + "><summary>单独添加项目（可选）</summary><div class=\"x-spm-gl\">" + pins + "</div></details>" : "") +
+            (pins ? "<details" + ((s.itemIds || []).length || (s.excludeItemIds || []).length ? " open" : "") + "><summary>单独添加 / 隐藏项目（可选）</summary><div class=\"x-spm-gl\">" + pins + "</div></details>" : "") +
             (confirmDel === s.id
               ? '<div class="x-spm-cf" role="alert"><span>删除空间「' + esc(s.name) + '」？只删除这个空间，分组、项目、图标和壁纸都不会删。</span><div><button type="button" class="x-spm-btn is-red" data-spm="del-yes" data-sid="' + esc(s.id) + '">删除空间</button><button type="button" class="x-spm-btn" data-spm="del-no">取消</button></div></div>'
               : '<div class="x-spm-f"><button type="button" class="x-spm-btn is-red" data-spm="del" data-sid="' + esc(s.id) + '">删除这个空间</button></div>') + "</div>";
+        }
+        /* 空间外观（新版外观里生效）：氛围光与密度。「自动」= 不存字段，按名称模板（日常 / 娱乐 / NAS）给默认样子，其余为中性 */
+        var LOOKS = { theme: [["", "自动"], ["default", "中性"], ["dawn", "晨光"], ["dusk", "靛紫"], ["frost", "冷霜"]],
+          density: [["", "自动"], ["comfortable", "舒适"], ["poster", "海报"], ["compact", "紧凑"]] };
+        function lookHTML(s) {
+          return '<p class="x-spm-lab">氛围与密度（新版外观）</p>' + ["theme", "density"].map(function (k) {
+            return '<div class="x-spm-look" role="group" aria-label="' + (k === "theme" ? "氛围" : "密度") + '">' + LOOKS[k].map(function (o) {
+              return '<button type="button" data-sp-look="' + k + '" data-v="' + o[0] + '" data-sid="' + esc(s.id) + '" aria-pressed="' + ((s[k] || "") === o[0]) + '">' + o[1] + "</button>";
+            }).join("") + "</div>";
+          }).join("");
         }
         function draw() {
           var cur = SPC.selected(), list = SPC.list(), full = list.length >= M.MAX_SPACES;
@@ -2851,6 +2941,15 @@
         }
 
         sh.addEventListener("click", function (e) {
+          var lk = e.target.closest("[data-sp-look]");
+          if (lk) {
+            var k = lk.getAttribute("data-sp-look"), v = lk.getAttribute("data-v") || null, sid0 = lk.getAttribute("data-sid"), sp0 = M.get(A.state, sid0);
+            if (!sp0 || (sp0[k] || null) === v) return;
+            var look = {}; look[k] = v;
+            A.commit(function (st) { if (M.get(st, sid0)) M.setLook(st, sid0, look); }, "space-look");
+            var nb2 = sh.querySelector('[data-sp-look="' + k + '"][data-v="' + (v || "") + '"][data-sid="' + A.util.sel(sid0) + '"]'); if (nb2) nb2.focus({ preventScroll: true });
+            return;
+          }
           var b = e.target.closest("[data-spm],[data-tpl]"); if (!b) return;
           if (b.hasAttribute("data-tpl")) {
             var inp = sh.querySelector("[data-spm-new] input[name=name]"); if (!inp || inp.disabled) return;
@@ -2886,6 +2985,7 @@
             var l = (s.groupIds || []).filter(function (x) { return x !== gid; }); if (on) l.push(gid);
             M.setGroups(st, sid, l);
           }, "space-groups");
+          else if (t.hasAttribute("data-whole")) A.commit(function (st) { if (!M.get(st, sid)) return; if (on) M.unhide(st, sid, iid); else M.hide(st, sid, iid); }, on ? "space-unhide" : "space-hide");
           else A.commit(function (st) { if (M.get(st, sid)) M.pin(st, sid, iid, on); }, "space-pin");
         });
         sh.addEventListener("input", function (e) {
@@ -2918,5 +3018,6 @@
         drawNav();
       })();
     </script>
+    <script src="midnight.js?v=1"></script>
   </body>
 </html>
