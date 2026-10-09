@@ -30,7 +30,7 @@ PARENT=$(dirname "$TARGET"); mkdir -p "$PARENT"; PARENT=$(cd "$PARENT" && pwd -P
 case "$(pwd -P)/" in "$TARGET/"*) die "禁止恢复当前目录或其上级" ;; esac
 [ ! -L "$TARGET" ] || die "目标不能是符号链接"
 STATE="$TARGET.restore-state"
-inode_of() { nc_inode_line=$(ls -di "$1") || return 1; nc_inode=${nc_inode_line%% *}; case "$nc_inode" in ''|*[!0-9]*) return 1 ;; esac; printf '%s\n' "$nc_inode"; }
+inode_of() { nc_inode_line=$(ls -di "$1") || return 1; nc_inode=$(printf '%s\n' "$nc_inode_line" | sed 's/^[[:space:]]*//;s/[[:space:]].*$//') || return 1; case "$nc_inode" in ''|*[!0-9]*) return 1 ;; esac; printf '%s\n' "$nc_inode"; }
 read_record() {
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || die "恢复记录目录异常，保留 $STATE"
   for nc_key in READY TARGET STAGE OLD OLD-ID NEW-ID; do [ -f "$STATE/$nc_key" ] && [ ! -L "$STATE/$nc_key" ] || die "恢复记录不完整，保留 $STATE"; done

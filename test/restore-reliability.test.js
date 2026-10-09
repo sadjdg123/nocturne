@@ -74,3 +74,16 @@ test("归档链接在解压前拒绝", t => {
   assert.equal(spawnSync("tar", ["-czf", a, "-C", x, "SHA256SUMS", "BACKUP-INFO.txt", "data"]).status, 0);
   const r = spawnSync("sh", [path.join(TOOLS, "verify-backup.sh"), "--no-sidecar", a], { encoding: "utf8" }); assert.notEqual(r.status, 0);
 });
+
+for (const prefix of [" ", "\t   "]) test("BusyBox inode 前导空白兼容 " + JSON.stringify(prefix), t => {
+  const f = fixture(t), real = spawnSync("sh", ["-c", "command -v ls"], { encoding: "utf8" }).stdout.trim(); assert.ok(real);
+  fs.writeFileSync(path.join(f.root, "bin/ls"), "#!/bin/sh\nprintf '%s' " + quote(prefix) + "\nexec " + quote(real) + " \"$@\"\n", { mode: 0o755 });
+  const r = f.run(); assert.equal(r.status, 0, r.stderr); assert.deepEqual(tree(f.target), tree(f.data));
+});
+test("inode 命令失败或非数字仍保护旧目标", t => {
+  const f = fixture(t), before = tree(f.target), ls = path.join(f.root, "bin/ls");
+  for (const command of ["exit 41", "printf '  not-an-inode /test\\n'"]) {
+    fs.writeFileSync(ls, "#!/bin/sh\n" + command + "\n", { mode: 0o755 });
+    assert.notEqual(f.run().status, 0); assert.deepEqual(tree(f.target), before); assert.ok(fs.existsSync(f.archive));
+  }
+});
