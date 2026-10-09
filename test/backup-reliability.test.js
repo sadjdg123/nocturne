@@ -56,6 +56,21 @@ for (const mode of ["continuous", "find", "hash", "tar", "gzip", "copy", "publis
 test("源目录链接拒绝，不能被清单静默遗漏", t => {
   const f = fixture(t); fs.symlinkSync(path.join(f.data, "users.json"), path.join(f.data, "alias")); assert.notEqual(f.run().status, 0); assert.deepEqual(fs.readdirSync(f.out), []);
 });
+test("合法账户后缀 .tmp 的资产和空目录不能被略过", t => {
+  const f = fixture(t);
+  for (const rel of ["icons/bob.tmp/icon.png", "backup/bob.tmp/saved.json"]) {
+    fs.mkdirSync(path.dirname(path.join(f.data, rel)), { recursive: true }); fs.writeFileSync(path.join(f.data, rel), "keep");
+  }
+  fs.mkdirSync(path.join(f.data, "backup/empty.tmp"));
+  assert.equal(f.run().status, 0); const copy = f.unpack();
+  assert.equal(fs.readFileSync(path.join(copy, "icons/bob.tmp/icon.png"), "utf8"), "keep");
+  assert.equal(fs.readFileSync(path.join(copy, "backup/bob.tmp/saved.json"), "utf8"), "keep");
+  assert.ok(fs.statSync(path.join(copy, "backup/empty.tmp")).isDirectory());
+});
+test("空目录含控制字符拒绝，不能被换行清单误拆后报成功", t => {
+  const f = fixture(t); fs.mkdirSync(path.join(f.data, "broken\nname"));
+  assert.notEqual(f.run().status, 0); assert.deepEqual(fs.readdirSync(f.out), []);
+});
 for (const mode of ["stopped", "running", "inspect", "stop", "stop-changed", "start"]) test("--stop 容器原状态保护 " + mode, t => {
   const f = fixture(t, mode), r = f.run(["--stop", "synthetic-nocturne"]), calls = fs.readFileSync(f.calls, "utf8").trim().split("\n");
   if (["stopped", "running"].includes(mode)) assert.equal(r.status, 0, r.stderr); else assert.notEqual(r.status, 0);

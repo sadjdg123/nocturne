@@ -66,9 +66,18 @@ list_files() {
   nc_list=$1
   (
     cd "$DATA"
-    set -- . -name '*.tmp' -prune
+    # 目录可能是合法账户名（例如 bob.tmp），不能按临时文件后缀剪枝。
+    set -- . -type f -name '*.tmp' -prune
     [ "$EX_RING" = 0 ] || set -- "$@" -o -path ./backup -prune
     [ "$EX_CACHE" = 0 ] || set -- "$@" -o -path ./cache -prune
+    # 换行清单无法无损表示控制字符；在枚举前逐个参数检查，不静默拆名。
+    find "$@" -o -exec sh -c '
+      for nc_path do
+        nc_clean=$(printf "%s" "$nc_path" | tr -d "[:cntrl:]") || exit 1
+        [ "$nc_path" = "$nc_clean" ] || printf "unsafe\n"
+      done
+    ' sh {} + > "$nc_list.names" || exit 1
+    [ ! -s "$nc_list.names" ] || { echo "data 路径含控制字符，拒绝备份" >&2; exit 1; }
     find "$@" -o ! -type f ! -type d -print > "$nc_list.types" || exit 1
     [ ! -s "$nc_list.types" ] || { echo "data 含链接或特殊文件，拒绝备份" >&2; exit 1; }
     find "$@" -o -type f -print > "$nc_list.raw" || exit 1
