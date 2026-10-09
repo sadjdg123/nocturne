@@ -8,4 +8,4 @@
 
 不要手工移动、改名或复制整个 restore-state 后期待工具继续识别目录 inode。此记录绑定同父目录的实际目录身份。账户事务的恢复侧车另用内容指纹，允许在完整备份/隔离复制后恢复，规则见 auth-transactions.md。
 
-工具使用 POSIX sh 及普通 tar/gzip/hash/sync 命令，没有增加 NAS 的 Node/Python 依赖；记录通过系统 sync 刷新。两次目录移动并非一个原子操作，强杀瞬间目标路径可能不存在，因此恢复完成前保持服务停止。macOS sh/dash 已测试；这不是 DSM 实机或断电耐久性证明。
+工具使用 POSIX sh 及普通 tar/gzip/hash/sync 命令，没有增加 NAS 的 Node/Python 依赖；记录通过系统 sync 刷新。两次目录移动并非一个原子操作，强杀瞬间目标路径可能不存在，因此恢复完成前保持服务停止。macOS sh/dash 及隔离 Linux/Alpine BusyBox 已测试；`ls -di` 前导空白会先去除再验证数字 inode（旧实现已故障反证）。实际 BusyBox 归档恢复后，修复版服务器能撤销备份中 COMMITTED 前的认证事务并保留空间。Linux 完整故障注入日志见第二阶段报告；这不是 DSM 实机或断电耐久性证明。
