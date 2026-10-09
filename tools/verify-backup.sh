@@ -23,14 +23,11 @@ done
 [ -f "$A" ] || { echo "错误：找不到 $A" >&2; exit 2; }
 say() { [ "$QUIET" = 1 ] || echo "$*"; }
 bad() { echo "校验失败：$*" >&2; exit 1; }
-hash_of() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
-  else openssl dgst -sha256 -r "$1" | cut -d' ' -f1; fi
-}
+. "$(dirname "$0")/archive-common.sh"
 
 if [ "$SIDECAR" = 1 ]; then
   if [ -f "$A.sha256" ]; then
-    want=$(cut -d' ' -f1 < "$A.sha256"); got=$(hash_of "$A")
+    want=$(cut -d' ' -f1 < "$A.sha256"); got=$(hash_of "$A") || bad "读取归档 hash 失败"
     [ "$want" = "$got" ] || bad "归档的 sha256 与 $(basename "$A").sha256 不一致（文件被改动或传输损坏）"
     say "归档 sha256 一致"
   else
@@ -43,9 +40,11 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/nocturne-verify.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 trap 'exit 130' INT TERM
 tar -tzf "$A" > "$T/entries" 2>/dev/null || bad "无法读取归档目录"
+tar -tvzf "$A" > "$T/types" 2>/dev/null || bad "无法读取归档类型"
+while IFS= read -r e; do case "$e" in -*) ;; d*) ;; *) bad "不支持归档中的链接或特殊文件" ;; esac; done < "$T/types"
 while IFS= read -r e; do
   case "$e" in
-    /*|../*|*/../*|*/..) bad "归档里有不安全的路径：$e" ;;
+    /*|../*|*/../*|*/..|*/./*) bad "归档里有不安全的路径：$e" ;;
     SHA256SUMS|BACKUP-INFO.txt|data|data/|data/*) ;;
     *) bad "归档里有意外的条目：$e" ;;
   esac
@@ -59,12 +58,18 @@ n=0
 while IFS= read -r line; do
   h=${line%%  *}; f=${line#*  }
   case "$f" in data/*) ;; *) bad "SHA256SUMS 里有 data/ 以外的路径" ;; esac
+  case "$f" in */../*|*/..|*/./*) bad "SHA256SUMS 路径不安全" ;; esac
+  [ "${#h}" = 64 ] || bad "SHA256SUMS hash 格式错误"
+  case "$h" in *[!0-9a-f]*) bad "SHA256SUMS hash 格式错误" ;; esac
   [ -f "$T/x/$f" ] || bad "缺少文件 $f"
-  [ "$(hash_of "$T/x/$f")" = "$h" ] || bad "sha256 不一致：$f"
+  got=$(hash_of "$T/x/$f") || bad "读取文件 hash 失败：$f"
+  [ "$got" = "$h" ] || bad "sha256 不一致：$f"
   n=$((n + 1))
 done < "$T/x/SHA256SUMS"
-( cd "$T/x" && { [ -d data ] && find data -type f | sort || :; } ) > "$T/have"
-cut -d' ' -f3- "$T/x/SHA256SUMS" | sort > "$T/want"
+( cd "$T/x" && find data -type f ) > "$T/raw" || bad "枚举解压文件失败"
+sort "$T/raw" > "$T/have" || bad "清单排序失败"
+cut -d' ' -f3- "$T/x/SHA256SUMS" > "$T/raw-want" || bad "读取清单失败"
+sort "$T/raw-want" > "$T/want" || bad "清单排序失败"
 cmp -s "$T/have" "$T/want" || bad "归档里有清单之外的文件"
 want=$(sed -n 's/^files=//p' "$T/x/BACKUP-INFO.txt")
 [ "$want" = "$n" ] || bad "文件数与 BACKUP-INFO.txt 不符（$n / $want）"
