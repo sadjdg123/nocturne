@@ -1,12 +1,14 @@
-# 镜像标签防覆盖：设计与模拟，尚未启用
+# 镜像标签防覆盖：设计与隔离验证，生产尚未启用
 
-本阶段不修改 `.github/workflows/docker.yml`，不运行 Docker 构建、登录、镜像写入或 Actions。本辅助模块没有命令行入口、默认 HTTP 客户端或真实推送适配器；测试传入纯内存 HTTP 响应和标为 simulation 的发布器。现有生产工作流仍保留旧行为，正式接入需要另行批准。
+第一阶段仅做模拟。第二阶段已获准进行本地 Linux/Docker 构建及无推送权限 CI 验证，仍不修改 `.github/workflows/docker.yml`，不登录或写入 GHCR。本辅助模块没有命令行入口、默认 HTTP 客户端或真实 GHCR 推送适配器。现有生产工作流仍保留旧行为，正式接入需要另行批准。
 
 ## 最小协议
 
 `tools/image-publish-policy.js` 的模拟计划要求显式 approved 标记，限定仓库 sadjdg123/nocturne、原 push 事件的待发布提交、v2 ref、完整 40 位 revision，标签只能是与该提交对应的一个 sha-七位标签。拒绝 latest、main/v2、浮动 semver、重复或附带标签。独立开发分支不能进入此模拟发布协议；不改变现有 V1.1 工作流。正式版本的不可变版本标签须另行设计和授权，当前不支持。
 
 读取器要求显式 HTTP 适配器和 scoped Bearer 授权，不获取或记录凭据。验证带授权的 V2 API 响应后，对标签执行 HEAD 和 GET；只有两次均 404 且 GET 是唯一 MANIFEST_UNKNOWN 错误时，才判定缺失。401/403、限流、服务器故障、网络错误、网页 404、NAME_UNKNOWN、状态变化或缺失 digest 一律阻断。凭据真实权限与 GHCR 错误语义仍需未来集成验收。
+
+第二阶段只读实测发现 GHCR 的 config blob 返回 307。读取器改为显式处理最多两次 blob 跳转，仅允许 HTTPS 的 `pkg-containers.githubusercontent.com` / `github-registry-files.githubusercontent.com`，拒绝用户信息、自定义端口、片段和其他域名；跳转请求剥离 Authorization，凭内容 digest/size 验证结果。标签和清单不允许跳转。两个旧版失败反证及安全边界回归已加入。`tools/engineering/check-ghcr-readonly.js` 只申请匿名 repository pull scope，记录经过脱敏的 GET/HEAD 证据，不读取环境发布 token。
 
 存在的标签核对原始响应 SHA-256、索引和子清单/config 的 digest 与大小，确认 linux/amd64、linux/arm64 均存在且配置 revision 为同一完整提交。相同 revision 返回 skip，绝不重推；短 SHA 一样而完整 revision 不同阻断。Buildx 明确标记的 unknown/unknown 证明条目不算运行平台。已有标签缺损也不能用覆盖“修补”。
 

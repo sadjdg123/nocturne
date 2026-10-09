@@ -17,11 +17,20 @@ function validatePlan(plan) {
 function createRegistryReader({ fetch: request, authorization, timeoutMs = 10000 }) {
   if (typeof request !== "function" || typeof authorization !== "string" || !/^Bearer \S+$/.test(authorization)) fail("explicit scoped authentication and HTTP adapter required");
   async function get(route, method = "GET") {
-    let r;
-    try { r = await request("https://ghcr.io" + route, {
-      method, redirect: "error", signal: AbortSignal.timeout(timeoutMs),
-      headers: { Authorization: authorization, Accept: [...INDEX, ...MANIFEST].join(", ") },
-    }); } catch (_) { fail("registry transport failure"); }
+    let r, url = "https://ghcr.io" + route;
+    const signal = AbortSignal.timeout(timeoutMs), accept = [...INDEX, ...MANIFEST].join(", ");
+    try {
+      r = await request(url, { method, redirect: "manual", signal, headers: { Authorization: authorization, Accept: accept } });
+      for (let n = 0; [301, 302, 303, 307, 308].includes(r.status); n++) {
+        // GHCR config blob 使用签名存储重定向；不允许标签/清单重定向，也不转发 Bearer。
+        if (!/^\/v2\/sadjdg123\/nocturne\/blobs\/sha256:[0-9a-f]{64}$/.test(route) || n >= 2 || !r.headers.get("Location")) fail("unsafe registry redirect");
+        const target = new URL(r.headers.get("Location"), url);
+        if (target.protocol !== "https:" || target.username || target.password || target.port || target.hash ||
+            !["pkg-containers.githubusercontent.com", "github-registry-files.githubusercontent.com"].includes(target.hostname)) fail("unsafe registry redirect");
+        url = target.href;
+        r = await request(url, { method, redirect: "manual", signal, headers: { Accept: accept }, credentials: "omit" });
+      }
+    } catch (_) { fail("registry transport or redirect failure"); }
     if (![200, 404].includes(r.status)) fail("registry HTTP " + r.status);
     return r;
   }

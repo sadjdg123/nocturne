@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
-const { validatePlan, createRegistryReader, simulatePublication } = require("../tools/image-publish-policy");
+const { validatePlan, createRegistryReader, simulatePublication } = require(path.join(process.env.NOCTURNE_POLICY_ROOT || path.join(__dirname, ".."), "tools/image-publish-policy"));
 const SHA = "af5104c285abd041e4118faae5d277c23917b113";
 const OTHER = SHA.slice(0, 7) + "0".repeat(33); // 七位短 SHA 碰撞。
 const plan = { approved: true, repository: "sadjdg123/nocturne", event: "push", ref: "refs/heads/v2", revision: SHA, tags: ["sha-af5104c"] };
@@ -25,7 +25,7 @@ function mock(initial = null, fault = "") {
     state.requests.push([url, options.method]);
     assert.match(url, /^https:\/\/ghcr\.io\/v2\//);
     assert.ok(["GET", "HEAD"].includes(options.method), "所有 HTTP 适配器调用只读");
-    assert.equal(options.redirect, "error");
+    assert.ok(["error", "manual"].includes(options.redirect));
     assert.equal(options.headers.Authorization, "Bearer simulated-only");
     if (fault === "transport") throw new Error("simulated timeout");
     if (url.endsWith("/v2/")) return response(null, 200, fault === "api" ? {} : { "Docker-Distribution-API-Version": "registry/2.0" });
@@ -41,7 +41,7 @@ function mock(initial = null, fault = "") {
   };
   const inspect = createRegistryReader({ fetch: http, authorization: "Bearer simulated-only" });
   const publisher = { simulation: true, async push() { state.pushes++; state.artifact = artifact(); return { digest: state.artifact.digest }; } };
-  return { state, inspect, publisher };
+  return { state, inspect, publisher, http };
 }
 function run(m, p = plan) {
   if (process.env.CI_POLICY_LEGACY === "1") {
@@ -110,4 +110,35 @@ test("生产工作流与开发基点逐字节一致", () => {
   const { execFileSync } = require("node:child_process");
   const original = execFileSync("git", ["show", "af5104c:.github/workflows/docker.yml"], { cwd: path.join(__dirname, "..") });
   assert.deepEqual(fs.readFileSync(path.join(__dirname, "../.github/workflows/docker.yml")), original);
+});
+
+function redirected(location = "https://pkg-containers.githubusercontent.com/blob", mode = "normal") {
+  const a = artifact(), m = mock(a); let redirects = 0;
+  const response = (b, status = 200, headers = {}) => new Response(b, { status, headers });
+  const http = async (url, options) => {
+    if (url.includes("/blobs/") || (mode === "manifest" && url.includes("/manifests/"))) {
+      if (options.redirect === "error") throw new Error("fetch rejects redirect, as old GHCR reader did");
+      return response(null, 307, location === null ? {} : { Location: location + "/" + url.split("/").pop() });
+    }
+    if (url.startsWith("https://pkg-containers.githubusercontent.com/") || url.startsWith("https://github-registry-files.githubusercontent.com/")) {
+      redirects++; assert.equal(options.headers.Authorization, undefined); assert.equal(options.credentials, "omit"); assert.equal(options.method, "GET"); assert.equal(options.redirect, "manual");
+      if (mode === "loop") return response(null, 307, { Location: url });
+      return response(mode === "corrupt" ? Buffer.from("wrong") : a.objects.get(url.split("/").pop()), 200);
+    }
+    return m.http(url, options);
+  };
+  return { ...m, inspect: createRegistryReader({ fetch: http, authorization: "Bearer simulated-only" }), redirects: () => redirects };
+}
+test("GHCR blob 签名重定向剥离凭据并继续核验双架构 digest", async () => {
+  const m = redirected(); assert.equal((await run(m)).action, "skip"); assert.equal(m.state.pushes, 0); assert.equal(m.redirects(), 2);
+});
+test("GHCR blob 第二个受限存储域兼容", async () => {
+  const m = redirected("https://github-registry-files.githubusercontent.com/blob"); assert.equal((await run(m)).action, "skip"); assert.equal(m.state.pushes, 0);
+});
+for (const location of [null, "http://pkg-containers.githubusercontent.com/blob", "https://evil.test/blob", "https://pkg-containers.githubusercontent.com.evil.test/blob", "https://user:secret@pkg-containers.githubusercontent.com/blob", "https://pkg-containers.githubusercontent.com:8443/blob", "https://pkg-containers.githubusercontent.com/blob#fragment"]) test("GHCR blob 不安全重定向拒绝 " + String(location), async () => {
+  const m = redirected(location); await assert.rejects(run(m), /blocked/); assert.equal(m.state.pushes, 0); assert.equal(m.redirects(), 0);
+});
+for (const mode of ["manifest", "loop", "corrupt"]) test("GHCR 重定向边界拒绝 " + mode, async () => {
+  const m = redirected(undefined, mode); await assert.rejects(run(m), /blocked/); assert.equal(m.state.pushes, 0);
+  assert.equal(m.redirects(), mode === "manifest" ? 0 : mode === "loop" ? 2 : 1);
 });
