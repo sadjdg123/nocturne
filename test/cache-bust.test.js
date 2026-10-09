@@ -1,7 +1,7 @@
 "use strict";
 /* V2.0 RC · 部署后更新能不能到达浏览器：
  *  1. index.html 引用的每个本地脚本 / 样式：内容和 V1.1（main@3e6da3c，按 blob SHA）不同 → ?v= 也必须不同（否则升级后浏览器最多一天还在用 V1.1 的缓存文件）
- *  2. 对每个已发布版本（V1.1 / RC.1 / RC.2 / RC.3，清单 test/fixtures/released-assets.json，由 tools/gen-released-assets.js 从远程提交生成）：
+ *  2. 对每个已发布版本（V1.1 / RC.1 / RC.2 / RC.3 / RC.4，清单 test/fixtures/released-assets.json，由 tools/gen-released-assets.js 从远程提交生成）：
  *     浏览器会按固定 URL 缓存的每个本地静态文件（index.html 的 src / href / url()、css 里的 url()、manifest 图标），
  *     现在的 URL（路径 + ?v=）若和该版本用过的相同，内容必须逐字节相同；内容变了就必须换 ?v=。清单不依赖 git，CI 有完整历史时再按提交核对清单本身。
  *  3. 缓存头：index.html no-store；字体文件 immutable；fonts.css 与其他静态文件 1 天后重新校验 + ETag / 304 */
@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { startServer, client } = require("./helpers");
-const { collectRefs, sha256, gitBlob } = require("./asset-refs");
+const { collectRefs, sha256, gitBlob, changedURLs } = require("./asset-refs");
 
 const ROOT = path.join(__dirname, "..");
 const V11_INDEX = "cbc42170a30b33c6a4f20c3afb0dc2ab0160ddbe";
@@ -57,8 +57,8 @@ const readPub = (p) => { const f = path.join(PUB, p); return fs.existsSync(f) &&
 function git(args) { try { return execFileSync("git", ["-C", ROOT, ...args], { stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 << 20 }); } catch (e) { return null; } }
 
 test("released-assets manifest covers every released version", () => {
-  assert.deepEqual(MANIFEST.releases.map((r) => r.name), ["V1.1", "RC.1", "RC.2", "RC.3"]);
-  const commits = { "V1.1": "3e6da3c", "RC.1": "2ee0983", "RC.2": "3d5beaf", "RC.3": "e4de70b" };
+  assert.deepEqual(MANIFEST.releases.map((r) => r.name), ["V1.1", "RC.1", "RC.2", "RC.3", "RC.4"]);
+  const commits = { "V1.1": "3e6da3c", "RC.1": "2ee0983", "RC.2": "3d5beaf", "RC.3": "e4de70b", "RC.4": "f516629" };
   for (const r of MANIFEST.releases) {
     assert.ok(r.commit.startsWith(commits[r.name]), r.name + " commit");
     assert.ok(r.image.endsWith(":sha-" + commits[r.name]), r.name + " image");
@@ -71,13 +71,12 @@ for (const rel of MANIFEST.releases) {
   test("same URL as " + rel.name + " (" + rel.commit.slice(0, 7) + ") ⇒ same content (changed asset needs a new ?v=)", () => {
     const now = collectRefs(readPub);
     assert.ok(now.size >= 20, "found " + now.size + " cacheable URLs in index.html / css / manifest");
-    const stale = [];
+    const stale = changedURLs(readPub, rel);
     let shared = 0;
     for (const [url, ref] of now) {
       const old = rel.assets[url];
       if (!old) continue;
       shared++;
-      if (sha256(readPub(ref.path)) !== old.sha256) stale.push(url);
     }
     assert.deepEqual(stale, [], "content changed since " + rel.name + " but URL unchanged (browser may serve the cached " + rel.name + " file for up to 86400s): " + stale.join(", "));
     assert.ok(shared >= 10, "compared " + shared + " URLs with " + rel.name);

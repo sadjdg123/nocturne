@@ -46,4 +46,8 @@ function collectRefs(read) {
   }
   return out;
 }
-module.exports = { collectRefs, sha256, gitBlob };
+function changedURLs(read, release) {
+  return [...collectRefs(read)].filter(([url, ref]) => release.assets[url] &&
+    sha256(read(ref.path)) !== release.assets[url].sha256).map(([url]) => url);
+}
+module.exports = { collectRefs, sha256, gitBlob, changedURLs };

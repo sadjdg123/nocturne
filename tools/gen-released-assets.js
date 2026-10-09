@@ -21,6 +21,7 @@ const RELEASES = [
   { name: "RC.1", commit: "2ee09835ea780cc2885f389a62b9cde188b13f2e", image: "ghcr.io/sadjdg123/nocturne:sha-2ee0983" },
   { name: "RC.2", commit: "3d5beaf4c5327d02312ab9096e9ba4dc9e095db2", image: "ghcr.io/sadjdg123/nocturne:sha-3d5beaf" },
   { name: "RC.3", commit: "e4de70bc25df4bce6b586bdff523a269bae105eb", image: "ghcr.io/sadjdg123/nocturne:sha-e4de70b" },
+  { name: "RC.4", commit: "f51662961ba7a86782cb863104917d75fb587553", image: "ghcr.io/sadjdg123/nocturne:sha-f516629" },
 ];
 
 async function api(p) {
@@ -43,35 +44,63 @@ async function blobContent(sha) {
   return buf;
 }
 
-async function release(r) {
-  const t = await api("/git/trees/" + r.commit + "?recursive=1");
+async function release(r, getTree = api, getBlob = blobContent) {
+  const checkedBlob = async (sha) => {
+    const buf = await getBlob(sha);
+    if (gitBlob(buf) !== sha) throw new Error("blob " + sha + " 内容校验失败");
+    return buf;
+  };
+  const t = await getTree("/git/trees/" + r.commit + "?recursive=1");
   if (t.truncated) throw new Error("tree truncated: " + r.commit);
   const tree = new Map(t.tree.filter((e) => e.type === "blob" && e.path.startsWith("public/")).map((e) => [e.path.slice(7), e.sha]));
   const files = new Map();
-  for (const [p, sha] of tree) if (/\.(html|css|webmanifest)$/.test(p)) files.set(p, await blobContent(sha));
+  for (const [p, sha] of tree) if (/\.(html|css|webmanifest)$/.test(p)) files.set(p, await checkedBlob(sha));
   const refs = collectRefs((p) => (files.has(p) ? files.get(p) : tree.has(p) ? Buffer.alloc(1) : null));
   const assets = {};
   for (const [url, ref] of [...refs].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    const buf = await blobContent(tree.get(ref.path));
+    const buf = await checkedBlob(tree.get(ref.path));
     assets[url] = { path: ref.path, v: ref.v, blob: tree.get(ref.path), sha256: sha256(buf) };
   }
   return { name: r.name, commit: r.commit, image: r.image, indexBlob: tree.get("index.html"), assets };
 }
 
-(async () => {
+async function generate(getTree = api, getBlob = blobContent) {
   const out = {
     about: "已发布版本当时浏览器会按固定 URL 缓存的本地静态文件（相对 public/）；由 tools/gen-released-assets.js 从 GitHub 远程提交生成，勿手改。test/cache-bust.test.js：现在相同的 URL 必须内容相同。",
     repo: REPO,
     releases: [],
   };
-  for (const r of RELEASES) out.releases.push(await release(r));
+  for (const r of RELEASES) out.releases.push(await release(r, getTree, getBlob));
+  return out;
+}
+
+// 写入失败保留旧清单；临时文件与目标同目录，rename 是唯一替换点。
+function writeManifest(file, text, io = fs) {
+  const tmp = file + "." + require("node:crypto").randomUUID() + ".tmp";
+  let fd;
+  try {
+    fd = io.openSync(tmp, "wx", 0o644);
+    io.writeFileSync(fd, text);
+    io.fsyncSync(fd);
+    io.closeSync(fd); fd = undefined;
+    io.renameSync(tmp, file);
+  } finally {
+    if (fd !== undefined) try { io.closeSync(fd); } catch (_) {}
+    try { io.unlinkSync(tmp); } catch (e) { if (e.code !== "ENOENT") throw e; }
+  }
+}
+
+async function main() {
+  const out = await generate();
   const text = JSON.stringify(out, null, 2) + "\n";
   if (process.argv.includes("--check")) {
     const same = fs.existsSync(OUT) && fs.readFileSync(OUT, "utf8") === text;
     console.log(same ? "released-assets.json 与远程一致" : "released-assets.json 与远程不一致（重跑本脚本生成）");
     process.exit(same ? 0 : 1);
   }
-  fs.writeFileSync(OUT, text);
+  writeManifest(OUT, text);
   for (const r of out.releases) console.log(r.name, r.commit.slice(0, 7), Object.keys(r.assets).length, "URLs");
   console.log("写入", path.relative(ROOT, OUT));
-})().catch((e) => { console.error(e.message); process.exit(1); });
+}
+module.exports = { RELEASES, generate, writeManifest };
+if (require.main === module) main().catch((e) => { console.error(e.message); process.exit(1); });
