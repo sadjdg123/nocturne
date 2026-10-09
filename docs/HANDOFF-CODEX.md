@@ -7,13 +7,14 @@
 
 **三条红线**：不改 `main`（合并需要用户明确批准）；永远不碰生产数据 / NAS（Hark 与开发环境都没有 NAS 访问权，部署由用户自己在群晖上做）；不覆盖已发布的镜像标签。
 
-## 0. 交接摘要（RC.4，2026-10-09）
+## 0. 交接摘要（RC.5，2026-10-09）
 
 ### 0.1 版本 / 镜像 / digest
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
-| **RC.4 `2.0.0-rc.4`（推荐候选）** | `v2@f51662961ba7a86782cb863104917d75fb587553` | `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f` | [37849652604](https://github.com/sadjdg123/nocturne/actions/runs/37849652604)（test 210 / 210 → build） |
+| **RC.5 `2.0.0-rc.5`（当前候选）** | `v2@c5f36addc2d85b8ed24edb605015b7ff0be9070b` | `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993` | [37917714749](https://github.com/sadjdg123/nocturne/actions/runs/37917714749)（test 510 / 510 → build，双架构） |
+| RC.4 `2.0.0-rc.4`（历史基线） | `v2@f51662961ba7a86782cb863104917d75fb587553` | `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f` | [37849652604](https://github.com/sadjdg123/nocturne/actions/runs/37849652604)（test 210 / 210 → build） |
 | RC.3 `2.0.0-rc.3` | `v2@e4de70bc25df4bce6b586bdff523a269bae105eb` | `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b` | 37843878107（204 / 204） |
 | RC.2 `2.0.0-rc.2` | `v2@3d5beaf4c5327d02312ab9096e9ba4dc9e095db2` | `ghcr.io/sadjdg123/nocturne:sha-3d5beaf@sha256:08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e` | 37838079107（180 / 180） |
 | RC.1 `2.0.0-rc.1`（历史基线） | `v2@2ee09835ea780cc2885f389a62b9cde188b13f2e` | `ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa` | — |
@@ -23,7 +24,7 @@ RC.4 构建后用 GHCR 匿名查询复核过：旧标签仍指向上表的 diges
 
 ### 0.2 先读这些文件
 
-1. `docs/v2.0-rc4-report.md`：RC.4 改了什么、测试、镜像、风险
+1. `docs/v2.0-rc5-report.md`：当前 RC.5 更新、测试、固定镜像和回滚边界；`docs/v2.0-rc4-report.md` 保留历史记录
 2. 本文第 1–2 节（架构、data 目录、兼容约束）和第 8 节（约定）
 3. `docs/v2.0-upgrade-rc.md`：RC 之间的升级 / 回滚，以及健康检查用的 `NAS_IP`
 4. `docs/v2.0-upgrade-rollback.md`：V1.1 ↔ V2
@@ -35,7 +36,7 @@ RC.4 构建后用 GHCR 匿名查询复核过：旧标签仍指向上表的 diges
 
 1. 用户已确认 RC.4 在 NAS 部署成功、iPhone Safari 正常及重启数据保留；本轮没有访问 NAS。这是用户提供的 RC.4 验收信息，不是未发布修复版的真机验收。
 2. 第一阶段及认证事务边界/退休清理补修已通过用户独立验收。先读 `auth-transactions.md`、`restore-recovery.md`、`stopped-backup.md` 和 `phase2-engineering-report.md`。
-3. RC.4 已加入 `gen-released-assets.js` 与缓存清单。后续每次发布继续登记固定提交；修改被引用资源必须更新缓存 URL，运行生成器 `--check` 和缓存回归。
+3. RC.4 与 RC.5 已加入 `gen-released-assets.js` 与缓存清单。后续每次发布继续登记固定提交；修改被引用资源必须更新缓存 URL，运行生成器 `--check` 和缓存回归。
 4. 测试工作流只允许隔离分支、`contents: read` / `packages: none`，现有生产 `docker.yml` 未改。补齐本机 workflow 权限后，工程 CI [37913738091](https://github.com/sadjdg123/nocturne/actions/runs/37913738091) 通过：原生 amd64/arm64 各 510/510、零失败/零跳过；每架构启动 12/12、工具 102/102、隔离 registry 9/9。三份 job 权限日志只有 Contents/Metadata read，无镜像写权限。
 5. 当前授权允许整理到 v2、更新 RC.5、测试及使用现有 Actions 发布全新 SHA 镜像。日常修复按文首流程执行；main 不修改，旧镜像标签不覆盖，NAS 和生产数据由用户自行操作。
 
@@ -161,7 +162,7 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
 4. 回滚前按 `engineering-rollback.md` 检查活动认证事务与离线恢复记录；必须由修复版完成恢复并验证后，才允许旧 RC 接管正常数据，或使用完整升级前备份。
 - RC 之间：`docs/v2.0-upgrade-rc.md`；V1.1 ↔ V2：`docs/v2.0-upgrade-rollback.md`；人工验收：`docs/v2.0-manual-acceptance.md`。
 - 用户提供的最近生产状态为 RC.4 已部署成功；本轮不重新检查或操作生产。实际端口和镜像以用户现场记录为准。
-- 候选版镜像：**RC.4** `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f`（CI 37849652604）。所有版本见第 0.1 节。
+- 当前候选镜像：**RC.5** `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993`（CI 37917714749，510/510）。所有版本见第 0.1 节。
 
 ## 7. 已知风险 / 待办
 

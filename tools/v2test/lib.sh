@@ -5,10 +5,10 @@
 
 KIT_VERSION="1"
 IMAGE_REPO="ghcr.io/sadjdg123/nocturne"
-IMAGE_TAG="sha-f516629"
-IMAGE_DIGEST="sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f"
+IMAGE_TAG="sha-c5f36ad"
+IMAGE_DIGEST="sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993"
 IMAGE_REF="$IMAGE_REPO:$IMAGE_TAG@$IMAGE_DIGEST"
-EXPECT_VERSION="2.0.0-rc.4"
+EXPECT_VERSION="2.0.0-rc.5"
 TEST_NAME="nocturne-v2test"        # 测试容器名 = compose 项目名
 OUR_LABEL="com.nocturne.v2test"    # 我们创建的容器带这个标签（值 = KIT_VERSION），用来判断「是不是我们的」
 MARKER=".nocturne-v2test"          # 测试目录里的标记文件：只有带它的目录 teardown 才会删

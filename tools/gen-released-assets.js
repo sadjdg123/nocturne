@@ -6,7 +6,7 @@
  *
  * 用法：node tools/gen-released-assets.js            # 按下方 RELEASES 从 GitHub 远程提交读取（公开仓库，无需 token；有 GITHUB_TOKEN 则带上）
  *       node tools/gen-released-assets.js --check    # 只核对现有清单与远程一致，不写文件（不一致退出码 1）
- * 新发布一个版本（如 RC.4 镜像构建成功后）：在 RELEASES 末尾加一行 { name, commit, image }，重跑本脚本并提交清单。
+ * 新发布一个版本（镜像构建成功后）：在 RELEASES 末尾加一行 { name, commit, image }，重跑本脚本并提交清单。
  * 文件内容优先用本地 git 对象（git cat-file blob <sha>），没有再走 GitHub API。 */
 const fs = require("node:fs");
 const path = require("node:path");
@@ -22,6 +22,7 @@ const RELEASES = [
   { name: "RC.2", commit: "3d5beaf4c5327d02312ab9096e9ba4dc9e095db2", image: "ghcr.io/sadjdg123/nocturne:sha-3d5beaf" },
   { name: "RC.3", commit: "e4de70bc25df4bce6b586bdff523a269bae105eb", image: "ghcr.io/sadjdg123/nocturne:sha-e4de70b" },
   { name: "RC.4", commit: "f51662961ba7a86782cb863104917d75fb587553", image: "ghcr.io/sadjdg123/nocturne:sha-f516629" },
+  { name: "RC.5", commit: "c5f36addc2d85b8ed24edb605015b7ff0be9070b", image: "ghcr.io/sadjdg123/nocturne:sha-c5f36ad" },
 ];
 
 async function api(p) {

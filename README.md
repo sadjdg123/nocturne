@@ -528,7 +528,7 @@ sh tools/restore.sh [--force] <备份.tar.gz> <目标 data 目录>
 V2 RC（2.0.0-rc.1）为
 `ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa`。RC.2（2.0.0-rc.2）见 `docs/v2.0-rc2-report.md`；
 RC.3（2.0.0-rc.3）为 `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b`，见 `docs/v2.0-rc3-report.md`；
-**RC.4（2.0.0-rc.4，当前推荐）**为 `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f`，见 `docs/v2.0-rc4-report.md`。
+**RC.5（2.0.0-rc.5，当前候选）**为 `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993`，整合账户事务、损坏保护、备份恢复与 BusyBox 兼容修复，见 `docs/v2.0-rc5-report.md`。升级前先停写并保留完整备份；回滚旧 RC 前先完成认证事务恢复。
 **已经在跑 RC.1 的 NAS 升级 / 回滚、以及全新安装，按 `docs/v2.0-upgrade-rc.md`**；V1.1 ↔ V2 按 `docs/v2.0-upgrade-rollback.md`。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
 回滚到 V1.1 一般不需要替换 `data/`。
 
