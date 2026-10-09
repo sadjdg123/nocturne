@@ -8,7 +8,7 @@
 - 自托管字体、图标代理缓存、自定义图片及 iPhone 主屏幕模式。
 - 损坏文件保护、账户/会话持久事务、完整备份与失败恢复保护。
 
-![夜曲 Nocturne 桌面截图（示例数据）](docs/screenshot.png)
+![夜曲 Nocturne 桌面截图（示例数据）](docs/screenshot.jpg)
 
 ## 部署与首次使用
 

@@ -8,10 +8,11 @@ V2.1.0 接入已确认的 Midnight 布局优化；数据、认证和备份恢复
 
 ### 0.1 版本 / 镜像 / digest
 
-正式版发布结果见 [V2.0.0 发布记录](v2.0.0-report.md)。使用以下固定镜像，latest 仍为 V1.1：
+正式版发布结果见 [V2.1.0 发布记录](v2.1.0-report.md)。使用以下固定镜像，latest 仍为 V1.1：
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
+| **[V2.1.0（当前正式版）](v2.1.0-report.md)** | `v2@1bb4b2087697f1b38cb0b0b0332377ec55f1778c` | `ghcr.io/sadjdg123/nocturne:sha-1bb4b20@sha256:b6dccc1ca3c9af6fb8af3fba21f45cd72d81b413fd439000e403a4abb1324174` | [37941520960](https://github.com/sadjdg123/nocturne/actions/runs/37941520960)（516/516，双架构） |
 | **[V2.0.0（上一正式版）](v2.0.0-report.md)** | `v2@93d9bec8e4e581107d375d57f9870b3353ade879` | `ghcr.io/sadjdg123/nocturne:sha-93d9bec@sha256:477db409164737bcf6c9439703c64052628aa91cff2f009b5d8056dd985d39e5` | [37926078600](https://github.com/sadjdg123/nocturne/actions/runs/37926078600)（512/512，双架构） |
 | **[RC.5 `2.0.0-rc.5`（历史候选）](v2.0-rc5-report.md)** | `v2@c5f36addc2d85b8ed24edb605015b7ff0be9070b` | `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993` | [37917714749](https://github.com/sadjdg123/nocturne/actions/runs/37917714749)（test 510 / 510 → build，双架构） |
 | RC.4 `2.0.0-rc.4`（历史基线） | `v2@f51662961ba7a86782cb863104917d75fb587553` | `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f` | [37849652604](https://github.com/sadjdg123/nocturne/actions/runs/37849652604)（test 210 / 210 → build） |
