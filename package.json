@@ -1,6 +1,6 @@
 {
   "name": "nocturne",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "夜曲 Nocturne · 群晖 NAS 自托管起始页（多用户、配置同步、服务端状态检测）",
   "main": "server.js",
   "private": true,
@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "DATA_DIR=./data node server.js",
-    "check": "node --check server.js && node --check auth-store.js && node --check public/nocturne.js && node --check public/urlcheck.js && node --check public/netmode.js && node --check public/cmdrank.js && node --check public/spaces.js && node --check public/status.js && node --check test/helpers.js",
+    "check": "node --check server.js && node --check auth-store.js && node --check public/midnight.js && node --check public/nocturne.js && node --check public/urlcheck.js && node --check public/netmode.js && node --check public/cmdrank.js && node --check public/spaces.js && node --check public/status.js && node --check test/helpers.js",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   }
 }

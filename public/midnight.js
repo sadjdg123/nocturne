@@ -1,5 +1,5 @@
 /*
- * 夜曲 Nocturne V2.0 · Midnight Edition（阶段 3）—— 新版外观的行为层。只用 window.App 的公开接口；经典外观下几乎什么都不做。
+ * 夜曲 Nocturne V2.1 · Midnight Edition—— 新版外观的行为层。只用 window.App 的公开接口；经典外观下几乎什么都不做。
  *   - 本设备外观：新版 / 经典（localStorage「nocturne.ui」，默认新版），手机列数（「nocturne.v2.cols」3 / 4，默认 3）——都只存本机、不进配置、不同步
  *   - 三层背景的「光层」：每个空间一层穹顶光（CSS 渐变），切换空间时转出 / 转入 + 一道扫过的光（只动 opacity / transform）
  *   - 空间外观：theme / density（空间字段；没设时按名称模板给默认：日常 = 晨光，娱乐 = 靛紫海报，NAS = 冷霜紧凑，其余中性）
@@ -216,10 +216,25 @@
   }
   new MutationObserver(boot).observe(de, { attributes: true, attributeFilter: ["class"] });
 
+  /* ------------------------------------------------------------ V2.1 分组排版（只标注 DOM，不改配置或顺序） */
+  function sizeGroups() {
+    groupsEl.querySelectorAll(":scope > .x-group").forEach(function (group) {
+      var count = group.querySelectorAll(".x-tile[data-id], .x-chip[data-id]").length;
+      group.setAttribute("data-size", count === 0 ? "empty" : count <= 4 ? "small" : "large");
+    });
+    pairGroups();
+  }
+  function pairGroups() {
+    var paired = String(groupsEl.clientWidth >= 660);
+    if (groupsEl.getAttribute("data-paired") !== paired) groupsEl.setAttribute("data-paired", paired);
+  }
+  if (window.ResizeObserver) new ResizeObserver(pairGroups).observe(groupsEl);
+  A.on("editmode", sizeGroups);
+
   /* ------------------------------------------------------------ 接线 */
   var lastSpace = null;
   function onRender() {
-    applyAppearance(); placeNav(); drawTitle(); syncDate();
+    applyAppearance(); placeNav(); drawTitle(); syncDate(); sizeGroups();
     var sid = SPC ? SPC.selected() : "all";
     lastMoved = lastSpace !== null && sid !== lastSpace;
     applyLook(lastMoved); lastSpace = sid;
@@ -230,7 +245,7 @@
   }
   var lastMoved = false;
   A.on("render", onRender);
-  function relayout() { placeNav(); placeInd(true); reveal(false); }
+  function relayout() { placeNav(); placeInd(true); reveal(false); pairGroups(); }
   window.addEventListener("resize", relayout);
   if (window.matchMedia) { var m = window.matchMedia("(max-width: 767px)"); if (m.addEventListener) m.addEventListener("change", relayout); }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { placeInd(true); reveal(false); });

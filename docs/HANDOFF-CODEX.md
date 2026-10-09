@@ -1,6 +1,6 @@
 # 夜曲 Nocturne · 开发交接
 
-V2.0.0 基于已验收 RC.5 发布；当前分支 v2，main 保持 V1.1。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
+V2.1.0 接入已确认的 Midnight 布局优化；数据、认证和备份恢复沿用 V2.0.0。当前分支 v2，main 保持 V1.1。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
 
 **边界**：不改 main、不覆盖已有镜像标签、不操作 NAS/生产数据。jingbo.men 后续作为本人私人首页；本次不改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
 
@@ -12,7 +12,7 @@ V2.0.0 基于已验收 RC.5 发布；当前分支 v2，main 保持 V1.1。Node 2
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
-| **[V2.0.0（当前正式版）](v2.0.0-report.md)** | `v2@93d9bec8e4e581107d375d57f9870b3353ade879` | `ghcr.io/sadjdg123/nocturne:sha-93d9bec@sha256:477db409164737bcf6c9439703c64052628aa91cff2f009b5d8056dd985d39e5` | [37926078600](https://github.com/sadjdg123/nocturne/actions/runs/37926078600)（512/512，双架构） |
+| **[V2.0.0（上一正式版）](v2.0.0-report.md)** | `v2@93d9bec8e4e581107d375d57f9870b3353ade879` | `ghcr.io/sadjdg123/nocturne:sha-93d9bec@sha256:477db409164737bcf6c9439703c64052628aa91cff2f009b5d8056dd985d39e5` | [37926078600](https://github.com/sadjdg123/nocturne/actions/runs/37926078600)（512/512，双架构） |
 | **[RC.5 `2.0.0-rc.5`（历史候选）](v2.0-rc5-report.md)** | `v2@c5f36addc2d85b8ed24edb605015b7ff0be9070b` | `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993` | [37917714749](https://github.com/sadjdg123/nocturne/actions/runs/37917714749)（test 510 / 510 → build，双架构） |
 | RC.4 `2.0.0-rc.4`（历史基线） | `v2@f51662961ba7a86782cb863104917d75fb587553` | `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f` | [37849652604](https://github.com/sadjdg123/nocturne/actions/runs/37849652604)（test 210 / 210 → build） |
 | RC.3 `2.0.0-rc.3` | `v2@e4de70bc25df4bce6b586bdff523a269bae105eb` | `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b` | 37843878107（204 / 204） |

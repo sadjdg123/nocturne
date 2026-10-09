@@ -1,6 +1,6 @@
 # 夜曲 Nocturne
 
-**V2.0.0 · Midnight Edition**。群晖 NAS 自托管的私人起始页，Node 22 零运行依赖，原生 HTML/CSS/JS，无前端构建步骤。镜像支持 linux/amd64 和 linux/arm64。
+**V2.1.0 · Midnight Edition**。群晖 NAS 自托管的私人起始页，Node 22 零运行依赖，原生 HTML/CSS/JS，无前端构建步骤。镜像支持 linux/amd64 和 linux/arm64。
 
 - Midnight 与经典外观；手机底栏、场景空间、排序及撤销。
 - 多账户、跨设备配置同步、离线修改、冲突保护与配置快照。
@@ -215,7 +215,7 @@ CI=true JSDOM_PATH=/path/to/node_modules/jsdom npm test
 
 链接仅允许 http/https，旧无效值保留但不可点击；旧 data URL 图片自动迁移。当前有 DENY/nosniff 等响应头，尚未启用页面 CSP（内联脚本多）。认证同步事务的磁盘 I/O 与 DSM 真机性能见 [工程报告](docs/phase2-engineering-report.md)，本地与 Linux 测试不代替真实断电或域名上线验收。
 
-- [正式版发布记录](docs/v2.0.0-report.md)
+- [当前发布记录](docs/v2.1.0-report.md)
 - [账户事务](docs/auth-transactions.md)、[恢复保护](docs/restore-recovery.md)、[停写备份](docs/stopped-backup.md)
 - [按需工程验证](docs/engineering-verification.md)、[人工验收](docs/v2.0-manual-acceptance.md)
 - [历史阶段归档](docs/archive/README.md)；RC 报告仍保留在 docs/ 供升级核查。

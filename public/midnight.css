@@ -1,5 +1,5 @@
 /*
- * 夜曲 Nocturne V2.0 · Midnight Edition —— 正式视觉系统（阶段 3）
+ * 夜曲 Nocturne V2.1 · Midnight Edition —— 视觉系统
  * 只在 html[data-ui="v2"]（本设备选了「新版」，v2 分支默认）下生效；经典外观完全不受影响（共用同一份 DOM 与逻辑）。
  *
  * 结构：1 tokens → 2 三层背景（壁纸 → 穹顶光 / 暗角 / 颗粒 → 内容材质）→ 3 排版 → 4 布局（桌面 / 平板 / 手机分别优化）
@@ -569,4 +569,111 @@ html[data-ui="v2"] .mn-ghost { animation: none !important; }
   html[data-ui="v2"] .mn-sweep, html[data-ui="v2"] .mn-ghost { display: none !important; }
   html[data-ui="v2"] body:not(.editing) .x-tile:active, html[data-ui="v2"] body:not(.editing) .x-chip:active { transform: none; }
   html[data-ui="v2"] .x-wrap > *, html[data-ui="v2"] .x-groups > * { animation: none !important; }
+}
+
+/* V2.1 · 经确认的 Midnight 布局：右栏收放、小分组并排、首屏比例与稳定对比。 */
+html[data-ui="v2"] { --mn-mist:#AAB2C1; --mn-line:rgba(236,230,218,.115); --mn-mat:rgba(19,26,39,.91); }
+html[data-ui="v2"] .mn-vig { background:linear-gradient(90deg,rgba(10,13,20,.22),rgba(10,13,20,.40) 25%,rgba(10,13,20,.34) 85%),linear-gradient(180deg,rgba(10,13,20,.04),rgba(10,13,20,.35) 85%); }
+html[data-ui="v2"] .mn-grain { opacity:.025; }
+html[data-ui="v2"] .mn-dome { opacity:0 !important; }
+html[data-ui="v2"] .mn-dome.is-on { opacity:.25 !important; }
+html[data-ui="v2"] .mn-sweep { display:none; }
+html[data-ui="v2"] .x-bar { background:rgba(17,24,36,.94); box-shadow:none; }
+html[data-ui="v2"] .x-tile { background:var(--mn-mat); box-shadow:none; }
+html[data-ui="v2"] .x-tile > .x-desc { color:#B0B7C4; }
+html[data-ui="v2"] .x-tile > .dot { box-shadow:none; }
+html[data-ui="v2"] .x-chip { background:rgba(19,26,39,.90); box-shadow:none; }
+html[data-ui="v2"] .x-card { background:rgba(17,24,36,.93); box-shadow:none; }
+html[data-ui="v2"] body:not(.editing) .x-group[data-size="empty"] { display:none; }
+
+@media(min-width:768px) {
+  html[data-ui="v2"] .page { max-width:none; padding:20px 32px 48px; }
+  html[data-ui="v2"] .x-wrap, html[data-ui="v2"] body.has-spaces .x-wrap { max-width:1380px; padding-top:0; }
+  html[data-ui="v2"] .x-clock { font-size:78px; line-height:.92; letter-spacing:-.012em; margin-left:-3px; text-shadow:none; }
+  html[data-ui="v2"] .x-greet { font-size:18px; letter-spacing:.025em; }
+  html[data-ui="v2"] .x-hero { row-gap:10px; }
+  html[data-ui="v2"] .x-hero > .x-greet[data-date]:not([data-date=""])::after { font-size:13px; margin-left:16px; letter-spacing:.025em; }
+  html[data-ui="v2"] .mn-sp { gap:5px; padding-bottom:2px; }
+  html[data-ui="v2"] .mn-sp b { font-size:26px; letter-spacing:.06em; }
+  html[data-ui="v2"] .mn-sp small { font-size:11px; }
+  html[data-ui="v2"] .mn-sp span { font-size:12px; }
+  html[data-ui="v2"] .x-search { gap:6px; }
+  html[data-ui="v2"] .x-bar { height:52px; border-radius:13px; }
+  html[data-ui="v2"] .x-engines { padding-left:4px; }
+  html[data-ui="v2"] .x-eng { height:32px; font-size:12.5px; }
+  html[data-ui="v2"] .x-groups { display:grid; grid-template-columns:minmax(0,1fr); align-content:start; align-items:start; gap:26px 24px; }
+  html[data-ui="v2"] .x-groups[data-paired="true"] { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  html[data-ui="v2"] .x-group { grid-column:auto !important; min-width:0; padding:0; border:0; border-radius:0; background:none; box-shadow:none; }
+  html[data-ui="v2"] .x-group[data-size="large"], html[data-ui="v2"] .x-groups[data-density="poster"] > .x-group { grid-column:1 / -1 !important; }
+  html[data-ui="v2"] .x-gtitle { font-size:17px; gap:9px; margin-bottom:12px; letter-spacing:.05em; }
+  html[data-ui="v2"] .x-gcnt { font-size:12px; color:var(--mn-mist); }
+  html[data-ui="v2"] .x-gtitle::after { background:rgba(236,230,218,.13); }
+  html[data-ui="v2"] .x-groups[data-density="comfortable"] .x-grid { grid-template-columns:repeat(auto-fill,minmax(185px,1fr)); gap:10px; }
+  html[data-ui="v2"] .x-groups[data-density="comfortable"] .x-tile { height:84px; min-height:84px; padding:12px 24px 12px 14px; column-gap:12px; border-radius:12px; }
+  html[data-ui="v2"] .x-groups[data-density="comfortable"] .x-tile > .x-ic { width:40px; height:40px; background:rgba(255,255,255,.055); box-shadow:inset 0 0 0 1px rgba(236,230,218,.08); }
+  html[data-ui="v2"] .x-groups[data-density="comfortable"] .x-tile > .x-name { font-size:14px; line-height:1.4; }
+  html[data-ui="v2"] .x-groups[data-density="comfortable"] .x-tile > .x-desc { font-size:12px; line-height:1.4; }
+  html[data-ui="v2"] .x-ic img:not(.x-full) { width:72%; height:72%; }
+  html[data-ui="v2"] .x-ic img.x-full { width:80%; height:80%; object-fit:contain; border-radius:6px; }
+  html[data-ui="v2"] .x-chip { height:42px; border-radius:12px; padding-right:14px; }
+  html[data-ui="v2"] .x-chips { gap:8px; }
+  html[data-ui="v2"] .x-side { gap:16px; }
+  html[data-ui="v2"] .x-card { padding:18px; border-radius:14px; }
+  html[data-ui="v2"] .x-card h2 { font-size:15px; margin-bottom:14px; letter-spacing:.05em; }
+  html[data-ui="v2"] .x-ring { width:46px; height:46px; }
+  html[data-ui="v2"] .x-cnt { font-size:32px; }
+  html[data-ui="v2"] .x-stat { gap:12px; }
+  html[data-ui="v2"] .x-sline { font-size:12px; margin-top:12px; }
+  html[data-ui="v2"] .x-rt { min-height:44px; font-size:13px; }
+  html[data-ui="v2"] .x-rt .x-ic { width:28px; height:28px; box-shadow:none; }
+}
+
+/* Rail exists only when at least one of its cards is actually visible. */
+@media(min-width:900px) {
+  html[data-ui="v2"] .x-wrap,
+  html[data-ui="v2"] body.has-spaces .x-wrap { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto auto auto 1fr; column-gap:32px; row-gap:20px; }
+  html[data-ui="v2"] .x-wrap:has(> .x-side > .x-card:not(.x-off):not([hidden])) { grid-template-columns:minmax(0,1fr) 244px; }
+  html[data-ui="v2"] .x-wrap > .x-head { grid-column:1 / -1; grid-row:1; min-height:44px; }
+  html[data-ui="v2"] .x-wrap > .x-hero,
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-hero { grid-column:1; grid-row:2; padding-top:4px; }
+  html[data-ui="v2"] .x-wrap > .x-search,
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-search { grid-column:1; grid-row:3; width:100%; margin:0; }
+  html[data-ui="v2"] .x-wrap > .x-spaces,
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-spaces { grid-column:1; grid-row:4; }
+  html[data-ui="v2"] .x-wrap > .x-groups,
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-groups { grid-column:1; grid-row:5; }
+  html[data-ui="v2"] .x-wrap > .x-side { grid-column:2; grid-row:2 / -1; top:24px; align-self:start; }
+  html[data-ui="v2"] .x-wrap:not(:has(> .x-side > .x-card:not(.x-off):not([hidden]))) > .x-side { display:none; }
+}
+
+@media(min-width:1200px) {
+  html[data-ui="v2"] body.has-spaces .x-wrap { grid-template-columns:152px minmax(0,1fr); }
+  html[data-ui="v2"] body.has-spaces .x-wrap:has(> .x-side > .x-card:not(.x-off):not([hidden])) { grid-template-columns:152px minmax(0,1fr) 244px; }
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-hero,
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-search { grid-column:2; }
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-groups { grid-column:2; grid-row:4 / -1; }
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-spaces { grid-column:1; grid-row:2 / -1; top:24px; }
+  html[data-ui="v2"] body.has-spaces .x-wrap > .x-side { grid-column:3; }
+  html[data-ui="v2"] body.has-spaces .x-sp { font-size:16px; height:44px; }
+  html[data-ui="v2"] body.has-spaces .x-sp > small { font-size:12px; }
+  html[data-ui="v2"] body.has-spaces .x-spaces::before { font-size:11px; margin-top:8px; }
+  html[data-ui="v2"] body.has-spaces .x-sp-manage { font-size:12px; margin-top:6px; padding-left:10px; }
+}
+
+@media(min-width:768px) and (max-height:600px) {
+  html[data-ui="v2"] .page { padding-top:8px; }
+  html[data-ui="v2"] .x-wrap { row-gap:14px; }
+  html[data-ui="v2"] .x-clock { font-size:58px; }
+  html[data-ui="v2"] .x-hero { row-gap:6px; }
+  html[data-ui="v2"] .mn-sp { display:none; }
+}
+
+@media(max-width:767px) {
+  /* Keep the established mobile grid / dock / hit areas. */
+  html[data-ui="v2"] .x-clock { font-size:60px; text-shadow:none; }
+  html[data-ui="v2"] .x-greet { font-size:16px; }
+  html[data-ui="v2"] .x-groups { gap:22px; }
+  html[data-ui="v2"] .x-groups > .x-group { grid-column:auto; }
+  html[data-ui="v2"] .x-tile { background:rgba(19,26,39,.90); }
+  html[data-ui="v2"] .x-card { background:rgba(17,24,36,.93); }
 }
