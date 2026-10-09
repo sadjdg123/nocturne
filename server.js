@@ -138,6 +138,7 @@ function bootstrapEvidence() {
 }
 function assertAuthStorage() {
   if (NO_AUTH || !storageLoaded) return;
+  if (authStore && storageFaults.has(authStore.journal)) throw storageError(authStore.journal, "auth-transaction", storageFaults.get(authStore.journal).reason);
   for (const [file, kind, check, missing] of [[USERS_FILE, "users", usersShape, () => ({ users: [] })], [SESSIONS_FILE, "sessions", sessionsShape, () => ({})]]) {
     const r = readCritical(file, kind, check, missing), h = r.raw === null ? null : fingerprint(r.raw);
     if (h !== authBaselines.get(file)) throw storageError(file, kind, "CHANGED_OUTSIDE_PROCESS");

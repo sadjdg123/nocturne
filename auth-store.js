@@ -51,10 +51,15 @@ function createAuthStore(root, validate) {
     if (marker && marker.toString() !== "committed\n") throw fail();
     return { r, committed: marker !== null };
   }
-  function finish(r, committed) {
+  function finish(r, committed, recovering = true) {
+    if (!recovering) {
+      const live = record();
+      if (!live.committed || JSON.stringify(live.r) !== JSON.stringify(r)) throw fail();
+    }
     for (const k of ["users", "sessions"]) {
       const got = read(path.join(root, k + ".json"));
-      if (![r.old[k], r.next[k]].some(v => v === null ? got === null : got !== null && got.equals(decode(v, k)))) throw fail();
+      const expected = recovering ? [r.old[k], r.next[k]] : [r.next[k]];
+      if (!expected.some(v => v === null ? got === null : got !== null && got.equals(decode(v, k)))) throw fail();
     }
     for (const [i, v] of r.assets.entries()) {
       checkParents(v.rel);
@@ -62,6 +67,7 @@ function createAuthStore(root, validate) {
       const a = stat(original), b = stat(saved);
       if (v.id === null) { if (a || b) throw fail(); continue; }
       if (committed) {
+        if (!recovering && (a || !b)) throw fail();
         if (a) { if (b || !same(original, v.id)) throw fail(); fs.renameSync(original, saved); syncDir(path.dirname(original)); syncDir(path.dirname(saved)); }
         else if (b && !same(saved, v.id)) throw fail();
       } else {
@@ -71,6 +77,7 @@ function createAuthStore(root, validate) {
     }
     for (const k of ["users", "sessions"]) {
       const f = path.join(root, k + ".json"), want = decode((committed ? r.next : r.old)[k], k), got = read(f);
+      if (!recovering && (got === null || !got.equals(want))) throw fail();
       if (want === null) { if (got !== null) { fs.unlinkSync(f); syncDir(root); } }
       else if (got === null || !got.equals(want)) write(f, want);
     }
@@ -128,7 +135,8 @@ function createAuthStore(root, validate) {
       try { recover(); } catch { throw fail(); }
       throw e;
     }
-    try { return finish(r, true); } catch { return { cleanupPending: true }; }
+    // 仅 finish 内已持久退休后的清理失败可降级；核验/写入/移动失败必须阻断并保留材料。
+    try { return finish(r, true, false); } catch { throw Object.assign(fail(), { committed: true }); }
   }
   return { commit, recover, pending: () => !!stat(journal), journal };
 }
