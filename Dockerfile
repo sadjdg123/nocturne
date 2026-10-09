@@ -16,7 +16,7 @@ ENV NODE_ENV=production \
 RUN apk add --no-cache su-exec tzdata
 
 WORKDIR /app
-COPY package.json server.js docker-entrypoint.sh ./
+COPY package.json server.js auth-store.js docker-entrypoint.sh ./
 COPY public ./public
 RUN chmod +x docker-entrypoint.sh && mkdir -p /data && chown -R node:node /data
 

@@ -15,6 +15,7 @@ const zlib = require("node:zlib");
 const dns = require("node:dns");
 const net = require("node:net");
 const os = require("node:os");
+const { createAuthStore } = require("./auth-store");
 const URLCHECK = require("./public/urlcheck.js"); // 与前端共用的 URL 白名单校验
 const SPACES = require("./public/spaces.js"); // 与前端共用的场景空间模型（V2.0）
 
@@ -77,6 +78,7 @@ function readJSON(file, fallback) {
  * 修复文件后需重启复核；日志只含类别/错误码，不含 JSON、凭据或指纹。 */
 const storageFaults = new Map(), seenCriticalFiles = new Set(), authBaselines = new Map();
 let storageLoaded = false;
+let authStore;
 const object = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 const fingerprint = (v) => crypto.createHash("sha256").update(v).digest("hex");
 function storageError(file, kind, reason) {
@@ -233,7 +235,11 @@ function withUserLock(name, fn) {
  * 持有用户锁的代码（配置 / 壁纸 / 图标）绝不再去拿账户锁，所以不会死锁。 */
 let accountsChain = Promise.resolve();
 function withAccountsLock(fn) {
-  const run = accountsChain.catch(() => {}).then(() => { assertAuthStorage(); return fn(); });
+  const run = accountsChain.catch(() => {}).then(() => {
+    assertAuthStorage();
+    if (authStore.pending()) { try { authStore.recover(); } catch { throw storageError(authStore.journal, "auth-transaction", "RECOVERY_FAILED"); } }
+    return fn();
+  });
   accountsChain = run.catch(() => {});
   return run;
 }
@@ -255,16 +261,43 @@ function loadState() {
   authBaselines.set(SESSIONS_FILE, s.raw === null ? null : fingerprint(s.raw));
   if (!users.users.length && bootstrapEvidence()) throw storageError(USERS_FILE, "users", "ORPHANED_DATA");
   storageLoaded = true;
-  const now = Date.now();
-  for (const [k, s] of Object.entries(sessions)) if (!s || s.expires < now) delete sessions[k];
 }
-const saveUsers = () => writeJSON(USERS_FILE, users);
 let sessTimer = null;
-function saveSessions(now) {
+function authCandidate() { return { users: structuredClone(users), sessions: structuredClone(sessions) }; }
+function maintainSessions(state) {
+  const now = Date.now();
+  for (const [k, s] of Object.entries(state.sessions)) {
+    if (s.expires < now || !state.users.users.some(u => u.name.toLowerCase() === s.user.toLowerCase())) delete state.sessions[k];
+  }
+}
+function commitAuth(state, deletedName = null) {
+  assertAuthStorage(); maintainSessions(state);
+  let result;
+  try { result = authStore.commit(state.users, state.sessions, deletedName); }
+  catch (e) {
+    if (e.committed) publishAuth(state); // 标记出现后不能退回旧内存，即使耐久性结果未知且必须阻断。
+    if (e.storage) throw storageError(authStore.journal, "auth-transaction", "RECOVERY_OR_DURABILITY_FAILED");
+    throw e;
+  }
+  publishAuth(state);
+  if (result.cleanupPending) log("auth transaction cleanup pending; recovery materials retained");
+}
+function publishAuth(state) {
+  users = state.users; sessions = state.sessions;
+  for (const [f, data] of [[USERS_FILE, users], [SESSIONS_FILE, sessions]]) {
+    authBaselines.set(f, fingerprint(JSON.stringify(data, null, 2))); seenCriticalFiles.add(f);
+  }
+}
+function saveSessions(now) { // 续期/清理也只经账户锁及同一个持久提交点，读取不修改内存。
   clearTimeout(sessTimer);
   if (NO_AUTH) return Promise.resolve();
-  if (now) return writeJSON(SESSIONS_FILE, sessions);
-  sessTimer = setTimeout(() => writeJSON(SESSIONS_FILE, sessions).catch((e) => log("save sessions", e.message)), 2000);
+  const flush = () => withAccountsLock(() => {
+    const state = authCandidate(); maintainSessions(state);
+    if (JSON.stringify(state.sessions) !== JSON.stringify(sessions)) commitAuth(state);
+  });
+  if (now) return flush();
+  if (sessTimer) sessTimer = null;
+  sessTimer = setTimeout(() => flush().catch(e => log("save sessions", e.storage ? "storage_unavailable" : e.code || "WRITE_FAILED")), 2000);
 }
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$/;
@@ -299,10 +332,9 @@ const DUMMY_HASH = "scrypt$" + Buffer.alloc(16).toString("base64") + "$" + Buffe
 /* ----------------------------------------------------------------- sessions */
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
-function newSession(name) {
+function newSession(name, state) {
   const token = crypto.randomBytes(32).toString("base64url");
-  sessions[sha(token)] = { user: name, created: Date.now(), expires: Date.now() + SESSION_DAYS * 864e5 };
-  saveSessions();
+  state.sessions[sha(token)] = { user: name, created: Date.now(), expires: Date.now() + SESSION_DAYS * 864e5 };
   return token;
 }
 /** decodeURIComponent，遇到坏的百分号编码返回 null（调用方回 400，而不是抛 URIError 变成 500） */
@@ -354,15 +386,14 @@ function knownDevice(req, u) {
   return u.devices.some((d) => d && d.h === h && d.exp > now);
 }
 /** 登录成功后调用：已是这个用户的已知设备就续期，否则发一个新的 */
-function rememberDevice(req, res, u) {
+function rememberDevice(req, u) {
   const old = parseCookies(req)[DEV_COOKIE];
   const t = old && knownDevice(req, u) ? old : crypto.randomBytes(32).toString("base64url");
   const h = sha(t), now = Date.now();
   u.devices = (Array.isArray(u.devices) ? u.devices : []).filter((d) => d && d.exp > now && d.h !== h);
   u.devices.push({ h, exp: now + DEVICE_DAYS * 864e5 });
   u.devices = u.devices.slice(-DEVICE_MAX);
-  addCookie(req, res, DEV_COOKIE, t, DEVICE_DAYS * 86400);
-  return saveUsers();
+  return t;
 }
 /** 带着哪个账户的有效「已知设备」cookie（不看用户名）；没有返回 null */
 function deviceOwner(req) {
@@ -380,18 +411,25 @@ function currentUser(req) {
   if (!t) return null;
   const key = sha(t), s = sessions[key];
   if (!s) return null;
-  if (s.expires < Date.now()) { delete sessions[key]; saveSessions(); return null; }
+  if (s.expires < Date.now()) { saveSessions(); return null; }
   const u = findUser(s.user);
-  if (!u) { delete sessions[key]; saveSessions(); return null; }
-  // 滑动续期：剩余不足一半时延长
-  if (s.expires - Date.now() < SESSION_DAYS * 432e5) { s.expires = Date.now() + SESSION_DAYS * 864e5; saveSessions(); }
+  if (!u) { saveSessions(); return null; }
   req.sessionKey = key;
   return { name: u.name, admin: !!u.admin };
 }
-function dropSessionsOf(name, exceptKey) {
+async function prepareAuth(req) {
+  if (NO_AUTH) return;
+  const token = parseCookies(req)[COOKIE], key = token && sha(token), s = key && sessions[key];
+  if (!s || s.expires <= Date.now() || s.expires - Date.now() >= SESSION_DAYS * 432e5) return;
+  await withAccountsLock(() => {
+    const state = authCandidate(), live = state.sessions[key];
+    if (!live || live.expires <= Date.now() || !findUser(live.user)) return;
+    live.expires = Date.now() + SESSION_DAYS * 864e5; commitAuth(state);
+  });
+}
+function dropSessionsOf(state, name, exceptKey) {
   const l = name.toLowerCase();
-  for (const [k, s] of Object.entries(sessions)) if (s.user.toLowerCase() === l && k !== exceptKey) delete sessions[k];
-  return saveSessions(true);
+  for (const [k, s] of Object.entries(state.sessions)) if (s.user.toLowerCase() === l && k !== exceptKey) delete state.sessions[k];
 }
 
 /* ------------------------------------------------------------- rate limiting */
@@ -885,9 +923,9 @@ function unsafeError(list) {
 /** 拿到用户锁之后再确认一次：账户还在、这个会话还有效（请求开始后账户可能被删 / 密码被改导致会话作废）。否则 401，什么都不写。 */
 function assertAlive(me, req) {
   assertAuthStorage();
+  if (!NO_AUTH && (!findUser(me.name) || (req && req.sessionKey && (!sessions[req.sessionKey] || sessions[req.sessionKey].expires <= Date.now())))) throw Object.assign(new Error("账户已不存在或登录已失效"), { status: 401 });
   readConfig(me.name);
   if (NO_AUTH) return;
-  if (!findUser(me.name) || (req && req.sessionKey && !sessions[req.sessionKey])) throw Object.assign(new Error("账户已不存在或登录已失效"), { status: 401 });
 }
 function allUserNames() {
   return NO_AUTH ? [NO_AUTH_USER, ...users.users.map((u) => u.name)] : users.users.map((u) => u.name);
@@ -1052,6 +1090,7 @@ async function migrateData(name, data) {
 async function migrateAll() {
   for (const name of allUserNames()) {
     await withUserLock(name, async () => {
+      if (!NO_AUTH && !findUser(name)) return;
       await guardHeal(name).catch((e) => log("spaces guard heal", name, e.message));
       await guardRecover(name).catch((e) => log("spaces guard", name, e.message));
       const cur = readConfig(name);
@@ -1577,7 +1616,7 @@ async function api(req, res, url) {
   const p = url.pathname.replace(/^\/api/, "") || "/", m = req.method;
 
   if (p === "/health") {
-    try { assertAuthStorage(); } catch (e) { if (!e.storage) throw e; }
+    try { assertAuthStorage(); await prepareAuth(req); } catch (e) { if (!e.storage) throw e; }
     for (const name of allUserNames()) { try { readConfig(name); } catch (e) { if (!e.storage) throw e; } }
     const out = { ok: storageFaults.size === 0, app: "nocturne", version: VERSION, auth: !NO_AUTH, uptime: Math.round(process.uptime()) };
     if (!out.ok) out.storage = { ok: false }; // 匿名健康检查不泄露账户名/路径。
@@ -1594,6 +1633,7 @@ async function api(req, res, url) {
     return json(res, out.ok ? 200 : 503, out);
   }
   assertAuthStorage();
+  await prepareAuth(req);
 
   if (p === "/me" && m === "GET") {
     return json(res, 200, { auth: !NO_AUTH, setup: !NO_AUTH && users.users.length === 0, user: currentUser(req) });
@@ -1609,9 +1649,10 @@ async function api(req, res, url) {
     return withAccountsLock(async () => {
       if (users.users.length) return json(res, 409, { error: "管理员已存在，请直接登录" });
       const admin = { name, admin: true, hash: await hashPassword(b.password), created: new Date().toISOString() };
-      users.users.push(admin);
-      setCookie(req, res, newSession(name));
-      await rememberDevice(req, res, admin); // 创建管理员的这台设备算「已知设备」（内含 saveUsers()）
+      const state = authCandidate(); state.users.users.push(admin);
+      const token = newSession(name, state), device = rememberDevice(req, admin);
+      commitAuth(state);
+      setCookie(req, res, token); addCookie(req, res, DEV_COOKIE, device, DEVICE_DAYS * 86400);
       log("setup: admin created", name);
       return json(res, 200, { ok: true, user: { name, admin: true } });
     });
@@ -1662,9 +1703,12 @@ async function api(req, res, url) {
       const verified = u.hash;
       return await withAccountsLock(async () => {
         // 校验密码期间账户被删除 / 密码被改：这次登录作废（不能让已撤销的凭据换到新会话）
-        if (!users.users.includes(u) || u.hash !== verified) return json(res, 401, { error: "用户名或密码不正确" });
-        setCookie(req, res, newSession(u.name));
-        await rememberDevice(req, res, u);
+        const live = findUser(u.name);
+        if (!live || live.hash !== verified || live.created !== u.created) return json(res, 401, { error: "用户名或密码不正确" });
+        const state = authCandidate(), candidate = state.users.users.find(x => x.name === live.name);
+        const token = newSession(live.name, state), device = rememberDevice(req, candidate);
+        commitAuth(state);
+        setCookie(req, res, token); addCookie(req, res, DEV_COOKIE, device, DEVICE_DAYS * 86400);
         return json(res, 200, { ok: true, user: { name: u.name, admin: !!u.admin } });
       });
     } finally {
@@ -1674,10 +1718,11 @@ async function api(req, res, url) {
   }
 
   if (p === "/logout" && m === "POST") {
-    const t = parseCookies(req)[COOKIE];
-    if (t && sessions[sha(t)]) { delete sessions[sha(t)]; await saveSessions(true); }
-    setCookie(req, res, "", 0);
-    return json(res, 200, { ok: true });
+    return withAccountsLock(() => {
+      const t = parseCookies(req)[COOKIE], state = authCandidate();
+      if (t && state.sessions[sha(t)]) { delete state.sessions[sha(t)]; commitAuth(state); }
+      setCookie(req, res, "", 0); return json(res, 200, { ok: true });
+    });
   }
 
   /* ---- 以下需要登录 ---- */
@@ -1868,13 +1913,16 @@ async function api(req, res, url) {
     const b = await readBody(req);
     if (!validPass(b.password)) return json(res, 400, { error: "新" + PASS_MSG });
     return withAccountsLock(async () => {
+      assertAlive(me, req);
       const u = findUser(me.name);
       if (!u) return json(res, 401, { error: "未登录" });
       if (!(await verifyPassword(String(b.old || ""), u.hash))) return json(res, 400, { error: "当前密码不正确" });
-      u.hash = await hashPassword(b.password);
-      revokeDevices(u); // 所有「已知设备」作废；当前这台刚验证过密码，重新发一个
-      await rememberDevice(req, res, u); // 内含 saveUsers()
-      await dropSessionsOf(u.name, req.sessionKey); // 其他设备需重新登录
+      const state = authCandidate(), candidate = state.users.users.find(x => x.name === u.name);
+      candidate.hash = await hashPassword(b.password);
+      revokeDevices(candidate);
+      const device = rememberDevice(req, candidate);
+      dropSessionsOf(state, u.name, req.sessionKey); commitAuth(state);
+      addCookie(req, res, DEV_COOKIE, device, DEVICE_DAYS * 86400);
       return json(res, 200, { ok: true });
     });
   }
@@ -1891,11 +1939,12 @@ async function api(req, res, url) {
       if (name.toLowerCase() === NO_AUTH_USER) return json(res, 400, { error: "这个用户名是保留的" });
       if (!validPass(b.password)) return json(res, 400, { error: PASS_MSG });
       return withAccountsLock(async () => { // 查重 → 算哈希 → 写入 在同一把锁里：并发同名（不分大小写）只会成功一次
+        assertAlive(me, req);
         if (findUser(name)) return json(res, 409, { error: "用户名已存在" });
         const hash = await hashPassword(b.password);
         if (findUser(name)) return json(res, 409, { error: "用户名已存在" });
-        users.users.push({ name, admin: !!b.admin, hash, created: new Date().toISOString() });
-        await saveUsers();
+        const state = authCandidate(); state.users.users.push({ name, admin: !!b.admin, hash, created: new Date().toISOString() });
+        commitAuth(state);
         return json(res, 200, { ok: true });
       });
     }
@@ -1908,30 +1957,25 @@ async function api(req, res, url) {
         const b = await readBody(req);
         if (!validPass(b.password)) return json(res, 400, { error: PASS_MSG });
         return withAccountsLock(async () => {
+          assertAlive(me, req);
           const target = findUser(tn);
           if (!target) return json(res, 404, { error: "用户不存在" });
-          target.hash = await hashPassword(b.password);
-          revokeDevices(target);
-          if (target.name === me.name) await rememberDevice(req, res, target); else await saveUsers();
-          await dropSessionsOf(target.name, target.name === me.name ? req.sessionKey : undefined);
+          const state = authCandidate(), candidate = state.users.users.find(x => x.name === target.name);
+          candidate.hash = await hashPassword(b.password); revokeDevices(candidate);
+          const device = target.name === me.name ? rememberDevice(req, candidate) : null;
+          dropSessionsOf(state, target.name, target.name === me.name ? req.sessionKey : undefined); commitAuth(state);
+          if (device) addCookie(req, res, DEV_COOKIE, device, DEVICE_DAYS * 86400);
           return json(res, 200, { ok: true });
         });
       }
       if (!mm[2] && m === "DELETE") return withAccountsLock(async () => {
+        assertAlive(me, req);
         const target = findUser(tn);
         if (!target) return json(res, 404, { error: "用户不存在" });
         if (target.name === me.name) return json(res, 400, { error: "不能删除自己" });
-        revokeDevices(target); // 已知设备随用户一起作废（同名用户以后重建也不会继承）
-        users.users = users.users.filter((u) => u !== target);
-        await saveUsers();
-        await dropSessionsOf(target.name);
         await withUserLock(target.name, async () => { // 锁顺序：账户锁 → 用户锁
-          await fsp.rm(configFile(target.name), { force: true });
-          await removeWallpaper(target.name);
-          await fsp.rm(legacyBackupFile(target.name), { force: true });
-          await fsp.rm(backupDir(target.name), { recursive: true, force: true });
-          await fsp.rm(iconDir(target.name), { recursive: true, force: true });
-          await fsp.rm(guardFile(target.name), { force: true }); // 回滚写保护旁路文件随用户删除（固定的升级前快照不动）
+          const state = authCandidate(); state.users.users = state.users.users.filter(u => u.name !== target.name);
+          dropSessionsOf(state, target.name); commitAuth(state, target.name.toLowerCase());
           guardIssues.delete(target.name.toLowerCase());
           seenCriticalFiles.delete(configFile(target.name));
         });
@@ -1954,6 +1998,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return await api(req, res, url);
     if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method Not Allowed");
     // 旧浏览器/工具会直接请求 /favicon.ico：给 SVG 图标（登录前也可访问）
+    if (url.pathname === "/" || url.pathname === "/index.html") await prepareAuth(req);
     return serveStatic(req, res, url.pathname === "/favicon.ico" ? "/favicon.svg" : url.pathname);
   } catch (e) {
     if (!e.status) log("error", req.method, url.pathname, e.stack || e.message);
@@ -1966,7 +2011,10 @@ const server = http.createServer(async (req, res) => {
 function main() {
   if (COOKIE_CFG.error) { console.error(stamp(), "配置错误：" + COOKIE_CFG.error); process.exit(2); }
   ensureDirs();
+  authStore = createAuthStore(DATA_DIR, { users: usersShape, sessions: sessionsShape });
+  try { authStore.recover(); } catch { throw storageError(authStore.journal, "auth-transaction", "RECOVERY_FAILED"); }
   loadState();
+  if (!NO_AUTH && Object.values(sessions).some(s => s.expires < Date.now() || !findUser(s.user))) saveSessions();
   for (const n of entriesStrict(CONFIG_DIR, "config")) {
     if (n.endsWith(".json") && validName(n.slice(0, -5))) { try { readConfig(n.slice(0, -5)); } catch (e) { if (!e.storage) throw e; } }
   }

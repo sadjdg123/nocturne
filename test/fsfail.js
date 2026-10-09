@@ -32,6 +32,42 @@ function err(code, syscall, p) {
 }
 
 const origOpen = fsp.open, origRename = fsp.rename;
+const origOpenSync = fs.openSync, origWriteSync = fs.writeSync, origSync = fs.fsyncSync, origClose = fs.closeSync;
+const origRm = fs.rmSync;
+const fdPaths = new Map();
+function consume(r) {
+  if (!r || !r.mode.startsWith("once_")) return;
+  fs.writeFileSync(CTL, rules().filter(x => x.mode !== r.mode || x.re.source !== r.re.source).map(x => x.mode + " " + x.re.source).join("\n"));
+}
+function renameFault(a) {
+  const r = hit(a, ["rename", "once_rename", "kill_rename", "after_rename_throw", "kill_after_rename", "rollback_failure"]);
+  consume(r);
+  if (r && r.mode === "rollback_failure") { fs.writeFileSync(CTL, "rename users\\.json\\.\\d+\\.[0-9a-f]{8}\\.tmp$\n"); throw err("EIO", "rename", a); }
+  if (r && r.mode === "kill_rename") process.kill(process.pid, "SIGKILL");
+  if (r && ["rename", "once_rename"].includes(r.mode)) throw err("ENOSPC", "rename", a);
+  return r;
+}
+fs.openSync = function(p, flags, ...args) {
+  const r = hit(p, ["sync_open", "once_sync_open"]); consume(r);
+  if (r) throw err("ENOSPC", "open", p);
+  const fd = origOpenSync.call(this, p, flags, ...args); fdPaths.set(fd, String(p)); return fd;
+};
+fs.writeSync = function(fd, buf, ...args) {
+  const p = fdPaths.get(fd), r = hit(p, ["sync_partial", "once_sync_partial"]); consume(r);
+  if (r) { origWriteSync.call(this, fd, buf.subarray(0, Math.floor(buf.length / 2))); throw err("EIO", "write", p); }
+  return origWriteSync.call(this, fd, buf, ...args);
+};
+fs.fsyncSync = function(fd) {
+  const p = fdPaths.get(fd), r = hit(p, ["sync_fsync", "once_sync_fsync", "corrupt_before_sync", "corrupt_auth_before_sync"]); consume(r);
+  if (r && r.mode.endsWith("sync_fsync")) throw err("EIO", "fsync", p);
+  if (r) {
+    const target = String(p).replace(/\.\d{1,10}\.[0-9a-f]{8}\.tmp$/, "");
+    fs.writeFileSync(r.mode === "corrupt_auth_before_sync" ? path.join(path.dirname(path.dirname(target)), "users.json") : target, "{injected-corrupt");
+  }
+  return origSync.call(this, fd);
+};
+fs.closeSync = function(fd) { fdPaths.delete(fd); return origClose.call(this, fd); };
+fs.rmSync = function(p, ...args) { const r = hit(p, ["sync_rm", "once_sync_rm"]); consume(r); if (r) throw err("EACCES", "rm", p); return origRm.call(this, p, ...args); };
 fs.readFileSync = function (p, ...args) {
   const r = hit(p, ["read_eacces", "read_eio", "read_enoent"]);
   if (r) throw err(r.mode === "read_eacces" ? "EACCES" : r.mode === "read_enoent" ? "ENOENT" : "EIO", "read", p);
@@ -74,6 +110,8 @@ fsp.rename = async function (a, b) {
   return out;
 };
 fs.renameSync = function (a, b) {
-  if (hit(a, ["rename"])) throw err("ENOSPC", "rename", a);
-  return origRenameSync.call(this, a, b);
+  const r = renameFault(a), out = origRenameSync.call(this, a, b);
+  if (r && r.mode === "after_rename_throw") throw err("EIO", "rename-result", a);
+  if (r && r.mode === "kill_after_rename") process.kill(process.pid, "SIGKILL");
+  return out;
 };
