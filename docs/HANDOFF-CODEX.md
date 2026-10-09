@@ -1,6 +1,6 @@
 # 夜曲 Nocturne · 开发交接
 
-V2.1.0 接入已确认的 Midnight 布局优化；数据、认证和备份恢复沿用 V2.0.0。当前分支 v2，main 保持 V1.1。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
+V2.1.1 在 Midnight 布局基础上增加可选公网域名 Secure Cookie 策略；数据、认证和备份恢复沿用 V2.0.0。当前分支 v2，main 保持 V1.1。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
 
 **边界**：不改 main、不覆盖已有镜像标签、不操作 NAS/生产数据。jingbo.men 后续作为本人私人首页；本次不改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
 
@@ -8,11 +8,12 @@ V2.1.0 接入已确认的 Midnight 布局优化；数据、认证和备份恢复
 
 ### 0.1 版本 / 镜像 / digest
 
-正式版发布结果见 [V2.1.0 发布记录](v2.1.0-report.md)。使用以下固定镜像，latest 仍为 V1.1：
+正式版发布结果见 [V2.1.1 发布记录](v2.1.1-report.md)。使用以下固定镜像，latest 仍为 V1.1：
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
-| **[V2.1.0（当前正式版）](v2.1.0-report.md)** | `v2@1bb4b2087697f1b38cb0b0b0332377ec55f1778c` | `ghcr.io/sadjdg123/nocturne:sha-1bb4b20@sha256:b6dccc1ca3c9af6fb8af3fba21f45cd72d81b413fd439000e403a4abb1324174` | [37941520960](https://github.com/sadjdg123/nocturne/actions/runs/37941520960)（516/516，双架构） |
+| **[V2.1.1（当前正式版）](v2.1.1-report.md)** | `v2@7508c9f69059b1cc71612749c1271fabd80e6d49` | `ghcr.io/sadjdg123/nocturne:sha-7508c9f@sha256:e249200989df5d75699834d7f9e401a2ee15ff711cbb40e1c7a20c0e37ea2a8a` | [37954611423](https://github.com/sadjdg123/nocturne/actions/runs/37954611423)（527/527，双架构） |
+| **[V2.1.0（上一正式版）](v2.1.0-report.md)** | `v2@1bb4b2087697f1b38cb0b0b0332377ec55f1778c` | `ghcr.io/sadjdg123/nocturne:sha-1bb4b20@sha256:b6dccc1ca3c9af6fb8af3fba21f45cd72d81b413fd439000e403a4abb1324174` | [37941520960](https://github.com/sadjdg123/nocturne/actions/runs/37941520960)（516/516，双架构） |
 | **[V2.0.0（上一正式版）](v2.0.0-report.md)** | `v2@93d9bec8e4e581107d375d57f9870b3353ade879` | `ghcr.io/sadjdg123/nocturne:sha-93d9bec@sha256:477db409164737bcf6c9439703c64052628aa91cff2f009b5d8056dd985d39e5` | [37926078600](https://github.com/sadjdg123/nocturne/actions/runs/37926078600)（512/512，双架构） |
 | **[RC.5 `2.0.0-rc.5`（历史候选）](v2.0-rc5-report.md)** | `v2@c5f36addc2d85b8ed24edb605015b7ff0be9070b` | `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993` | [37917714749](https://github.com/sadjdg123/nocturne/actions/runs/37917714749)（test 510 / 510 → build，双架构） |
 | RC.4 `2.0.0-rc.4`（历史基线） | `v2@f51662961ba7a86782cb863104917d75fb587553` | `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f` | [37849652604](https://github.com/sadjdg123/nocturne/actions/runs/37849652604)（test 210 / 210 → build） |
@@ -44,7 +45,7 @@ V2.1.0 接入已确认的 Midnight 布局优化；数据、认证和备份恢复
 |------|------|
 | 常量 / 环境变量 | `PORT`、`DATA_DIR`、探测、缓存、快照环、cookie 前缀等（完整列表见 README「环境变量」） |
 | storage | `readJSON`；`atomicWrite`（`<目标>.<pid>.<8hex>.tmp` + `wx` 打开 + fsync + rename；只在 `created` 后清理自己的临时文件）；`writeJSON`（按文件串行队列）；`sweepStaleTmp`（启动时只删确认是自己遗留的过期临时文件）；`withUserLock` / `withAccountsLock` |
-| users / sessions | `users.json`（scrypt 哈希，N=16384）、`sessions.json`（键 = sha256(令牌)，账户/密码/会话/设备变更由 `auth-store.js` 同步持久提交，成功后发布内存和 Cookie；不再依靠 2 秒防抖）；已知设备；`currentUser`；cookie 名 `cookieNames(NOCTURNE_COOKIE_PREFIX)` → `<前缀>sid` / `<前缀>dev`（`HttpOnly`、`SameSite=Lax`、`Path=/`，仅 HTTPS / 可信代理 HTTPS 时 `Secure`） |
+| users / sessions | `users.json`（scrypt 哈希，N=16384）、`sessions.json`（键 = sha256(令牌)，账户/密码/会话/设备变更由 `auth-store.js` 同步持久提交，成功后发布内存和 Cookie；不再依靠 2 秒防抖）；已知设备；`currentUser`；cookie 名 `cookieNames(NOCTURNE_COOKIE_PREFIX)` → `<前缀>sid` / `<前缀>dev`（`HttpOnly`、`SameSite=Lax`、`Path=/`；HTTPS / 可信代理 HTTPS 或准确匹配 `NOCTURNE_SECURE_COOKIE_HOSTS` 时加 `Secure`，域名策略不改变代理信任） |
 | rate limiting / 客户端 | `parseCidrList`、`clientInfo`（`TRUSTED_PROXY_CIDRS` 内的直连对端才读转发头）、登录失败计数 |
 | configs | 快照环 `backup/<用户>/`（`addBackup` / `listBackups` / `snapshotDue`：30 分钟或 20 个版本）；`readConfig`（mtime 缓存）；`canonical` + `dataHash`（键排序 JSON 的 sha256）；`writeConfig`（`hist` 最近 20 个版本指纹，V2 写的条目 `g:2`；`ops` 最近 50 个 opId；顶层 `writer:{app,v,gen:2}`） |
 | 回滚写保护 | `writeGuard` / `guardWriteFailed` / `guardFormatOk` / `guardMatches` / `lastV2FromBackups` / `guardRecover` / `guardHeal` / `guardNotice`；`preV2Snapshot`（首次 V2 启动、检测到 V1.1 数据时写 `pre-v2-snapshot-<时间>/` + `MANIFEST.json`） |
