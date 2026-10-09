@@ -51,6 +51,74 @@ function createAuthStore(root, validate) {
     if (marker && marker.toString() !== "committed\n") throw fail();
     return { r, committed: marker !== null };
   }
+  const retiredName = /^\.auth-done\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.tmp$/;
+  const receiptName = /^\.auth-cleanup\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json$/;
+  const metadata = /^(RECORD\.json|DONE|COMMITTED)(\.\d+\.[0-9a-f]{8}\.tmp)?$/;
+  function inventory(dir) {
+    const entries = [];
+    const s = stat(dir); if (!s || !s.isDirectory() || s.isSymbolicLink()) throw fail();
+    function walk(f, rel) {
+      const s = stat(f); if (!s || s.isSymbolicLink() || (!s.isFile() && !s.isDirectory())) throw fail();
+      if (rel) entries.push(s.isDirectory() ? { rel, dir: true } : { rel, dir: false, sha256: hash(read(f)) });
+      if (s.isDirectory()) for (const n of fs.readdirSync(f).sort()) walk(path.join(f, n), rel ? rel + "/" + n : n);
+    }
+    walk(dir, ""); return entries;
+  }
+  function receiptFile(n) { return path.join(root, ".auth-cleanup." + n.match(retiredName)[1] + ".json"); }
+  function certify(n) {
+    const dir = path.join(root, n), { r, committed } = record(dir);
+    const done = committed ? "committed\n" : "rolled-back\n";
+    if (read(path.join(dir, "DONE"))?.toString() !== done) throw fail();
+    // 旧版完整退休目录也必须先核验来源和资产；不能仅凭目录名授权删除。
+    for (const child of fs.readdirSync(dir)) {
+      if (child === "assets") continue;
+      const m = child.match(metadata); if (!m) throw fail();
+      if (m[2]) {
+        const expected = m[1] === "RECORD.json" ? read(path.join(dir, "RECORD.json")) : Buffer.from(m[1] === "DONE" ? done : "committed\n");
+        const got = read(path.join(dir, child));
+        // 强杀可留下尚未写完的原子临时文件；仅接纳已知元数据的字节前缀。
+        if (!got || got.length > expected.length || !got.equals(expected.subarray(0, got.length))) throw fail();
+      }
+    }
+    for (const child of fs.readdirSync(path.join(dir, "assets"))) {
+      if (!/^(0|[1-9]\d*)$/.test(child)) throw fail();
+      const v = r.assets[Number(child)];
+      if (!committed || !v?.id || !same(path.join(dir, "assets", child), v.id)) throw fail();
+    }
+    const payload = JSON.stringify({ format: 1, retired: n, entries: inventory(dir) });
+    write(receiptFile(n), Buffer.from(JSON.stringify({ payload, sha256: hash(payload) })));
+  }
+  function verifyRetired(n) {
+    const envelope = JSON.parse(read(receiptFile(n)).toString("utf8"));
+    if (typeof envelope.payload !== "string" || envelope.sha256 !== hash(envelope.payload)) throw fail();
+    const r = JSON.parse(envelope.payload), expected = new Map();
+    if (r.format !== 1 || r.retired !== n || !Array.isArray(r.entries)) throw fail();
+    for (const e of r.entries) {
+      if (typeof e.rel !== "string" || e.rel.split("/").some(p => !p || p === "." || p === ".." || /[\\\0]/.test(p)) ||
+          typeof e.dir !== "boolean" || (!e.dir && !/^[0-9a-f]{64}$/.test(e.sha256)) || expected.has(e.rel)) throw fail();
+      const [top] = e.rel.split("/");
+      if (top !== "assets" && (!metadata.test(top) || e.rel !== top || e.dir)) throw fail();
+      if (e.rel.includes("/") && expected.get(e.rel.slice(0, e.rel.lastIndexOf("/")))?.dir !== true) throw fail();
+      expected.set(e.rel, e);
+    }
+    if (!expected.get("assets")?.dir || expected.get("RECORD.json")?.dir !== false || expected.get("DONE")?.dir !== false) throw fail();
+    const dir = path.join(root, n);
+    // 只允许已认证清单的子集：文件可缺失，剩余文件不可替换，也不可加入链接/额外数据。
+    if (stat(dir)) for (const e of inventory(dir)) {
+      const want = expected.get(e.rel);
+      if (!want || want.dir !== e.dir || (!e.dir && want.sha256 !== e.sha256)) throw fail();
+    }
+  }
+  function cleanRetired(n) {
+    verifyRetired(n); // 核验错误不属于可忽略的清理失败。
+    try {
+      const dir = path.join(root, n);
+      if (stat(dir)) fs.rmSync(dir, { recursive: true });
+      syncDir(root); // 先持久化目录消失，才能移除目录外的凭据。
+      fs.unlinkSync(receiptFile(n)); syncDir(root);
+    } catch { return { cleanupPending: true }; }
+    return { cleanupPending: false };
+  }
   function finish(r, committed, recovering = true) {
     if (!recovering) {
       const live = record();
@@ -83,17 +151,20 @@ function createAuthStore(root, validate) {
     }
     // 先持久化“无需再恢复”的退休名称，递归清理失败不破坏提交判断。
     write(path.join(journal, "DONE"), Buffer.from(committed ? "committed\n" : "rolled-back\n"));
-    const retired = path.join(root, ".auth-done." + crypto.randomUUID() + ".tmp");
+    const n = ".auth-done." + crypto.randomUUID() + ".tmp", retired = path.join(root, n);
     fs.renameSync(journal, retired); syncDir(root);
-    try { fs.rmSync(retired, { recursive: true }); syncDir(root); } catch (e) { return { cleanupPending: true }; }
-    return { cleanupPending: false };
+    certify(n); // 首次递归删除前，持久化不会随退休目录一起删除的来源凭据。
+    return cleanRetired(n);
   }
   function recover() {
-    for (const n of fs.readdirSync(root).filter(n => /^\.auth-done\.[0-9a-f-]{36}\.tmp$/.test(n))) {
-      const dir = path.join(root, n), result = record(dir);
-      if (read(path.join(dir, "DONE")).toString() !== (result.committed ? "committed\n" : "rolled-back\n")) throw fail();
-      try { fs.rmSync(dir, { recursive: true }); syncDir(root); } catch { /* 已提交材料仍保留，不能撤销认证状态 */ }
-    }
+    try {
+      const names = fs.readdirSync(root), retired = new Set(names.filter(n => retiredName.test(n)));
+      for (const f of names.filter(n => receiptName.test(n))) retired.add(".auth-done." + f.match(receiptName)[1] + ".tmp");
+      for (const n of retired) {
+        if (!stat(receiptFile(n))) certify(n);
+        cleanRetired(n); // 凭据存在时允许重复清理，不重放过时认证状态。
+      }
+    } catch { throw fail(); }
     if (!stat(journal)) return null;
     try { const { r, committed } = record(); return { committed, ...finish(r, committed) }; } catch (e) { throw fail(); }
   }
