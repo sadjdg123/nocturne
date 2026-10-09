@@ -2,7 +2,7 @@
 
 日期：2026-10-09。独立开发分支：`verify/phase2-engineering`。第一阶段最终基线：`a7a9ca0104084f78458949f9919af000d3b1abfa`；本轮验证源码冻结：`018a696a8b1f6893b714f0d462af22ba0cf0fbc3`。
 
-**验收结论：本地隔离构建、启动与可靠性验证通过；远程 CI 尚未完成，不能据本报告批准发布。** GitHub 拒绝新增工作流的 push，原因是本机 PAT 缺少 workflow scope；没有创建远端开发分支，没有触发发布工作流或 GHCR 推送。最终逐项结果与性能数据在以下各节记录。
+**验收结论：本地与 GitHub 原生双架构工程验证全部通过；生产发布机制仍待另行批准。** 首次推送因本机 PAT 缺少 workflow scope 被拒；用户更新权限后，仅推送独立开发分支，实际工程 CI [37913738091](https://github.com/sadjdg123/nocturne/actions/runs/37913738091) 成功。未触发生产发布工作流或 GHCR 推送。先前拒绝证据与此次实际日志均保留。
 
 ## 1. 范围与隔离
 
@@ -52,6 +52,8 @@ macOS 的完整 510 项已全过，零失败/零跳过。Linux 完整测试包�
 
 源码冻结清单记录 144 个非文档跟踪文件。AMD64 runner 开始于 9f5f16b；其 npm 测试运行过程中只补入最终 run.sh 确定性夹具，产品及全部 npm 用例字节未变；完整 144 文件已与 018a696 逐一 SHA-256 相符，Git HEAD 的这一来源差异单独保留，不隐瞒为单一 checkout。最终 ARM64 整条流水线从 018a696 重新复制执行。macOS npm 用例覆盖文件同样没有后续变更。后续提交仅文档。
 
+远程 CI 统一检出 `d30eca2f32d92e997d65f887612678ac8b275220`，相对冻结提交仅文档不同。原生 `ubuntu-24.04` AMD64 完整 **510/510**（484.017 秒），原生 `ubuntu-24.04-arm` ARM64 完整 **510/510**（466.868 秒），均 0 fail/skipped/cancelled/todo。每个架构还通过启动与故障重启 **12/12**、工具 **102/102**、隔离注册表 **9/9**；preflight **26/26**。实际 Linux 6.17 Azure、Node 22.23.3、BusyBox 1.37.0，完整回归 UID 1000。两份 artifacts 下载后逐一核对 GitHub digest、ZIP CRC 与原始日志；证据已保存本地，不依赖 14 天远程保留期。
+
 ## 5. GHCR 防覆盖与 CI 权限
 
 只读 GHCR 实测使用匿名 `repository:sadjdg123/nocturne:pull`，仅 GET/HEAD。RC.4 仍为 `sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f`，revision 为 `f51662961ba7a86782cb863104917d75fb587553`，双架构齐全；日志不含 Bearer 或签名 URL 查询参数。
@@ -62,7 +64,9 @@ macOS 的完整 510 项已全过，零失败/零跳过。Linux 完整测试包�
 
 新增工程 workflow 只允许独立分支 push，根级和每个 job 都是 contents:read/packages:none；无 PR/tag/dispatch、登录/推送 action、secret 发布凭据或持久 checkout 凭据。固定 action SHA，原生 GitHub runner 矩阵为 ubuntu-24.04 / ubuntu-24.04-arm，独立无认证 Docker 配置，本地 --load，内部注册表和 network none 回归。26 项门禁及官方 actionlint 1.7.12 表达式/语法检查通过；actionlint 曾发现 job env 不允许 runner.temp，已改用可用 github.run_id/matrix context。
 
-远程 push 已被 GitHub 拒绝，报错为 PAT 缺少 workflow scope；查询没有本开发分支的 run。本机上传权限与 CI 令牌权限不同，即使以后补 workflow scope，工程 workflow 仍没有镜像推送权限。**当前不能交付实际 GitHub job 权限日志或原生 AMD64 CI 结果**，这是未完成项，不能用静态校验冒充运行证据。
+用户补齐本机 workflow scope 后，开发分支 push 成功；这与 CI 令牌权限不同。实际 run 37913738091 的 preflight、AMD64、ARM64 三份 job 日志均只列出 `Contents: read` 与 `Metadata: read`，无 packages 写权限；根级/每 job 的 `packages: none` 仍生效。按完整 HEAD 查询仅有工程验证 run，原生产 docker.yml 未触发。远端 main 保持 `3e6da3cf80c59fda12fa0a719afb8745829679b4`，v2 保持 `af5104c285abd041e4118faae5d277c23917b113`。
+
+远程 artifacts：linux-amd64 的 SHA-256 为 `fc7c0f255bdfb05b234e69dd4dd0dd1bd5c35a39d467b8ee6f07be28adfa2403`，linux-arm64 为 `7805eeffe801709119736071fc53f5fb9836b4ef7e0f8ef947c6e66ca042794a`。`remote-ci/verification-summary.json` 汇总已核验结果，原始 ZIP、解包日志、权限日志和 run/job/artifact 元数据均附入审查包。GitHub 提示固定 checkout/upload-artifact action 的 Node 20 目标由平台改用 Node 24 执行；本次全部步骤通过，后续需单独升级固定 action SHA 并回归。
 
 ## 6. 认证磁盘 I/O 性能
 
@@ -79,6 +83,8 @@ macOS 的完整 510 项已全过，零失败/零跳过。Linux 完整测试包�
 
 文件 API 计数不代表物理 IOPS。RC.4 登录会话允许 2 秒防抖，在响应后才可能落盘；修复版响应包含持久提交成本，不能把旧版较快响应等价为同样耐久性的性能。虚拟机和 QEMU 数值不作为 NAS SLA；同步 fsync、完整 users/sessions 记录及删除资产指纹仍会占用 Node 事件循环。并行回归期间的测量仅留原始日志，最终判断使用回归结束后的空闲原生 ARM64 顺序基准。
 
+补充原生 GitHub runner 顺序基准（各 30 次已知设备登录）：AMD64 RC.4 p50/p95 为 **36.51/38.74 ms**，修复版 **45.34/48.18 ms**；ARM64 RC.4 **32.37/35.19 ms**，修复版 **40.72/42.51 ms**。两平台 30 次登录均从响应时 30、延迟后 31 次 fsync 增至 540 次，当前响应后不再增加。8 MiB 删除的 p50，AMD64 退休补修前/当前为 **59.02/98.87 ms**，ARM64 **47.14/73.70 ms**。云 runner 的共享宿主和存储条件不同，分别保留原始样本，不与本机值混合统计或推断 DSM 性能；新增同步 I/O 成本及 P2 风险结论不变。
+
 ## 7. 提交与文件清单
 
 | 提交 | 变更 |
@@ -93,22 +99,24 @@ macOS 的完整 510 项已全过，零失败/零跳过。Linux 完整测试包�
 
 后续独立文档提交更新 HANDOFF-CODEX、人工验收、RC/V1 回滚入口、备份/恢复说明、防覆盖设计，新增 engineering-verification、engineering-rollback 与本报告。完整逐提交文件表、代码补丁、冻结源码及最终工作树状态在证据包，不以摘要替代独立代码审查。
 
+远端开发分支及本次 CI 绑定上述 d30eca2 完整 SHA。本次补齐实际 CI 结果的文档提交仅保留本地，避免为了报告再次触发相同工程验证；最终本地提交及与远端的差异在 `git-state.json`。冻结后的非文档文件无变更，工作树保持干净。
+
 账户、主配置、空间及默认 Cookie 结构与 RC.1–RC.4 保持兼容；本轮没有产品/UI 改动。旧 RC 不理解新的活动事务恢复记录，回滚前须先由修复版完成恢复并正常停机。完整停写备份保存退休目录及外部清理凭据；未知来源、内容冲突、符号链接和目录身份冲突仍严格阻断。
 
 ## 8. 剩余事项与风险
 
 | 等级 | 事项 | 发布前处理 |
 | --- | --- | --- |
-| P1 阻断 | 远程测试 workflow 未上传、未实际运行 | 用户在本机补 workflow 权限后只推独立分支，核验远端 SHA、原生双架构 job、权限和零跳过日志 |
 | P1 阻断 | 现有生产 workflow 自动发布，防覆盖 helper 尚未接入 | 单独批准发布流程切换、共享锁及写权限收敛，先独立测试注册表验证，不直接推 v2 |
 | P2 | DSM 宿主工具/文件系统/真实断电未经实测 | 用户另行批准后只在隔离 DSM 数据副本验收；SIGKILL 不等于断电 |
 | P2 | 同步认证事务和资产哈希阻塞事件循环，NAS 磁盘可能更慢 | 使用本轮基准评估，再由用户批准隔离 NAS 性能测量；没有据此重构认证或改变数据格式 |
 | P2 | 多进程写同一 DATA_DIR 不受支持；无凭据的旧版部分退休材料无法确认来源 | 保持单实例；保留现场并独立核查，不靠目录名称自动删除 |
+| P3 | 固定 checkout/upload-artifact action 的 Node 20 目标被平台切换至 Node 24 | 本次全部步骤成功；后续独立升级固定 SHA、门禁与双架构回归 |
 
-本轮不发布 V2.0 正式版、不创建发布标签、不推镜像、不合并或推送 main/v2，不操作 NAS。交付后停止，等待用户检查及后续发布审批；未完成远程 CI 不应被批准记录掩盖。
+远程 CI 待办已关闭，有实际原生双架构、权限和零跳过证据。本轮不发布 V2.0 正式版、不创建发布标签、不推镜像、不合并或推送 main/v2，不操作 NAS。交付后停止，等待用户检查及后续发布审批。
 
 ## 9. 证据入口
 
 证据目录：`/Users/million/nocturne/audit-evidence/phase2/`。最终索引、摘要与 SHA-256 清单在 README.md、final-results.json 和 SHA256SUMS；测试原始日志、故障反证、完整差异、源码、OCI 归档均保留。早期失败日志和实验性短 revision 归档不会作为最终通过/发布证明。
 
-主要入口（路径相对证据目录）：各架构 build.log/build.json、smoke.json、full.log/full-summary.json、v2kit.log、registry-integration.json；macos-final-510.log；final-oci-validation.json；ghcr-readonly-cli-final.json；benchmark-idle/auth-io-benchmark.json；phase2-complete-diff.patch；phase2-commits-files.txt；frozen-code.json/freeze-check.json；git-state.json/protected-refs-final.txt；远程推送拒绝证据和 remote-runs.json。
+主要入口（路径相对证据目录）：各架构 build.log/build.json、smoke.json、full.log/full-summary.json、v2kit.log、registry-integration.json；macos-final-510.log；final-oci-validation.json；ghcr-readonly-cli-final.json；benchmark-idle/auth-io-benchmark.json；phase2-complete-diff.patch；phase2-commits-files.txt；frozen-code.json/freeze-check.json；git-state.json/protected-refs-final.txt；原推送拒绝证据与 remote-ci/ 下的完整实际 CI 材料。

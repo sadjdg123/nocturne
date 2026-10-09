@@ -30,6 +30,8 @@ SIGKILL 注入在指定文件操作边界等待测试标记，宿主对测试容
 
 `engineering-verify.yml` 是 JSON 格式的 YAML；根级和每个 job 权限为 `contents: read`、`packages: none`，只允许隔离分支 push，没有 PR、标签或 dispatch 入口，checkout 不保留凭据。Docker 配置由可用的 github/matrix job context 构造，原生 runner 分别为 `ubuntu-24.04` 与 `ubuntu-24.04-arm`。
 
-上传工作流需本机 Git 凭据具备 workflow 更新权限，这与 CI 运行令牌的镜像权限不同。本轮凭据不足，推送被拒：本地 actionlint 与门禁通过，但尚无远程 run。更新本机凭据后先核对远端 main/v2 未变，再只推此开发分支，核验远端 SHA、实际 job 权限、日志和 artifacts；不得同时触发旧发布 workflow。
+上传工作流需本机 Git 凭据具备 workflow 更新权限，这与 CI 运行令牌的镜像权限不同。首次权限不足的推送被拒，原记录保留；用户补齐权限后，仅推独立分支的 `d30eca2f32d92e997d65f887612678ac8b275220`，工程 CI [37913738091](https://github.com/sadjdg123/nocturne/actions/runs/37913738091) 已成功。原生双架构各 510/510、零失败/零跳过，启动 12/12、工具 102/102、registry 9/9；preflight 26/26。三份 job 实际权限均只有 Contents/Metadata read；原发布 workflow 未触发，main/v2 未变。原始 artifacts 的 SHA-256 已与 GitHub 元数据核对，并保存本地证据副本。
+
+以后复现仍须先核对 main/v2，再只推上述隔离分支，逐次检查完整远端 SHA、实际 job 权限、日志和 artifacts。工程 workflow 对文档 push 也会运行；本次补齐实际结果的最终文档提交保留本地，详见报告的分支状态。固定 action 出现 Node 20 目标被平台强制改用 Node 24 的提醒，本次步骤全过；后续升级固定 SHA 时独立回归。
 
 actions 的权限定义与平台依据：[GitHub workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)、[GitHub hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。构建平台与本地导出依据：[Docker multi-platform builds](https://docs.docker.com/build/building/multi-platform/)。

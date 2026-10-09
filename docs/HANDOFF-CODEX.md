@@ -34,7 +34,7 @@ RC.4 构建后用 GHCR 匿名查询复核过：旧标签仍指向上表的 diges
 1. 用户已确认 RC.4 在 NAS 部署成功、iPhone Safari 正常及重启数据保留；本轮没有访问 NAS。这是用户提供的 RC.4 验收信息，不是未发布修复版的真机验收。
 2. 第一阶段及认证事务边界/退休清理补修已通过用户独立验收。先读 `auth-transactions.md`、`restore-recovery.md`、`stopped-backup.md` 和 `phase2-engineering-report.md`。
 3. RC.4 已加入 `gen-released-assets.js` 与缓存清单。后续每次发布继续登记固定提交；修改被引用资源必须更新缓存 URL，运行生成器 `--check` 和缓存回归。
-4. 测试工作流只允许隔离分支、`contents: read` / `packages: none`，现有生产 `docker.yml` 未改。当前 Git 凭据缺少 workflow 权限，推送被拒，远程 CI 尚未执行；不得据此声称 GitHub 双架构验收通过。
+4. 测试工作流只允许隔离分支、`contents: read` / `packages: none`，现有生产 `docker.yml` 未改。补齐本机 workflow 权限后，工程 CI [37913738091](https://github.com/sadjdg123/nocturne/actions/runs/37913738091) 通过：原生 amd64/arm64 各 510/510、零失败/零跳过；每架构启动 12/12、工具 102/102、隔离 registry 9/9。三份 job 权限日志只有 Contents/Metadata read，无镜像写权限。
 5. 后续发布机制启用、版本号、合并、镜像发布和 NAS 升级均须另行批准。禁止直接推送 `v2` / `main`、创建发布标签或覆盖镜像。
 
 ---
@@ -148,7 +148,7 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
   `curl -s "https://ghcr.io/token?scope=repository:sadjdg123/nocturne:pull"` 取 token，再 `curl -sI -H "Authorization: Bearer <token>" -H "Accept: application/vnd.oci.image.index.v1+json" https://ghcr.io/v2/sadjdg123/nocturne/manifests/<tag>` 看 `docker-content-digest`。
 - 当前推送方式为 Git 整提交，仅隔离开发分支；禁用向 main/v2 及发布标签推送。原 Hark 逐文件 Contents API 流程已退出日常开发。
 - 新 `engineering-verify.yml`：只允许 `verify/phase2-engineering` push，原生 amd64/arm64 runner、完整历史、固定 action SHA、checkout 不保留凭据、独立无认证 Docker 配置。构建使用 `--load`，测试注册表仅内部网络，生产 GHCR 无写权限。
-- 远程工作流上传目前被凭据权限阻断；本地可运行 `DOCKER_CONFIG=<无凭据配置目录> sh tools/engineering/verify-local.sh arm64 <日志目录>`。所有 Docker 操作须指向隔离 daemon；不挂载宿主数据或 docker.sock 到容器。
+- 工程 CI 已实际通过，检出 `d30eca2f32d92e997d65f887612678ac8b275220`；本机补充验收文档提交不改变验证源码。日志/artifacts 校验结果见工程报告和 remote-ci/ 证据。本地可运行 `DOCKER_CONFIG=<无凭据配置目录> sh tools/engineering/verify-local.sh arm64 <日志目录>`。所有 Docker 操作须指向隔离 daemon；不挂载宿主数据或 docker.sock 到容器。
 - 防覆盖辅助模块通过只读 GHCR 与真实隔离 registry 测试，尚未接入发布工作流。共享发布锁、收敛所有写入者权限及正式工作流变更仍是发布前批准事项，不能把进程内锁当作跨 CI 的原子保护。
 
 ## 6. 部署流程（用户在群晖上自己做）
