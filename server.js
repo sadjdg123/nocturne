@@ -388,9 +388,8 @@ function secureCookieHosts(raw) {
 }
 const SECURE_COOKIE_CFG = secureCookieHosts(process.env.NOCTURNE_SECURE_COOKIE_HOSTS);
 function secureCookie(req) {
-  // 重复 Host 不用于域名策略；不读取 X-Forwarded-Host 或请求 URL 的 authority。
-  const hostCount = (req.rawHeaders || []).filter((x, i) => i % 2 === 0 && x.toLowerCase() === "host").length;
-  return isHttps(req) || (hostCount === 1 && SECURE_COOKIE_CFG.hosts.has(cookieHostname(req.headers.host, true)));
+  // 使用 Node 解析的 Host；不读取 X-Forwarded-Host 或请求 URL 的 authority。
+  return isHttps(req) || SECURE_COOKIE_CFG.hosts.has(cookieHostname(req.headers.host, true));
 }
 /** HTTPS 判定：只有直连对端是可信代理（TRUSTED_PROXY_CIDRS）时才看 X-Forwarded-Proto，否则只认本连接是否加密 */
 function isHttps(req) { return clientInfo(req).https; }

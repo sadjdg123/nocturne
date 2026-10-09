@@ -8,11 +8,12 @@ function client(base, defaults = {}) {
   const jar = new Map();
   function req(method, p, body, extra = {}) {
     return new Promise((resolve, reject) => {
-      const headers = { ...defaults.headers, ...extra };
+      const headers = { Host: new URL(base).host, ...defaults.headers, ...extra };
       if (jar.size) headers.Cookie = [...jar].map(([k, v]) => k + "=" + v).join("; ");
       const data = body === undefined ? undefined : JSON.stringify(body);
       if (data) headers["Content-Type"] = "application/json";
-      const q = http.request(new URL(p, base), { method, headers }, r => {
+      const wireHeaders = Object.entries(headers).flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).flatMap(x => [k, x]));
+      const q = http.request(new URL(p, base), { method, headers: wireHeaders }, r => {
         const chunks = []; r.on("data", b => chunks.push(b)); r.on("error", reject);
         r.on("end", () => {
           const setCookie = r.headers["set-cookie"] || [];
@@ -20,7 +21,8 @@ function client(base, defaults = {}) {
             const kv = c.split(";")[0], i = kv.indexOf("="), name = kv.slice(0, i), value = kv.slice(i + 1);
             if (!value || /Max-Age=0\b/.test(c)) jar.delete(name); else jar.set(name, value);
           }
-          resolve({ status: r.statusCode, setCookie, json: JSON.parse(Buffer.concat(chunks).toString()) });
+          let json = null; try { json = JSON.parse(Buffer.concat(chunks).toString()); } catch { /* HTTP parser errors may have no JSON body */ }
+          resolve({ status: r.statusCode, setCookie, json });
         });
       }); q.on("error", reject); q.end(data);
     });
@@ -86,6 +88,11 @@ test("unlisted/suffix hosts and spoofed forwarding headers cannot activate publi
 test("public policy only adds Secure: trusted HTTPS remains Secure on an unlisted host", async t => {
   const srv = await startServer({ env: { ...env, TRUSTED_PROXY_CIDRS: "127.0.0.1/32" } }); t.after(() => srv.stop());
   const r = await client(srv.base).post("/api/setup", credentials, { Host: "other.example", "X-Forwarded-Proto": "https" });
+  assert.equal(r.status, 200); checkCookies(r, true);
+});
+test("a duplicate Host header cannot remove Secure from the parsed public Host", async t => {
+  const srv = await startServer({ env }); t.after(() => srv.stop());
+  const r = await client(srv.base).post("/api/setup", credentials, { Host: ["jingbo.men", "other.example"] });
   assert.equal(r.status, 200); checkCookies(r, true);
 });
 test("public Host cannot defeat the per-peer login limiter with forged client IPs", async t => {
