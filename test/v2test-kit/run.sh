@@ -157,11 +157,25 @@ for SHN in $SHELLS; do
   kit teardown.sh --test-root "$TR" --yes
   check "teardown 拒绝删除没有标记的目录" sh -c "[ \"\$(cat '$T/rc')\" != 0 ] && [ -f '$TR/somefile' ]"
   rm -rf "$TR"; reset_docker
-  # 热备份一致性失败：备份期间不停（像夜曲一样「写临时文件 → rename」）改动生产 data 里的一个文件
-  : > "$T/writer.on"; ( i=0; while [ -e "$T/writer.on" ]; do i=$((i + 1)); echo "$i" > "$PROD/icons/zz-writer.tmp"; mv "$PROD/icons/zz-writer.tmp" "$PROD/icons/zz-writer.bin"; done ) & WPID=$!
-  kit deploy.sh --test-root "$TR" --yes
-  rm -f "$T/writer.on"; wait "$WPID" 2>/dev/null
+  # 每次真实 cp 后确定性注入一次原子 rename，确保三次源 hash 核验都看到变化。
+  # 无同步的后台循环可能短暂停写形成合法稳定窗口，也可能触发 find 的目录竞态；
+  # 此用例专门验证持续内容变化的退出码 4，不依赖调度偶然性。
+  mkdir -p "$T/hot-bin"
+  export V2KIT_REAL_CP="$(command -v cp)" V2KIT_HOT_FILE="$PROD/icons/zz-writer.bin" V2KIT_HOT_COUNTER="$T/hot-counter" V2KIT_HOT_TMP="$T/hot-source.tmp"
+  echo 0 > "$V2KIT_HOT_COUNTER"; echo 0 > "$V2KIT_HOT_FILE"
+  cat > "$T/hot-bin/cp" <<'EOF'
+#!/bin/sh
+"$V2KIT_REAL_CP" "$@" || exit "$?"
+if [ "$1" = -p ] && [ "$2" = "$V2KIT_HOT_FILE" ]; then
+  n=$(cat "$V2KIT_HOT_COUNTER"); n=$((n + 1))
+  echo "$n" > "$V2KIT_HOT_COUNTER"
+  echo "$n" > "$V2KIT_HOT_TMP"; mv "$V2KIT_HOT_TMP" "$V2KIT_HOT_FILE" || exit 1
+fi
+EOF
+  chmod +x "$T/hot-bin/cp"
+  PATH="$T/hot-bin:$PATH" kit deploy.sh --test-root "$TR" --yes
   check "热备份一直不一致 → 退出码 4、停止并询问是否用 --stop，未建容器" sh -c "[ \"\$(cat '$T/rc')\" = 4 ] && grep -q '热备份没能得到一致的数据' '$T/out' && grep -q 'backup.sh --stop nocturne' '$T/out' && grep -q -- '--from-backup' '$T/out' && ! grep -q '\"nocturne-v2test\"' '$FD/state.json' && [ ! -e '$TR/data' ]"
+  check "三次复制后的原子变化注入均实际命中" sh -c "[ \"\$(cat '$V2KIT_HOT_COUNTER')\" = 3 ]"
   check "热备份失败时也没有停止生产容器" no_prod_ops
   rm -rf "$PROD"; cp -a "$T/prod-pristine" "$PROD"
   check "反向测试结束：生产 data 逐字节未变" prod_same
@@ -170,5 +184,5 @@ done
 reset_docker
 echo ""
 echo "合计：$PASS 通过，$FAIL 失败$FAILED"
-[ "${KEEP:-0}" = 1 ] && echo "保留：$T" || rm -rf "$T"
+if [ "${KEEP:-0}" = 1 ] || [ "$FAIL" != 0 ]; then echo "保留：$T"; else rm -rf "$T"; fi
 [ "$FAIL" = 0 ]
