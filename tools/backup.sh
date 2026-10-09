@@ -139,6 +139,7 @@ SIDECAR_OWN=1
 ln "$STAGE/archive.part" "$ARCHIVE" || die "归档已存在或写入失败"
 SIDECAR_OWN=0
 restart_original || die "归档已校验生成，但服务原运行状态未恢复"
-echo "备份完成：$ARCHIVE（文件 $N 个，原始大小 $BYTES 字节）"
+echo "备份完成：$ARCHIVE"
+echo "  文件 $N 个，原始大小 $BYTES 字节"
 [ -n "$STOP" ] || echo "热备份只做变化检测，不保证跨文件事务一致；升级/灾备基准须停写完整备份"
 exit 0

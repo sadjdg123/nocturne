@@ -45,6 +45,14 @@ esac
   const unpack = () => { const d = path.join(root, "extracted"); fs.mkdirSync(d); assert.equal(spawnSync("tar", ["-xzf", archive(), "-C", d]).status, 0); return path.join(d, "data"); };
   return { root, data, out, run, archive, unpack, dockerState, calls };
 }
+test("备份成功路径保持部署工具的独立行契约（目录可含空格）", t => {
+  const f = fixture(t); const out = path.join(f.root, "archives with spaces"); fs.mkdirSync(out);
+  const r = f.run(["-o", out]); assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.split("\n").filter(x => x.startsWith("备份完成：")); assert.equal(lines.length, 1);
+  const archive = lines[0].slice("备份完成：".length);
+  assert.ok(fs.existsSync(archive), "tools/v2test/deploy.sh 必须可以直接使用成功行中的路径");
+  assert.ok(archive.endsWith(".tar.gz")); assert.ok(fs.existsSync(archive + ".sha256"));
+});
 for (const mode of ["add", "late-add", "rename", "replace", "delete"]) test("热备份清单及源文件变化 " + mode, t => {
   const f = fixture(t, mode), r = f.run(); assert.equal(r.status, 0, r.stderr); const restored = f.unpack();
   function all(d) { const result = {}; function walk(p, rel) { for (const n of fs.readdirSync(p, { withFileTypes: true })) { const r = path.join(rel,n.name), a = path.join(p,n.name); if(n.isDirectory())walk(a,r);else result[r] = crypto.createHash("sha256").update(fs.readFileSync(a)).digest("hex"); } } walk(d,""); return result; }
