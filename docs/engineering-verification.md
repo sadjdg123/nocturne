@@ -1,6 +1,8 @@
 # 隔离 Linux/Docker 验证复现
 
-测试源码冻结提交、环境、结果与证据索引见 `phase2-engineering-report.md`。以下仅用于开发隔离环境，不是 NAS 部署命令。
+本流程用于认证/存储/备份恢复、Docker 或平台改动的按需深度验证，不是每次普通修复的发布前置条件。日常流程见 `HANDOFF-CODEX.md` 第 0.4 节。
+
+第二阶段测试源码提交、环境、结果与证据索引见 `phase2-engineering-report.md`。以下仅用于开发隔离环境，不是 NAS 部署命令。
 
 ## 前提
 
@@ -32,6 +34,6 @@ SIGKILL 注入在指定文件操作边界等待测试标记，宿主对测试容
 
 上传工作流需本机 Git 凭据具备 workflow 更新权限，这与 CI 运行令牌的镜像权限不同。首次权限不足的推送被拒，原记录保留；用户补齐权限后，仅推独立分支的 `d30eca2f32d92e997d65f887612678ac8b275220`，工程 CI [37913738091](https://github.com/sadjdg123/nocturne/actions/runs/37913738091) 已成功。原生双架构各 510/510、零失败/零跳过，启动 12/12、工具 102/102、registry 9/9；preflight 26/26。三份 job 实际权限均只有 Contents/Metadata read；原发布 workflow 未触发，main/v2 未变。原始 artifacts 的 SHA-256 已与 GitHub 元数据核对，并保存本地证据副本。
 
-以后复现仍须先核对 main/v2，再只推上述隔离分支，逐次检查完整远端 SHA、实际 job 权限、日志和 artifacts。工程 workflow 对文档 push 也会运行；本次补齐实际结果的最终文档提交保留本地，详见报告的分支状态。固定 action 出现 Node 20 目标被平台强制改用 Node 24 的提醒，本次步骤全过；后续升级固定 SHA 时独立回归。
+以后需要远程深度验证时，只推上述隔离分支（不要为工程验证推 main/v2），检查目标 SHA、只读 job 权限和验证结果。工程门禁校验本工作流的权限和隔离边界，不再要求生产工作流与第二阶段基点逐字节相同。工程 workflow 对文档 push 也会运行；本次补齐实际结果的最终文档提交保留本地，详见报告的分支状态。固定 action 出现 Node 20 目标被平台强制改用 Node 24 的提醒，本次步骤全过；后续升级固定 SHA 时独立回归。
 
 actions 的权限定义与平台依据：[GitHub workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)、[GitHub hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。构建平台与本地导出依据：[Docker multi-platform builds](https://docs.docker.com/build/building/multi-platform/)。

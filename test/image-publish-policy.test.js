@@ -106,12 +106,6 @@ test("未提供显式认证或模拟器不得运行", async () => {
   assert.throws(() => createRegistryReader({ fetch: () => {} }), /blocked/);
   await assert.rejects(simulatePublication({ plan, inspect: () => {}, publisher: { push: () => {} } }), /blocked/);
 });
-test("生产工作流与开发基点逐字节一致", () => {
-  const { execFileSync } = require("node:child_process");
-  const original = execFileSync("git", ["show", "af5104c:.github/workflows/docker.yml"], { cwd: path.join(__dirname, "..") });
-  assert.deepEqual(fs.readFileSync(path.join(__dirname, "../.github/workflows/docker.yml")), original);
-});
-
 function redirected(location = "https://pkg-containers.githubusercontent.com/blob", mode = "normal") {
   const a = artifact(), m = mock(a); let redirects = 0;
   const response = (b, status = 200, headers = {}) => new Response(b, { status, headers });

@@ -3,6 +3,19 @@ const test = require("node:test"), assert = require("node:assert/strict"), fs = 
 const { checkWorkflow, checkDockerConfig } = require("../tools/engineering/check-ci"), { check } = require("../tools/engineering/assert-tap");
 const workflow = JSON.parse(fs.readFileSync(path.join(__dirname, "../.github/workflows/engineering-verify.yml")));
 test("验证工作流只有隔离分支和读取权限", () => assert.equal(checkWorkflow(workflow), true));
+test("工程门禁 CLI 独立校验自身，不冻结生产工作流或依赖历史 Git 提交", (t) => {
+  const root = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "nocturne-ci-scope-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, "tools/engineering"); fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(root, ".github/workflows"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".github/workflows/engineering-verify.yml"), JSON.stringify(workflow));
+  fs.writeFileSync(path.join(root, ".github/workflows/docker.yml"), "# routine maintenance\n" + fs.readFileSync(path.join(__dirname, "../.github/workflows/docker.yml"), "utf8"));
+  const script = path.join(dir, "check-ci.js");
+  fs.copyFileSync(process.env.NOCTURNE_CI_GUARD_SCRIPT || path.join(__dirname, "../tools/engineering/check-ci.js"), script);
+  const r = require("node:child_process").spawnSync(process.execPath, [script], { cwd: root, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /packages:none/);
+});
 for (const [name, change] of [
   ["job 不可用的 runner context", x => { x.jobs.linux.env.DOCKER_CONFIG = "${{ runner.temp }}/nocturne-docker-${{ matrix.arch }}"; }],
   ["根镜像写权限", x => { x.permissions.packages = "write"; }],

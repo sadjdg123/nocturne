@@ -13,7 +13,7 @@
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
-| **RC.5 `2.0.0-rc.5`（当前候选）** | `v2@c5f36addc2d85b8ed24edb605015b7ff0be9070b` | `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993` | [37917714749](https://github.com/sadjdg123/nocturne/actions/runs/37917714749)（test 510 / 510 → build，双架构） |
+| **[RC.5 `2.0.0-rc.5`（当前候选）](v2.0-rc5-report.md)** | `v2@c5f36addc2d85b8ed24edb605015b7ff0be9070b` | `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993` | [37917714749](https://github.com/sadjdg123/nocturne/actions/runs/37917714749)（test 510 / 510 → build，双架构） |
 | RC.4 `2.0.0-rc.4`（历史基线） | `v2@f51662961ba7a86782cb863104917d75fb587553` | `ghcr.io/sadjdg123/nocturne:sha-f516629@sha256:2c4bf740a106ce78dda34815da9558234e27d0301e397e9dd5c4711e0886b57f` | [37849652604](https://github.com/sadjdg123/nocturne/actions/runs/37849652604)（test 210 / 210 → build） |
 | RC.3 `2.0.0-rc.3` | `v2@e4de70bc25df4bce6b586bdff523a269bae105eb` | `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b` | 37843878107（204 / 204） |
 | RC.2 `2.0.0-rc.2` | `v2@3d5beaf4c5327d02312ab9096e9ba4dc9e095db2` | `ghcr.io/sadjdg123/nocturne:sha-3d5beaf@sha256:08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e` | 37838079107（180 / 180） |
@@ -22,7 +22,7 @@
 
 RC.4 构建后用 GHCR 匿名查询复核过：旧标签仍指向上表的 digest。RC.4 相对 RC.3：`nocturne.js?v=8 → ?v=9`（缓存刷新），按已发布版本检查的缓存刷新测试，健康检查文档改用 `NAS_IP`。`server.js` 和数据格式都没变。详见 `docs/v2.0-rc4-report.md`。
 
-### 0.2 先读这些文件
+### 0.2 查阅入口（按任务读取）
 
 1. `docs/v2.0-rc5-report.md`：当前 RC.5 更新、测试、固定镜像和回滚边界；`docs/v2.0-rc4-report.md` 保留历史记录
 2. 本文第 1–2 节（架构、data 目录、兼容约束）和第 8 节（约定）
@@ -34,11 +34,20 @@ RC.4 构建后用 GHCR 匿名查询复核过：旧标签仍指向上表的 diges
 
 ### 0.3 当前交接与发布边界
 
-1. 用户已确认 RC.4 在 NAS 部署成功、iPhone Safari 正常及重启数据保留；本轮没有访问 NAS。这是用户提供的 RC.4 验收信息，不是未发布修复版的真机验收。
-2. 第一阶段及认证事务边界/退休清理补修已通过用户独立验收。先读 `auth-transactions.md`、`restore-recovery.md`、`stopped-backup.md` 和 `phase2-engineering-report.md`。
+1. 用户已确认 RC.4 在 NAS 部署成功、iPhone Safari 正常及重启数据保留；本轮没有访问 NAS。这是用户提供的 RC.4 验收信息；RC.5 的真机升级结果尚待用户反馈。
+2. 第一阶段及认证事务边界/退休清理补修已通过用户独立验收。相关改动再查阅 `auth-transactions.md`、`restore-recovery.md`、`stopped-backup.md` 和 `phase2-engineering-report.md`。
 3. RC.4 与 RC.5 已加入 `gen-released-assets.js` 与缓存清单。后续每次发布继续登记固定提交；修改被引用资源必须更新缓存 URL，运行生成器 `--check` 和缓存回归。
 4. 测试工作流只允许隔离分支、`contents: read` / `packages: none`，现有生产 `docker.yml` 未改。补齐本机 workflow 权限后，工程 CI [37913738091](https://github.com/sadjdg123/nocturne/actions/runs/37913738091) 通过：原生 amd64/arm64 各 510/510、零失败/零跳过；每架构启动 12/12、工具 102/102、隔离 registry 9/9。三份 job 权限日志只有 Contents/Metadata read，无镜像写权限。
 5. 当前授权允许整理到 v2、更新 RC.5、测试及使用现有 Actions 发布全新 SHA 镜像。日常修复按文首流程执行；main 不修改，旧镜像标签不覆盖，NAS 和生产数据由用户自行操作。
+
+### 0.4 日常最短流程
+
+1. 只读任务相关代码和文档，实施最小改动；普通修复不逐包审批，也不重复接管审计。新功能先讨论，重大高风险修改单独确认。
+2. 本地运行语法检查和对应回归测试，再推送 v2，由现有 CI 做一次全量测试和双架构构建。同一源码没有新失败或疑点，不重复跑整套验收。修复的回归测试仍须证明旧代码失败、新代码通过；认证/存储修复保留相关故障注入。
+3. 认证、持久化、备份恢复、Docker 或平台相关改动，按影响范围补做隔离 Linux 启动、异常重启、恢复或性能验证；第二阶段完整工程矩阵不作为每次小修的前置条件。
+4. 发布前确认新 SHA 标签不存在；发布后确认实际产出只有本次新 SHA 标签，并核对 CI 零失败/零跳过、完整 revision、双架构和 digest。只有修改发布/标签逻辑或出现异常时，才逐一比对全部旧镜像。已有标签禁止覆盖，不重跑已完成的发布。
+5. 交付简要更新说明、CI 链接和 `标签@digest`；故障修复保留必要日志，不默认制作长审计报告、Git bundle、镜像归档或证据压缩包。当前版本和镜像统一查第 0.1 节，历史报告保留当时记录。
+6. 仅文档/开发工具维护不发布产品镜像。现有工作流会被 `test/**` 改动触发，这类无需镜像的维护提交使用 `[skip ci]`，并先完成对应本地验证；不得用于跳过产品改动的发布验证。
 
 ---
 
@@ -132,12 +141,13 @@ data/
 
 ```bash
 npm run check                         # node --check 所有前端 / 后端脚本
-npm test                              # node --test --test-concurrency=1 test/*.test.js（CI 用法；约 4 分钟）
-JSDOM_PATH=… node --test --test-concurrency=4 test/*.test.js   # 本地并行，约 100 秒（用例互相独立：临时 DATA_DIR + 空闲端口）
+npm test                              # node --test --test-concurrency=1 test/*.test.js（CI 用法）
+CI=true JSDOM_PATH=… node --test --test-concurrency=4 test/*.test.js   # 本地全量按需运行，需先准备完整测试环境
 sh test/v2test-kit/run.sh [dash] [busybox]   # tools/v2test 套件沙盒自测（不在 npm test 里）：需要回环别名 sudo ip addr add 192.168.77.10/32 dev lo
 python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归；另有 rollback_drill.py / restore_drill.py / rc_perf.py / https_proxy.py
 ```
 
+- 2026-10-09 本地 Node 22 并行 4 验证：512/512，零失败/零跳过，187.661 秒（日志 `audit-evidence/workflow-simplification/parallel-full.log`，位于仓库父目录）；RC.5 串行本地 510/510 为 507.032 秒、CI 为 461.835 秒。不同测试数/环境的耗时仅供参考；CI 并行尚未验证，保持现状。
 - 已发布 RC.4 历史结果为 210/210。当前修复版结果、平台和日志见第二阶段报告。Linux Alpine 工程 runner 的 dash 与 BusyBox 套件自测各 51/51；旧 Hark 静态 BusyBox 的 39/50 和缺工具 SKIP 只保留为历史环境记录，不能作为当前平台结论。
 - 缓存刷新（RC.4 起）：`test/cache-bust.test.js` 对每个已发布版本检查：URL（路径 + `?v=`）相同，内容就必须相同。清单 `test/fixtures/released-assets.json` 由 `node tools/gen-released-assets.js` 生成，`--check` 只核对。
 - v2test 套件的固定镜像 / 期望版本统一在 `tools/v2test/lib.sh`（`IMAGE_TAG` / `IMAGE_DIGEST` / `EXPECT_VERSION`），套件自测会核对 `EXPECT_VERSION` 与 `package.json` 一致——**发新 RC 后要更新 lib.sh**。
@@ -149,27 +159,27 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
 - 标签：`:latest` 与分支名只在默认分支（main）；`v2` 只产出 `sha-<7 位提交>`；semver tag 产出 `X.Y.Z` / `X.Y`。**镜像标签对应触发构建的代码提交**，之后的仅文档提交不会有镜像。
 - digest：看 build 任务日志里 `docker/build-push-action` 的 `containerimage.digest`（多架构 manifest list）。也可匿名核对（包是公开的）：
   `curl -s "https://ghcr.io/token?scope=repository:sadjdg123/nocturne:pull"` 取 token，再 `curl -sI -H "Authorization: Bearer <token>" -H "Accept: application/vnd.oci.image.index.v1+json" https://ghcr.io/v2/sadjdg123/nocturne/manifests/<tag>` 看 `docker-content-digest`。
-- 当前推送方式为 Git 整提交至 v2，保留已验证修复的清晰历史；不修改 main。发布前以只读 GHCR 查询确认新的 SHA 标签不存在，发布后核对完整 revision、双架构和 digest，并比对旧标签。原 Hark 逐文件 Contents API 流程已退出日常开发。
-- 新 `engineering-verify.yml`：只允许 `verify/phase2-engineering` push，原生 amd64/arm64 runner、完整历史、固定 action SHA、checkout 不保留凭据、独立无认证 Docker 配置。构建使用 `--load`，测试注册表仅内部网络，生产 GHCR 无写权限。
+- 当前推送方式为 Git 整提交至 v2，保留已验证修复的清晰历史；不修改 main。发布前以只读 GHCR 查询确认新的 SHA 标签不存在，发布后核对完整 revision、双架构和 digest，并确认实际仅产出本次新 SHA 标签；发布/标签机制改动或异常时，再比对全部旧标签。原 Hark 逐文件 Contents API 流程已退出日常开发。
+- 按需深度验证的 `engineering-verify.yml`：只允许 `verify/phase2-engineering` push，原生 amd64/arm64 runner、完整历史、固定 action SHA、checkout 不保留凭据、独立无认证 Docker 配置。构建使用 `--load`，测试注册表仅内部网络，生产 GHCR 无写权限。
 - 工程 CI 已实际通过，检出 `d30eca2f32d92e997d65f887612678ac8b275220`；本机补充验收文档提交不改变验证源码。日志/artifacts 校验结果见工程报告和 remote-ci/ 证据。本地可运行 `DOCKER_CONFIG=<无凭据配置目录> sh tools/engineering/verify-local.sh arm64 <日志目录>`。所有 Docker 操作须指向隔离 daemon；不挂载宿主数据或 docker.sock 到容器。
 - 防覆盖辅助模块通过只读 GHCR 与真实隔离 registry 测试，保留供后续使用；本次沿用现有生产 docker.yml，不启用新的发布机制。普通 v2 push 只产出新的 sha-<7 位提交>，不生成 latest/main/v2 或版本别名；不要重跑已完成的发布来覆盖已有标签。
 
 ## 6. 部署流程（用户在群晖上自己做）
 
-1. 先在 `tools/v2test` 测试站试（另一个端口 8089 + 生产数据的热备份副本，不碰生产 data；见 `tools/v2test/README.md`）。
-2. 用户批准升级后，按 `stopped-backup.md` 先停唯一写入实例，再完整备份、校验和隔离恢复演练；热备份不能作为跨文件事务一致的灾备基准。
+1. 用户自行决定升级。RC.5 这类认证/存储改动先在 `tools/v2test` 副本站验证并做隔离恢复演练（见 `tools/v2test/README.md`）；普通小修不要求重复完整人工验收清单。
+2. 升级前按 `stopped-backup.md` 先停唯一写入实例，再完整备份并校验；热备份不能作为跨文件事务一致的灾备基准。
 3. compose `image:` 写 `标签@digest`，重建；`curl -s "http://$NAS_IP:8088/api/health"` 检查版本（生产端口绑定在 `192.168.50.141:8088`，`NAS_IP` 默认它、以 `sudo docker port nocturne` 为准；**不要用 `127.0.0.1:8088` / `localhost:8088`**，连不上），再登录看空间。
 4. 回滚前按 `engineering-rollback.md` 检查活动认证事务与离线恢复记录；必须由修复版完成恢复并验证后，才允许旧 RC 接管正常数据，或使用完整升级前备份。
 - RC 之间：`docs/v2.0-upgrade-rc.md`；V1.1 ↔ V2：`docs/v2.0-upgrade-rollback.md`；人工验收：`docs/v2.0-manual-acceptance.md`。
 - 用户提供的最近生产状态为 RC.4 已部署成功；本轮不重新检查或操作生产。实际端口和镜像以用户现场记录为准。
-- 当前候选镜像：**RC.5** `ghcr.io/sadjdg123/nocturne:sha-c5f36ad@sha256:85303abb887ed0ec8dee5865cc5171bda7b4b24036bfde38312022c852d7e993`（CI 37917714749，510/510）。所有版本见第 0.1 节。
+- 当前候选、固定镜像和 CI 统一见第 0.1 节。
 
 ## 7. 已知风险 / 待办
 
-- 用户已提供 RC.4 iPhone Safari/NAS 验收。修复版未发布；其 DSM 宿主脚本、真实磁盘/断电与设备性能仍待另行批准后的用户验收。
+- 用户已提供 RC.4 iPhone Safari/NAS 验收。RC.5 已发布；其 DSM 宿主脚本、真实磁盘/断电与设备性能仍待用户验收反馈。
 - Alpine BusyBox 的离线完整备份/恢复及 dash/BusyBox 沙盒套件已验证；这不能代替 DSM 特定版本 `/bin/sh`、tar/权限模型的实机结论。同步认证事务与大资产删除仍可能阻塞事件循环，性能测量见工程报告。
 - 自动找回只覆盖「最近 20 个版本」内的情况；`RC.1 → V1.1 → 直接升 RC.3 / RC.4` 不会自动找回（RC.1 旧格式旁路不用），需手动「恢复较早的版本」。
-- 缓存刷新清单已包含 RC.4。没有 `?v=` 的资源（字体、图标、manifest、`fonts.css`）靠「内容不变」保证，改它们时要加 `?v=` 或改文件名。RC.1 期间的写入在 `hist` 里没有 `g:2`，无法与 V1.1 写入区分。
+- 缓存刷新清单已包含 RC.1–RC.5。没有 `?v=` 的资源（字体、图标、manifest、`fonts.css`）靠「内容不变」保证，改它们时要加 `?v=` 或改文件名。RC.1 期间的写入在 `hist` 里没有 `g:2`，无法与 V1.1 写入区分。
 - 管理员旁路提示依赖内存诊断（`guardIssues`）：容器重启后诊断清空（启动自愈会重写旁路；若仍写不进去会再次记录）。
 - 未启用 CSP（内联脚本多）；`tools/*.sh` 远端无可执行位。
 - `main` 建议开启分支保护（需要 GitHub 套餐支持）。
@@ -181,4 +191,4 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
 - 不加新功能、不改界面设计，除非用户明确要求；最小改动，沿用已有 toast / 诊断等 UI。
 - 普通修复可在开发分支整理后提交到 v2，测试通过后使用现有 Actions 发布新 SHA 镜像；不修改 main，不覆盖以前的镜像标签。新功能和重大高风险修改先取得用户确认。
 - 永远不碰 NAS / 生产数据；需要真实环境验证时给用户脚本和步骤。
-- 发布后：核对远端完整 SHA、现有 Docker CI 测试/构建结果、GHCR 完整 digest/双架构和旧镜像未变，给用户简要更新说明及人工升级入口；不执行 NAS 升级。
+- 发布后：核对远端完整 SHA、现有 Docker CI 测试/构建结果、GHCR 完整 digest/双架构和仅新增本次 SHA 标签，给用户简要更新说明及人工升级入口；不执行 NAS 升级。
