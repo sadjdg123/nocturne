@@ -1,0 +1,97 @@
+{
+  "name": "Engineering verification (no publication)",
+  "on": {
+    "push": {
+      "branches": [
+        "verify/phase2-engineering"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read",
+    "packages": "none"
+  },
+  "concurrency": {
+    "group": "engineering-${{ github.ref }}",
+    "cancel-in-progress": true
+  },
+  "jobs": {
+    "preflight": {
+      "runs-on": "ubuntu-24.04",
+      "permissions": {
+        "contents": "read",
+        "packages": "none"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "fetch-depth": 0,
+            "persist-credentials": false
+          }
+        },
+        {
+          "run": "node tools/engineering/check-ci.js"
+        },
+        {
+          "run": "node --test test/engineering-ci.test.js"
+        }
+      ]
+    },
+    "linux": {
+      "needs": "preflight",
+      "runs-on": "${{ matrix.runner }}",
+      "timeout-minutes": 40,
+      "permissions": {
+        "contents": "read",
+        "packages": "none"
+      },
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "arch": "amd64",
+              "runner": "ubuntu-24.04"
+            },
+            {
+              "arch": "arm64",
+              "runner": "ubuntu-24.04-arm"
+            }
+          ]
+        }
+      },
+      "env": {
+        "DOCKER_CONFIG": "${{ runner.temp }}/nocturne-docker-${{ matrix.arch }}"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "fetch-depth": 0,
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Fresh Docker configuration",
+          "run": "mkdir -p \"$DOCKER_CONFIG\""
+        },
+        {
+          "name": "Local build, startup, Linux regression and BusyBox",
+          "run": "sh tools/engineering/verify-local.sh \"${{ matrix.arch }}\" \"$RUNNER_TEMP/nocturne-evidence\""
+        },
+        {
+          "name": "Verification evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "with": {
+            "name": "linux-${{ matrix.arch }}",
+            "path": "${{ runner.temp }}/nocturne-evidence",
+            "if-no-files-found": "error",
+            "retention-days": 14
+          }
+        }
+      ]
+    }
+  }
+}
