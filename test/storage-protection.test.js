@@ -42,6 +42,11 @@ for (const file of ["users.json", "sessions.json"]) for (const raw of ["{broken"
 for (const seed of [d => config(d), d => fs.writeFileSync(path.join(d, "sessions.json"), "{}"), d => { config(d); fs.writeFileSync(path.join(d, "users.json"), '{"users":[]}'); }]) {
   test("孤立既有数据不能重新初始化管理员", async t => { const d = temp(t); seed(d); const before = tree(d); const s = await launch(t, d); assert.notEqual(s.child.exitCode, null); assert.notEqual(s.child.exitCode, 0); unchanged(d, before); });
 }
+for (const dir of ["icons", "backup"]) test("孤立 .tmp 后缀账户目录阻断首次初始化 " + dir, async t => {
+  const d = temp(t), sub = path.join(d, dir, "bob.tmp"); fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, "original.json"), "existing account material"); const before = tree(d);
+  const s = await launch(t, d); assert.equal(s.child.exitCode, 2); unchanged(d, before);
+});
 for (const rule of ["read_eacces", "read_eio", "stat_eacces", "stat_eio", "read_enoent"]) {
   test("认证文件读取故障在启动前关闭：" + rule, async t => { const d = temp(t), ctl = path.join(temp(t), "faults"); auth(d); fs.writeFileSync(ctl, rule + " users\\.json$\n"); const before = tree(d); const s = await launch(t, d, faultEnv(ctl)); assert.notEqual(s.child.exitCode, null); unchanged(d, before); });
 }

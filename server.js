@@ -128,7 +128,7 @@ function configShape(d) {
 }
 function entriesStrict(dir, kind) {
   if (storageFaults.has(dir)) throw storageError(dir, kind, storageFaults.get(dir).reason);
-  try { return fs.readdirSync(dir).filter((n) => !n.endsWith(".tmp")); }
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.endsWith(".tmp") || !e.isFile()).map((e) => e.name); }
   catch (e) { if (e.code === "ENOENT") return []; throw storageError(dir, kind, e.code || "READ_FAILED"); }
 }
 function bootstrapEvidence() {
