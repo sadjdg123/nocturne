@@ -1,6 +1,6 @@
 {
   "name": "nocturne",
-  "version": "2.0.0-rc.5",
+  "version": "2.0.0",
   "description": "夜曲 Nocturne · 群晖 NAS 自托管起始页（多用户、配置同步、服务端状态检测）",
   "main": "server.js",
   "private": true,

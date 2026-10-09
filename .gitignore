@@ -5,3 +5,7 @@ data/
 *.tmp
 tools/__pycache__/
 tools/e2e/__pycache__/
+
+# Historical design preview: generated from retained sources
+preview/v2/standalone.html
+preview/v2/__pycache__/

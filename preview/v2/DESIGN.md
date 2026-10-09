@@ -1,6 +1,6 @@
 # 夜曲 Nocturne V2.0 · Midnight Edition — 设计预览说明（阶段 0）
 
-> 状态：**设计预览，待用户确认视觉方向**。不改正式首页 `public/index.html`、不改数据模型、不改 `server.js`、不部署。
+> 状态：**阶段 0 历史设计预览（正式 UI 已实现于 public/）**。不改正式首页 `public/index.html`、不改数据模型、不改 `server.js`、不部署。
 > 基线：`main@3e6da3c`（V1.1）。回滚镜像：`ghcr.io/sadjdg123/nocturne:sha-3e6da3c`。
 
 ## 打开方式
@@ -9,10 +9,10 @@
 | --- | --- | --- |
 | 本地服务 | 在仓库根目录 `python3 -m http.server 8765`，打开 `http://127.0.0.1:8765/preview/v2/index.html` | 字体与壁纸直接引用 `public/` 里的现有资源 |
 | file:// | 直接打开 `preview/v2/index.html` | 可用；Chrome 在 file:// 下可能拦截跨目录字体，会退回系统衬线字体 |
-| 单文件 | `preview/v2/standalone.html`（≈750 KB） | CSS/JS/字体子集/两张壁纸全部内联，零网络请求，适合发到 iPhone 打开 |
+| 单文件 | 本地生成的 `preview/v2/standalone.html`（≈750 KB，不入库） | CSS/JS/字体子集/两张壁纸全部内联，零网络请求，适合发到 iPhone 打开 |
 
 调试参数（仅预览）：`?at=2147` 冻结时钟到 21:47；`#space=s-fun` 直接进入某空间；`?fresh=1` 忽略本机保存的预览空间。
-`standalone.html` 由 `preview/v2/build_standalone.py` 从 `index.html + v2.css + v2.js` 生成（依赖 fontTools + brotli + Pillow）。
+需要单文件分享时运行 `python3 preview/v2/build_standalone.py`；生成文件不作为发布资产维护。`standalone.html` 由 `preview/v2/build_standalone.py` 从 `index.html + v2.css + v2.js` 生成（依赖 fontTools + brotli + Pillow）。
 
 ## 设计主张：深夜观测台
 

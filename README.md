@@ -1,204 +1,56 @@
 # 夜曲 Nocturne
 
-一个跑在群晖 NAS 上的自托管起始页：星空壁纸、分组图标、内网/外网自动选择（随时一键纠正）、服务在线状态、⌘K 快速打开。
-在原来的纯静态页面基础上加了一个零依赖的小后端（Node.js 22，只用内置模块）：
+**V2.0.0 · Midnight Edition**。群晖 NAS 自托管的私人起始页，Node 22 零运行依赖，原生 HTML/CSS/JS，无前端构建步骤。镜像支持 linux/amd64 和 linux/arm64。
 
-- **多账户登录**：首次打开创建管理员，管理员可添加/删除用户、重置密码；每个人有自己的分组和设置。
-- **配置同步**：配置保存在 NAS 上，手机、电脑登录同一账户自动同步；浏览器里仍保留一份离线缓存。
-- **服务端状态检测**：NAS 每 30 秒从内网检测每个服务，所以你在外面用 4G/5G 打开时，状态点也是准的。
-- **容器状态（可选）**：挂载 docker.sock 后，可以给项目「关联容器」，用容器运行状态当作在线依据。
-- **图标代理与缓存**：Iconify 图标经 NAS 代理并缓存到本地，不怕限流；字体也已自托管（子集化，约 0.8MB），不依赖 Google Fonts。
-- **自定义壁纸存成文件**：从相册选的壁纸上传到 NAS（`data/wallpapers/`），配置里只记一个引用，换设备也在。
-- **多设备冲突保护**：另一台设备在这之间改过配置时**不会互相覆盖**，而是弹出冲突面板，由你选择用哪一份；被替换的那份都能在「恢复较早的版本」里找回。配置还会定期留快照。
-- **添加到主屏幕**：带图标与 Web App Manifest，iPhone Safari「添加到主屏幕」后是全屏的「夜曲」。
-- 镜像同时支持 **x86（amd64）** 和 **ARM（arm64）** 群晖。
+- Midnight 与经典外观；手机底栏、场景空间、排序及撤销。
+- 多账户、跨设备配置同步、离线修改、冲突保护与配置快照。
+- 内外网地址选择、搜索别名、⌘K 快速打开、NAS 侧服务状态。
+- 自托管字体、图标代理缓存、自定义图片及 iPhone 主屏幕模式。
+- 损坏文件保护、账户/会话持久事务、完整备份与失败恢复保护。
 
 ![夜曲 Nocturne 桌面截图（示例数据）](docs/screenshot.png)
 
----
+## 部署与首次使用
 
-## 目录
+需要 DSM 7.2+ Container Manager，操作由用户自行完成。
 
-1. [在群晖 Container Manager 部署](#在群晖-container-manager-部署)
-2. [首次使用：创建管理员](#首次使用创建管理员)
-3. [从旧页面迁移配置](#从旧页面迁移配置)
-4. [容器状态（docker.sock，可选）](#容器状态dockersock可选)
-5. [外网访问 / HTTPS（反向代理）](#外网访问--https反向代理)
-6. [网络模式、搜索别名与快速打开（V1.1）](#网络模式搜索别名与快速打开v11)
-7. [更新](#更新)
-8. [备份与恢复](#备份与恢复)
-9. [环境变量](#环境变量)
-10. [本地开发](#本地开发)
+1. 准备项目目录与 data/，复制 docker-compose.yml。
+2. 将 `image:` 替换为 [版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest) 的 V2 正式版固定镜像。模板的 latest 仍是 V1.1，不要用它升级 V2。
+3. 按实际用户设置 PUID/PGID（常见 1026/100），确认端口不冲突，然后创建并启动项目。
+4. 在内网打开 `http://NAS的IP:8088`，创建管理员（新密码 8–200 字）。初始化前不要公开入口，防止他人抢先创建。
+5. 确认健康、配置保存与重启持久性。新安装有副本站工具可选，见 [人工验收](docs/v2.0-manual-acceptance.md)。
 
----
+公开 GHCR 镜像可匿名拉取；自建私有镜像需要用户在 NAS 执行 `docker login ghcr.io`（仅 read:packages），不要把令牌写进 compose 或文档。源码部署时注释 image 并启用模板的 build。
 
-## 在群晖 Container Manager 部署
-
-需要 DSM 7.2 及以上（套件中心里的 **Container Manager**）。两种方式任选其一。
-
-### 方式一：使用构建好的镜像（推荐）
-
-前提：把这个仓库推到你自己的 GitHub，`main` 分支每次推送都会由 GitHub Actions 自动构建镜像并发布到
-`ghcr.io/sadjdg123/nocturne:latest`（只改文档不触发构建；连续推送时只构建最新的一次）。
-仓库是私有的话，镜像默认也是私有的，NAS 拉取会报 `denied` / `unauthorized`。两种办法任选：
-
-- **保持私有（推荐）**：
-  1. GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)** → Generate new token，
-     **只勾 `read:packages`**，复制生成的 token。
-  2. 控制面板 → 终端机和 SNMP → 启用 SSH，用 SSH 登录 NAS，执行：
-     ```bash
-     sudo docker login ghcr.io -u sadjdg123
-     # Password 处粘贴上一步的 token（不是 GitHub 密码）
-     ```
-     登录信息保存在 NAS 上，之后 Container Manager 的「项目」创建和「更新」都能正常拉取。
-  3. 也可以在 Container Manager → 注册表 → 设置 → 新增，填 `https://ghcr.io`、用户名和上面的 token
-     （这条路径**未实测**，不行就用 SSH 的方式）。
-- **改成公开**：GitHub → 你的头像 → Packages → nocturne → Package settings，把可见性改为 **Public**
-  （任何人都能拉取镜像，镜像里包含全部代码）。
-
-1. 打开 **File Station**，在 `docker` 共享文件夹里新建文件夹 `nocturne`，再在里面新建 `data` 文件夹。
-2. 把本仓库的 `docker-compose.yml` 上传到 `/docker/nocturne/`，用文本编辑器把
-   `sadjdg123` 改成你的 GitHub 用户名（**全部小写**）。
-3. 打开 **Container Manager → 项目 → 新增**：
-   - 项目名称：`nocturne`
-   - 路径：选择 `/docker/nocturne`
-   - 来源：选择「使用现有的 docker-compose.yml」
-4. 一路下一步，勾选「项目创建完成后启动」，完成。
-5. 浏览器打开 `http://NAS的IP:8088`。
-
-> 如果 8088 端口被占用，把 compose 里的 `"8088:8080"` 左边的数字改成别的端口。
-
-> **健康检查用哪个地址**：`ports` 若绑定到具体 IP（例如本项目生产环境是 `"192.168.50.141:8088:8080"`），NAS 上访问 `127.0.0.1:8088` / `localhost:8088`
-> 会被拒绝（不代表容器坏了），要用绑定的那个 IP：
->
-> ```sh
-> NAS_IP=${NAS_IP:-192.168.50.141}      # 以 sudo docker port nocturne 8080/tcp 的输出为准（例：8080/tcp -> 192.168.50.141:8088）
-> curl -s "http://$NAS_IP:8088/api/health"
-> ```
->
-> 下文所有「检查 `/api/health`」都指这条命令（输出 `0.0.0.0:8088` 时表示绑定所有地址，用 NAS 的内网 IP 即可）。
-
-> **数据文件的属主**：容器默认以 uid/gid `1000:1000` 写 `data/`（文件权限 0600）。如果你想用 File Station / SMB
-> 直接复制或查看 `data/`，可以在 compose 的 `environment` 里加上你自己的 uid/gid，群晖常见是：
-> ```yaml
->       - PUID=1026
->       - PGID=100
-> ```
-> （SSH 执行 `id 你的用户名` 可以查到）。重启容器后会自动把 `data/` 改成这个属主。Hyper Backup 以 root 运行，不受影响。
-
-### 方式二：在 NAS 上从源码构建
-
-适合不想用 GitHub 的情况。
-
-1. 把整个项目文件夹（包含 `Dockerfile`、`server.js`、`public/` 等）上传到 `/docker/nocturne/`。
-2. 编辑 `docker-compose.yml`：注释掉 `image:` 这一行，取消注释 `# build: .`。
-3. 按方式一的第 3、4 步创建项目，Container Manager 会在 NAS 上构建镜像（第一次需要几分钟，要能访问 Docker Hub）。
-
-### 网络说明
-
-默认的 bridge 网络就够用：状态检测是由容器直接访问你填写的**内网 IP**（例如 `http://192.168.1.20:8096`），
-容器能访问到局域网。只有当你用 `localhost` / `127.0.0.1` 来填写服务地址时，才需要改成 `network_mode: host`
-（这时端口映射失效，直接访问 `http://NAS的IP:8080`）。
-
-> 💡 **内网地址建议填 IP**（如 `http://192.168.1.20:5000`），不要填 `xxx.local`：群晖的 `.local` 名字靠 Bonjour（mDNS），
-> Mac / iPhone 的浏览器能解析，但容器里解析不了。遇到解析不了的 `.local` 地址，夜曲会改用浏览器自己检测，不会误报离线，
-> 但只有填 IP 才能由 NAS 统一检测。
-
----
-
-## 首次使用：创建管理员
-
-第一次打开页面时还没有任何账户，会显示「**创建管理员**」界面：输入用户名（字母、数字、`.` `_` `-`）和至少 8 位的密码即可，创建后自动登录。
-新建用户、修改 / 重置密码同样要求至少 8 位（最长 200 位，欢迎用密码管理器生成长密码）；升级前设置的 6–7 位旧密码**照常能登录**，不会被强制修改，建议有空时改长一点。
-
-> ⚠️ 在创建管理员之前，任何能访问这个地址的人都能抢先创建。请**先在内网完成初始化，再开放外网访问**。
-
-之后：
-
-- **设置 → 账户**：查看当前账户、修改自己的密码、退出登录。
-- 管理员在同一页可以**添加用户**（可设为管理员）、**重置密码**、**删除用户**（会同时删除该用户的配置）。
-- 修改或重置密码后，该账户在其他设备上的登录会失效，需要重新登录。
-- 连续输错密码 5 次，该 IP 会被锁定 10 分钟；另外同一个用户名 15 分钟内输错 10 次（不论来自哪个 IP），
-  这个用户名会对**陌生的外网设备**暂停登录 15 分钟（第 5 次起每次会逐渐变慢）。只影响这一个用户名，其他账户照常登录。
-  - 计数在校验密码**之前**就记上，同一 IP、同一用户名同时最多 2 个登录请求在处理，并发爆发也绕不过去（多的直接返回 429）。
-  - **别人锁不住你**：从内网地址登录、或这台浏览器以前登录成功过（会留一个 1 年有效的「已知设备」HttpOnly Cookie，
-    服务器只存它的哈希），都不受用户名封禁限制，只会逐渐变慢。带着有效「已知设备」Cookie 的登录也不受按 IP 的锁定
-    （反向代理没配置 `TRUSTED_PROXY_CIDRS` 时，外网访客会共用代理的 IP，别人试错不该把你也锁在外面）；其他请求按 IP 锁定照常生效。
-  - 「内网地址」按**判定出的真实客户端 IP** 算（见「外网访问 / HTTPS」）；请求带着转发头、但直连的对端不是可信代理时，不算内网。
-  - 修改 / 重置密码、删除用户后，该账户所有「已知设备」都会作废（改密码的这台设备会重新获得一个）。
-- 登录状态保存 30 天（使用中会自动续期）。
-
-只在家里内网使用、不想要登录？设置环境变量 `NOCTURNE_NO_AUTH=1`，所有人共用一份配置。**不要在开放外网时这样做。**
-
----
-
-## 从旧页面迁移配置
-
-旧版起始页把配置存在浏览器的 localStorage 里，而 localStorage 是**按网址隔离**的：换了地址（例如从
-`file://` 或别的网址换到 `http://NAS:8088`），新页面读不到旧数据。所以推荐：
-
-1. 在**旧页面**：设置 → 数据 → **导出配置**，得到一个 `yeqv-backup-日期.json`。
-2. 在**新页面**登录后：设置 → 数据 → **导入配置**，选择刚才的文件。导入后会自动同步到 NAS。
-
-自动迁移：如果新页面和旧页面是**同一个网址**（例如你原来就在 `http://NAS:8088` 上用旧版），第一次登录时，
-若服务器上还没有你的配置，会自动把浏览器里已有的配置上传到 NAS，无需手动操作。
-
----
-
-## 容器状态（docker.sock，可选）
-
-在 `docker-compose.yml` 里取消注释这一行：
-
-```yaml
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+```sh
+sudo docker port nocturne 8080/tcp
+NAS_IP=${NAS_IP:-192.168.50.141} # 替换为实际绑定 IP
+curl -s "http://$NAS_IP:8088/api/health"
 ```
 
-重新构建/启动项目后，**管理员**编辑项目时「更多」里会出现「**关联容器**」输入框（带容器名称提示）。
-当某个项目没有可检测的网址，或者 HTTP 检测失败（连接不上）时，会改用该容器是否 `running` 作为在线状态。
-没有挂载 docker.sock 时，这个功能会自动隐藏，不影响其他功能。
+端口绑定到具体 IP 时 localhost/127.0.0.1 不可达，应使用绑定 IP。bridge 网络通常足够；服务地址用 NAS 可达的内网 IP，容器一般不能解析 Bonjour `.local`。不直接暴露应用端口到公网。
 
-**权限**：容器清单（`/api/docker`）和「关联容器」只对管理员开放。普通账户请求容器清单会得到 403，
-它的项目即使填了容器名，也不会用容器状态（否则填个名字就能探出 NAS 上任意容器在不在跑）。
+### 账户与迁移
 
-> 🔐 **安全说明**：能访问 docker.sock 就等于拥有 NAS 上 Docker 的完全控制权（相当于 root）。
-> `:ro` 只是让挂载点只读，**并不能**阻止通过这个 socket 调用 Docker API。夜曲本身只会读取容器列表
-> （`GET /containers/json`），但如果夜曲被攻破，攻击者理论上可以控制所有容器。
-> **`:ro` 挂载的 docker.sock 依然等同 root 权限。** 只在你信任的网络环境里开启；更稳妥的做法是（可选，默认不启用）
-> 使用 [tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)，只开放 `CONTAINERS=1`
-> （其余 `POST=0`、`IMAGES=0`、`EXEC=0` 等保持默认关闭），夜曲**不挂载** docker.sock，改设
-> `DOCKER_SOCK=tcp://docker-proxy:2375`（`DOCKER_SOCK` 也支持 unix socket 路径）。代理容器不要映射端口到宿主机，只放在同一个 compose 网络里：
->
-> ```yaml
->   docker-proxy:
->     image: tecnativa/docker-socket-proxy
->     restart: unless-stopped
->     environment:
->       - CONTAINERS=1
->     volumes:
->       - /var/run/docker.sock:/var/run/docker.sock:ro
-> ```
->
-> 容器内进程以非 root 的 `node` 用户运行；启动脚本会自动把它加入 docker.sock 所属的用户组以便读取。
+设置 → 账户 可修改密码、退出、由管理员管理用户。密码修改后其他设备会话失效；已有旧短密码仍可登录。登录失败有 IP/账户限流，可信客户端地址与已知设备按已有规则处理；默认会话有效期 30 天。公网私人首页保持认证开启，不设置 `NOCTURNE_NO_AUTH=1`。
 
----
+旧静态页迁移：在旧地址导出配置，再在新地址登录并导入（localStorage 按网址隔离）。同地址且服务器无配置时会迁移已有本机配置；迁移兼容代码保留。
+
+### 可选容器状态
+
+默认不挂载 Docker socket。需要时按模板挂载，只有管理员可列容器与关联项目。**docker.sock 的 :ro 挂载仍可调用 Docker API，等同 Docker 管理权限**；仅在可信环境启用，或使用限制 API 的 socket proxy 并通过 DOCKER_SOCK 配置。此功能不影响普通 HTTP 状态检测。
 
 ## 外网访问 / HTTPS（反向代理）
 
 不要把 8088 端口直接暴露到公网，建议走 HTTPS 反向代理：
 
-**群晖自带反向代理**：控制面板 → 登录门户 → 高级 → 反向代理服务器 → 新增
+TLS 在反向代理终止，夜曲上游为 HTTP。代理目标须使用容器地址或实际绑定的 NAS IP；端口绑到具体 IP 时不要使用 localhost。
 
-| 项目 | 来源 | 目的地 |
-| --- | --- | --- |
-| 协议 | HTTPS | HTTP |
-| 主机名 | `home.你的域名.com` | `localhost` |
-| 端口 | 443（或你的外网端口） | 8088 |
+### jingbo.men 私人首页（后续部署）
 
-证书在 控制面板 → 安全性 → 证书 里为该域名配置（可用 Let's Encrypt）。
+本次只发布镜像，不切换域名、Tunnel 或 Sun-Panel。后续应先完成内网管理员初始化，保持夜曲登录开启；现有 Cloudflare Access 入口须仅允许本人身份，不设置 Everyone/Bypass，并确保不能绕过入口直接访问源站。Access 配置与上线验证留到域名切换时执行，参见 [Cloudflare 官方说明](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)。
 
-**Lucky**：Web 服务 → 添加规则 → 反向代理，目标填 `http://NAS的IP:8088`，开启 TLS 即可。
-
-**Cloudflare Tunnel**：在 cloudflared 里把公网主机名指向 `http://nocturne:8080`（同一 Docker 网络）或 `http://NAS的IP:8088`。
+实际切换后检查有效 HTTPS 证书、未授权身份被拒、管理员诊断 `client.https=true`，以及会话和设备 Cookie 均为 `Secure; HttpOnly; SameSite=Lax`；不能用本地测试代替线上结论。
 
 ### 可信代理：`TRUSTED_PROXY_CIDRS`
 
@@ -237,7 +89,7 @@
 | 群晖 DSM 反向代理 → `localhost:8088`（bridge 网络；仅当 `ports` 没有绑定具体 IP 时可用，绑定了如 `192.168.50.141:8088` 就要填那个 IP，见下一行） | Docker bridge 网关，例如 `172.17.0.1`；自定义 compose 网络常见 `172.18.0.1`、`172.19.0.1`… | 诊断里显示的那个网关地址 |
 | 群晖 DSM 反向代理 → `NAS的IP:8088` | NAS 自己的内网 IP（如 `192.168.1.10`），有时也是网关地址 | 诊断里显示的地址 |
 | Lucky（host 网络 / 套件）| 同上：网关地址或 NAS IP | 诊断里显示的地址 |
-| Cloudflare Tunnel（cloudflared 容器在同一 compose 网络） | cloudflared 容器的 IP（如 `172.20.0.3`，重建后可能变化） | 那个网段，例如 `172.20.0.0/16`（只放代理所在的网段） |
+| Cloudflare Tunnel（cloudflared 容器在同一 compose 网络） | cloudflared 容器的 IP（如 `172.20.0.3`，重建后可能变化） | 优先只填该代理 IP；需要 CIDR 时只含受控代理，不信任共享容器网段 |
 
 > ⚠️ 只填你自己的代理。**不要**填 `0.0.0.0/0`，也尽量不要把整个家庭局域网（如 `192.168.1.0/24`）都填进去 ——
 > 列表里的每个地址都可以替任何人「声明」客户端 IP。
@@ -248,7 +100,7 @@
 
 ---
 
-## 网络模式、搜索别名与快速打开（V1.1）
+## 网络模式、搜索别名与快速打开
 
 ### 三态网络：自动 / 优先内网 / 优先外网
 
@@ -295,104 +147,27 @@
 
 ---
 
-## 更新
+## 更新、备份与恢复
 
-- **方式一（镜像）**：Container Manager → 项目 → nocturne → 操作 → **停止**，然后到「映像」里对
-  `ghcr.io/…/nocturne` 点 **更新**（或删除后重新拉取），再启动项目。
-  也可以 SSH 执行：`cd /volume1/docker/nocturne && sudo docker compose pull && sudo docker compose up -d`
-- **方式二（源码）**：用新文件覆盖 `/docker/nocturne/` 里的代码（**不要覆盖 `data/`**），然后在项目里选择 **构建** 再启动。
+当前正式版与历史镜像统一见 [开发交接版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest)。生产固定到 `标签@digest`；SHA 标签按项目约定不覆盖，GHCR 本身不保证标签不可变。`:latest` 跟随 main，仍为 V1.1。
 
-数据都在 `data/`，更新不会丢失配置。
+1. 用户停止唯一写入实例，按 [停写完整备份](docs/stopped-backup.md) 保存并校验整个 `data/`。
+2. 将 compose 的 image 改成目标 `标签@digest`，拉取并重建。
+3. 检查 `/api/health` 版本、登录、空间、配置、壁纸和图标；公网入口检查连接诊断和 Cookie。
 
-### 版本与回滚
-
-镜像标签：`:latest`（跟随 main）、`:sha-xxxxxxx`（每个提交，不可变）、打 `v1.2.3` tag 时还有 `:1.2.3` / `:1.2`。
-CI 只有在 `npm run check && npm test` 通过后才会构建、推送镜像。**生产部署建议固定版本**，不要长期用 `:latest`：
-
-```yaml
-    image: ghcr.io/sadjdg123/nocturne:sha-1a2b3c4   # 或 :1.2.3；也可以用 @sha256:<digest> 固定到不可变摘要
+```sh
+# 唯一写入实例停止后，创建并校验完整备份
+sh tools/backup.sh -o /path/to/backups ./data
+sh tools/verify-backup.sh /path/to/backups/nocturne-backup-<时间>.tar.gz
+# 恢复只写新空目录；--force 会保留原目录，详见恢复手册
+sh tools/restore.sh <备份.tar.gz> <新空目录>
 ```
 
-升级（NAS 上最少步骤）：
+热备份用于日常尽力备份，不能代替跨文件一致的停写灾备基准。完整备份包含账户、会话、配置、空间旁路、图片、固定快照及认证事务/退休清理凭据，不能只复制 users.json/config。恢复失败或中断时保留材料，按 [恢复保护](docs/restore-recovery.md) 处理。
 
-1. **先备份**：停止项目，复制整个 `data/` 文件夹（如 `cp -a data data.bak-$(date +%Y%m%d)`）。
-2. 把 compose 里的镜像标签改成新版本（记下旧标签），`sudo docker compose pull && sudo docker compose up -d`。
-3. 验证：`curl -s "http://$NAS_IP:8088/api/health"`（`NAS_IP` 见「群晖 Container Manager」一节的健康检查说明，生产默认 `192.168.50.141`）返回 `ok`；用浏览器登录，看配置、壁纸、图标和状态点是否正常；反向代理用户检查「连接诊断」。
+正常数据保持 RC.1–RC.5 兼容；旧 RC 不认识新增认证事务材料。**回滚旧版前必须由当前版完成事务恢复并正常停止**，或使用完整升级前备份，见 [工程回滚边界](docs/engineering-rollback.md)、[RC 升级](docs/v2.0-upgrade-rc.md)、[V1.1 ↔ V2](docs/v2.0-upgrade-rollback.md)。
 
-回滚：
-
-1. 停止项目；
-2. compose 里改回旧标签（或旧的 digest）；
-3. 如果新版本已经写过数据而旧版本读不了 / 需要回到升级前的状态：用第 1 步备份的 `data.bak-…` 替换 `data/`；
-4. `sudo docker compose up -d`，再次 `curl -s "http://$NAS_IP:8088/api/health"`。
-
-> 本版本的数据格式向后兼容：配置文件只是多了 `ops`（最近的操作 ID）字段、快照文件名多了类型后缀，旧版本读取时会忽略它们，
-> 所以回滚到旧镜像**一般不需要**恢复 `data/`；旧版本不认识的 `-auto` / `-local` 等快照它仍能列出和恢复。
-
-**从 V1.1 回滚到上一个已验收版本**（`sha-4d85cf3`）：
-
-1. 停止项目，**先备份** `data/`：`cp -a data data.bak-v11-$(date +%Y%m%d)`；
-2. compose 里改成 `image: ghcr.io/sadjdg123/nocturne:sha-4d85cf3`，`sudo docker compose pull && sudo docker compose up -d`；
-3. `curl -s "http://$NAS_IP:8088/api/health"` 检查版本，登录确认配置正常。
-
-V1.1 只新增了项目上的 `aliases` 字段，`data/` 布局不变。回滚后：旧版本会**保留**配置里的 `aliases`（旧版编辑、复制、移动、拖动项目时都原样保留，
-实测通过），只是不显示、不参与搜索、也不校验；再升级回来别名仍在。浏览器里存的网络模式若是「自动」，旧版会把它当作无效值改回「外网」；
-选过「内网」/「外网」的设备不受影响。所以一般**不需要**用备份替换 `data/`——备份是为了万一需要回到升级前的确切状态。
-
----
-
-## 备份与恢复
-
-所有数据都在 compose 文件旁的 `data/` 文件夹：
-
-```
-data/
-├── users.json        账户（密码为 scrypt 哈希）
-├── sessions.json     登录会话
-├── config/<用户名>.json  每个用户的配置
-├── wallpapers/<用户名>.jpg|png|webp  自定义壁纸（从相册上传的图片）
-├── icons/<用户名>/<id>.png|jpg|webp  上传的图标（不再被引用满 24 小时后自动清理）
-├── backup/<用户名>/<时间>-v<版本>-<类型>.json  配置快照，每人最多 30 份 / 共 20MB（「恢复较早的版本」用）
-├── spaces-guard/<用户名>.json  V2：回滚写保护旁路文件（最后一次 V2 写入的空间定义）
-├── pre-v2-snapshot-<时间>/  V2：首次以 V2 启动时写的固定升级前快照（永不轮换）
-└── cache/            图标缓存（可随时删除）
-```
-
-也可以用 `tools/backup.sh` / `verify-backup.sh` / `restore.sh` 做带 sha256 校验的备份与恢复（见文末「V2 的备份、升级与回滚」）。
-
-**配置快照**：以下时刻会把**被替换掉的那个版本**存一份快照（`BACKUP_KEEP`、`BACKUP_MAX_MB` 可调，超出从最旧的删，最新一份永远保留）：
-
-- 普通保存：距上一份快照满 **30 分钟**或相差 **20 个版本**时（定期快照）；
-- 冲突时选「用本机版覆盖」：服务器原来的版本（被覆盖前）；
-- 冲突时选「使用服务器版」：这台设备上的版本（冲突时的本机版本）；
-- 「恢复较早的版本」之前：当前版本（恢复前）。
-
-**找回**：设置 → 账户 → 数据 →「恢复较早的版本」，列表里会标出快照类型，点「恢复」（再点一次确认）即可；恢复前当前版本也会先存一份，可以再换回来。
-快照引用的上传图标不会被清理，恢复后图标仍然在。**壁纸图片不在版本历史里**：快照只记录配置 JSON（壁纸只是一个引用），
-`data/wallpapers/` 里每个账户只保存当前那一张；想保留旧壁纸请自己备份图片。
-
-### 多设备同时编辑
-
-每次保存都会带上「这份修改基于服务器的哪个版本」。如果另一台设备在这之间改过配置，NAS **不会覆盖**，而是让这台设备弹出「配置冲突」面板（同步暂停，本机修改仍保存在本机）：
-
-- **使用服务器版**：换成另一台设备的版本；本机这份先存入快照，可以随时找回。
-- **用本机版覆盖**：用这台设备的版本；服务器上的版本先存入快照。确认前若服务器又被改了，会再提示一次。
-- **导出本机版**：把本机这份下载成 JSON 文件留存（面板不关闭，之后再选上面两项之一）。
-- **稍后处理**：先关掉面板，之后可从提示里的「处理冲突」重新打开；处理之前这台设备不会同步。
-
-> 这是行为变化：旧版会直接用后保存的一方覆盖，再提示「改用服务器版」。
-
-同一份修改重复送达（页面关闭前的后台发送其实成功了、但没来得及确认，下次打开又补发）不会产生新版本，也不会误报冲突：
-每次推送带一个操作 ID，服务器记住最近 50 个。**设备本地状态不参与同步**：内网/外网切换、「最近使用」只保存在当前设备上，
-切换或点击不会产生新版本，也不会和其他设备冲突（这也意味着「最近使用」不再跨设备同步）。断网 / 页面在后台时的修改先存在本机，
-联网后自动补推；从服务器拉取时，本机有未同步的修改就不会被覆盖。
-
-备份：直接复制整个 `data/` 文件夹（Hyper Backup 勾选 `/docker/nocturne` 即可）。
-恢复：停止容器 → 放回 `data/` → 启动。
-单个用户也可以随时在 设置 → 数据 → 导出配置 做一份 JSON 备份（上传的图标会内嵌进去；**自定义壁纸文件不包含在导出里**，
-换实例后需要重新设置壁纸，找不到壁纸文件时页面会显示默认壁纸）。
-
----
+配置保存有版本冲突保护、最近 50 个操作去重和快照环。冲突时可使用服务器版、以本机版覆盖、导出或稍后处理；覆盖和恢复之前均保留当前快照。设置 → 账户 → 数据 →「恢复较早的版本」可找回配置。**壁纸历史不在快照环中**，应保存完整备份。配置 JSON 导出含上传图标，但不包含自定义壁纸文件。
 
 ## 环境变量
 
@@ -424,117 +199,27 @@ data/
 
 ---
 
-## 状态检测规则
+## 开发与维护
 
-- 每个项目优先检测**内网地址**，没有则检测外网地址；多个用户里相同的地址只检测一次。
-- 发送 HTTP 请求，4 秒超时，默认**忽略证书错误**（自签名证书也算在线，`PROBE_TLS_STRICT=1` 可改为校验）；任何 `< 500` 的响应都算在线，并记录响应耗时。
-- 返回 **401 / 403** 的服务显示为「在线 · 需登录」（琥珀色状态点），同样计入在线数。
-- 安全边界：主机名会先解析，所有解析结果都要通过检查，且只连接检查过的地址。**永远不探测**链路本地地址
-  （`169.254.0.0/16`、`fe80::/10`，包括云服务器元数据 `169.254.169.254`）、`metadata.google.internal` 等元数据主机名、
-  `0.0.0.0`，以及 Nocturne 自己的端口；内嵌 IPv4 的 IPv6 地址（`::ffff:a.b.c.d`、`::a.b.c.d`、NAT64 `64:ff9b::/96`）按内嵌的 IPv4 检查。
-  这些项目的状态是 `blocked`，页面上显示灰色状态点「未检测」，不计入在线 / 离线数。
-- 只看第一个响应的状态码，**不跟随重定向**（重定向目标不会被请求，也就绕不过上面的检查）。
-- **普通（非管理员）账户**：只有管理员能决定 NAS 主动去访问哪里。普通账户的项目地址，只有匹配 `PROBE_ALLOW` 时才由 NAS 探测；
-  默认（`PROBE_ALLOW` 为空）NAS 不会替普通账户发任何请求（连 DNS 都不查），这些项目改由浏览器自己检测（和 `.local` 一样），
-  也拿不到管理员对同一地址的检测结果。每轮每个账户最多 `PROBE_MAX_PER_USER`（默认 200）个地址。
-  单人使用（只有一个管理员账户）时没有任何变化。
-- `xxx.local` 在容器里解析失败时，NAS 不返回这一项，页面改用浏览器自己检测（见上面「网络说明」，建议填 IP）。
-- 全部服务都离线时，状态卡片只显示一句提示（多半是地址还没填，或当前网络到不了）；桌面版的离线芯片可以直接点开对应服务。
-- `example.com` 等保留域名（默认示例数据）直接视为离线，不发请求。
-- 页面每 30 秒从 NAS 拿一次结果；刚添加的项目在 NAS 检测到之前，会先用浏览器自己检测。
-
-## 接口一览
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/health` | 健康检查（容器 HEALTHCHECK 使用）；管理员登录时多一个 `client` 字段（直连对端 / 识别出的客户端 IP / 是否 HTTPS），用来确定 `TRUSTED_PROXY_CIDRS`；以及 `guard` 字段（2.0.0-rc.2 起）：`{ok, issues:[{user, kind: "write_failed" \| "stale", at, since?, error?, detail?}]}`，回滚写保护旁路文件写入失败 / 过期时 `ok` 为 `false`（该账户下次写成功或重启自愈后清除；`since` = 这一轮连续写入失败开始的时间，2.0.0-rc.3 起）。2.0.0-rc.3 起管理员页面会据此提示一次（toast + 设置 → 账户的连接诊断行） |
-| GET | `/api/me` | 当前登录状态 |
-| POST | `/api/setup` · `/api/login` · `/api/logout` | 初始化 / 登录 / 退出 |
-| GET / PUT | `/api/config` | 读取 / 保存当前用户配置（带 `version`、`updatedAt`）。PUT **必须**带 `baseVersion`（非负整数，缺失 / 不合法 → 400 `{code:"bad_base_version"}`；服务器还没有配置时任何值都可以，通常是 0）和 `opId`：版本对不上（另一台设备改过）→ **409** `{conflict, version, updatedAt, groups, items}`，不写入；`force: true` + `expectVersion`（409 里的版本）= 明确用本机版覆盖，服务器锁内复核后先存快照再写，又变了就再 409；重复的 `opId` 且内容（键排序后 JSON 的 SHA-256）完全相同 → `{duplicate: true, version, current}`，不产生新版本；同一个 `opId` 却是另一份内容 → **422** `{code:"opid_mismatch"}`，不写入（前端换新 `opId` 正常重推）；内容与服务器相同不升版本；`restore: true` 先存快照再写。保存成功、但回滚写保护旁路文件写不进去（磁盘满 / 权限）时，响应多一个 `guardWarning: "spaces_guard_write_failed"`（2.0.0-rc.2 起；配置照常保存；2.0.0-rc.3 起管理员页面提示一次）。导航地址只收 `http(s)`、搜索模板需 `http(s)` 且含 `%s`、图片地址另有白名单，新出现的不安全地址 → 400 `{invalid:[…]}`（旧值豁免只对「同一个项目 / 搜索引擎 id + 同一个字段 + 完全相同的原值」生效，依据当前配置和备份；新项目、别的字段抄这个值一律 400）。旧版前端的 `replay: true`（无 `opId`）仍按内容指纹返回 `{stale: true}`。`GET /api/config?prev=1` 取最新一份快照。同一用户的写入串行执行。JSON 请求体上限 2MB |
-| POST | `/api/config/stash` | 冲突时「使用服务器版」前，把本机版本存成一份快照（不改当前配置） |
-| GET / PUT(POST) / DELETE | `/api/wallpaper` | 当前用户的自定义壁纸。PUT/POST 请求体为原始图片（`Content-Type` 为 `image/jpeg`、`image/png` 或 `image/webp`，≤15MB）；GET 带 ETag，`?v=` 版本号可长期缓存 |
-| GET | `/api/config/backups` · `/api/config?backup=<id>` | 快照列表（`id`、`version`、`updatedAt`、分组 / 项目数、`kind`：`auto` / `replaced` / `restore` / `local`，新的在前）/ 取其中一份 |
-| POST / PUT / GET / DELETE | `/api/icons` · `/api/icons/<id>` | 上传的图标：POST（服务器生成 id）或 PUT 指定 id，请求体为原始 PNG / JPEG / WebP（≤512KB）；配置里记 `{type:"image", value:"api/icons/<id>"}` |
-| GET | `/api/status` | `{项目ID: {up, status, code, ms, checkedAt}}`，`status` 为 `up` / `auth` / `down` / `blocked` |
-| GET | `/api/docker` | 管理员：容器列表（未挂载 docker.sock 时 `available: false`）；普通账户 403 |
-| GET | `/api/icon/<前缀>/<名称>.svg`、`/api/icon/search?query=…`、`/api/icon?q=…` | Iconify 代理（缓存在 `data/cache`）。搜索参数只认 `query`（≤100 字）/`limit`/`start`/`prefixes`/`prefix`/`category`；上游响应 ≤256KB、8 秒超时、类型须为 SVG / JSON |
-| POST | `/api/password` | 修改自己的密码 |
-| GET / POST | `/api/users` | 管理员：列出 / 添加用户 |
-| POST / DELETE | `/api/users/<名字>/password` · `/api/users/<名字>` | 管理员：重置密码 / 删除用户 |
-
----
-
-## 本地开发
-
-不需要 `npm install`：
-
-```bash
-DATA_DIR=./data node server.js
-# 打开 http://localhost:8080
+```sh
+DATA_DIR=./data node server.js  # http://localhost:8080
+npm run check
+CI=true JSDOM_PATH=/path/to/node_modules/jsdom npm test
 ```
 
-测试（同样不需要安装依赖，用的是 Node 自带的 `node:test`，每个用例用临时 `DATA_DIR` 启动独立的服务器和本地模拟服务）：
+运行不需要 npm install；完整测试需要测试专用 jsdom@24，以及 Python/dash/BusyBox 等环境。CI 安装 jsdom，镜像不包含它。详细开发环境、数据布局、API 和验证范围见 [开发交接](docs/HANDOFF-CODEX.md)。
 
-```bash
-npm run check && npm test
-```
+直接打开 public/index.html 仍支持纯静态模式。字体子集再生成用 tools/subset-fonts.py；不会进入运行依赖。开发流程：相关测试 → v2 → 现有 Actions 全量测试/双架构构建 → 新 SHA 镜像 → 用户自行升级。main 保持 V1.1，不覆盖旧镜像，不操作生产 NAS。
 
-`public/index.html` 直接双击打开也能用（纯静态模式，配置只存在浏览器里，自定义壁纸和上传的图标仍以 data URL 存在本机），和旧版行为一致；
-后端相关逻辑都在 `public/nocturne.js`，只有在由 `server.js` 提供页面时才会启用。
-网络地址选择（`public/netmode.js`）和命令面板排序（`public/cmdrank.js`）是浏览器与 Node 测试共用的纯函数；`A.url(item)` 是唯一的地址选择出口。
+## 安全与维护边界
 
-字体是子集化后的 woff2（界面里出现的所有汉字 + 约 3500 个常用字，生僻字回退到系统宋体）。
-需要重新生成时见 `tools/subset-fonts.py` 顶部说明（开发工具，需要 `pip install fonttools brotli`，运行时不需要）。
+链接仅允许 http/https，旧无效值保留但不可点击；旧 data URL 图片自动迁移。当前有 DENY/nosniff 等响应头，尚未启用页面 CSP（内联脚本多）。认证同步事务的磁盘 I/O 与 DSM 真机性能见 [工程报告](docs/phase2-engineering-report.md)，本地与 Linux 测试不代替真实断电或域名上线验收。
 
-## 安全说明
-
-- **链接地址白名单**：项目的内网 / 外网地址、命令面板打开的地址只允许 `http://` / `https://`；`javascript:`、`data:`、`file:`、`vbscript:`、`blob:`
-  及大小写、空白、控制字符等变体一律无效。添加 / 编辑、导入 JSON、服务器保存、页面渲染、命令面板、自定义搜索引擎都做同一套检查（`public/urlcheck.js`）。
-  旧配置里已有的无效地址不会被删除：页面上它不可点击，编辑时提示「地址无效」，改掉或清空即可。图标的 `data:image/…` 只为兼容旧配置保留（启动 / 同步时会转存成文件）。
-- 内联脚本较多，暂未启用 CSP（以后拆分脚本后再逐步加），已有 `X-Frame-Options: DENY`、`nosniff` 等响应头。
-- 建议（如果 GitHub 套餐支持）给 `main` 开启分支保护：要求 PR 检查（`test` 任务）通过、禁止强推。
+- [正式版发布记录](docs/v2.0.0-report.md)
+- [账户事务](docs/auth-transactions.md)、[恢复保护](docs/restore-recovery.md)、[停写备份](docs/stopped-backup.md)
+- [按需工程验证](docs/engineering-verification.md)、[人工验收](docs/v2.0-manual-acceptance.md)
+- [历史阶段归档](docs/archive/README.md)；RC 报告仍保留在 docs/ 供升级核查。
 
 ## 许可
 
 MIT
-
-## V2.0 · Midnight Edition（v2 分支，RC：2.0.0-rc.3）
-
-> 当前是**候选版（RC）**，只在 `v2` 分支构建 `:sha-<提交>` 镜像，`:latest` 仍是 V1.1。真机 Safari / 群晖 NAS / 真实 HTTPS 尚待人工验收，
-> 建议先用**另一个端口 + 数据副本**的并行容器试用（见 `docs/v2.0-manual-acceptance.md` 第 6 节）。
-
-主要变化：
-
-- **新版外观（Midnight）**默认开启；设置 → 外观 → 界面 可随时切回「经典」（只影响这台设备，数据和功能完全相同）。
-- **场景空间**：左侧（手机为底栏）切换「全部 / 日常 / 娱乐 / NAS …」，「管理空间」新建、排序、删除；切换空间不写服务器。
-- **删除语义**：「从当前空间移除」只影响该空间；「从所有空间删除」两步确认并点名受影响的空间；都可撤销。
-- **可信状态**：在线 · 延迟 / 离线 / 需登录，系统状态卡汇总；三态网络（自动 / 优先内网 / 优先外网）。
-- **手机合并底栏**：空间、快速打开、更多合在一条底栏里；快捷键 `⌘K` / `/` 命令面板、`⌘E` 编辑、`⌘,` 设置、`⌥1…9` 切空间。
-- **回滚写保护**：回滚到 V1.1 期间被旧版覆盖掉的空间，再升级时自动找回（先存 `-guard` 快照，页面提示一次）；首次以 V2 启动时写一份固定的升级前快照 `data/pre-v2-snapshot-<时间>/`。
-- **独立备份工具**：`tools/backup.sh` / `tools/verify-backup.sh` / `tools/restore.sh`（POSIX sh，群晖 SSH 可直接运行）。
-
-### V2 的备份、升级与回滚
-
-```sh
-# 备份（停容器 → 打包 + sha256 → 自动重新启动）并校验
-sudo sh tools/backup.sh --stop nocturne -o /volume1/backup/nocturne /volume1/docker/nocturne/data
-sh tools/verify-backup.sh /volume1/backup/nocturne/nocturne-backup-<时间>.tar.gz
-# 恢复（目标非空会拒绝；--force 把原目录改名保留后再恢复）
-sh tools/restore.sh [--force] <备份.tar.gz> <目标 data 目录>
-```
-
-升级 / 回滚请把镜像固定到 `标签@digest`。**当前候选、历史镜像和发布报告统一见 [开发交接版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest)**，避免多处复制版本信息。升级前先停写并保留完整备份；回滚旧 RC 前先完成认证事务恢复。
-**已经在跑 RC.1 的 NAS 升级 / 回滚、以及全新安装，按 `docs/v2.0-upgrade-rc.md`**；V1.1 ↔ V2 按 `docs/v2.0-upgrade-rollback.md`。V2 新增的数据：`data/spaces-guard/`（写保护旁路文件）、`data/pre-v2-snapshot-*/`（固定快照）；
-回滚到 V1.1 一般不需要替换 `data/`。
-
-文档：
-
-- `docs/v2.0-upgrade-rc.md` —— **RC.1 → RC.2 / RC.3 升级与回滚**（已部署 RC.1 的群晖：停写完整备份 + 校验、查旁路写入失败日志、按 digest 改镜像、检查、按 digest 回滚 RC.1）+ 全新安装
-- `docs/v2.0-rc4-report.md` —— RC.4 报告：`nocturne.js` 缓存刷新（`?v=9`）、按已发布版本检查的缓存刷新测试、健康检查地址（`NAS_IP`，生产 `192.168.50.141:8088`）、镜像 / CI / 远端核对、全部版本的 digest
-- `docs/v2.0-rc3-report.md` —— RC.3 修复报告：旁路格式校验（P-2 补强）、临时文件撞名（P-3 补强）、管理员提示、镜像 / CI / 远端核对
-- `docs/HANDOFF-CODEX.md` —— 开发交接：架构、data 目录与兼容约束、开发 / 测试、CI/CD、部署流程、已知风险、约定
-- `docs/v2.0-rc2-report.md` —— RC.2 稳定性修复报告：cookie 名前缀（P-1）、回滚写保护旁路一致性（P-2）、原子写入临时文件（P-3）、RC.1 → RC.2 兼容
-- `docs/v2.0-rc-report.md` —— RC 报告：版本 / 镜像、测试、验证矩阵、数据清单、演练结果、性能、Blocking / Non-blocking
-- `docs/v2.0-upgrade-rollback.md` —— **V1.1 ↔ V2** 升级 / 回滚 / 再升级操作手册（群晖 Container Manager；已在 RC.1 上的不用看这份）
-- `docs/v2.0-manual-acceptance.md` —— 人工验收清单（iPhone / Mac Safari、群晖 NAS、HTTPS）+ 并行测试部署提议
-- `docs/v2.0-visual-acceptance.md`、`docs/v2.0-stage1-report.md`、`docs/v2.0-stage2-report.md`、`docs/v2.0-stage3-report.md` —— 各阶段设计与验收

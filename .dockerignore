@@ -8,3 +8,7 @@ docker-compose.yml
 .DS_Store
 docs
 tools
+
+# Development tests and historical prototypes are not runtime assets
+test
+preview
