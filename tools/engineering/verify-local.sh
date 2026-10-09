@@ -18,7 +18,8 @@ node tools/engineering/container-smoke.js "$IMAGE" "$ARCH" "$OUT"
 docker buildx build --platform "linux/$ARCH" --load --tag "$RUNNER" --progress plain --file tools/engineering/runner.Dockerfile . > "$OUT/runner-build.log" 2>&1
 # 仅在临时容器网络命名空间授予 NET_ADMIN，供 RFC1918 回环测试使用；没有 Docker socket/宿主目录挂载。
 node tools/engineering/registry-integration.js "$RUNNER" "$OUT"
-docker create --platform "linux/$ARCH" --name "$NAME" --cap-add NET_ADMIN --network none "$RUNNER" >/dev/null
+# 合成夹具 nas.local 指向容器自身的回环别名，消除外部 DNS 等待；不联系真实 NAS。
+docker create --platform "linux/$ARCH" --name "$NAME" --cap-add NET_ADMIN --network none --add-host nas.local:192.168.77.11 "$RUNNER" >/dev/null
 docker cp . "$NAME:/work"
 docker start "$NAME" >/dev/null
 docker exec "$NAME" sh tools/engineering/linux-suite.sh /evidence
