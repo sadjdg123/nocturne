@@ -1,6 +1,6 @@
 # 夜曲 Nocturne
 
-**V2.1.0 · Midnight Edition**。群晖 NAS 自托管的私人起始页，Node 22 零运行依赖，原生 HTML/CSS/JS，无前端构建步骤。镜像支持 linux/amd64 和 linux/arm64。
+**V2.1.1 · Midnight Edition**。群晖 NAS 自托管的私人起始页，Node 22 零运行依赖，原生 HTML/CSS/JS，无前端构建步骤。镜像支持 linux/amd64 和 linux/arm64。
 
 - Midnight 与经典外观；手机底栏、场景空间、排序及撤销。
 - 多账户、跨设备配置同步、离线修改、冲突保护与配置快照。
@@ -50,7 +50,20 @@ TLS 在反向代理终止，夜曲上游为 HTTP。代理目标须使用容器�
 
 本次只发布镜像，不切换域名、Tunnel 或 Sun-Panel。后续应先完成内网管理员初始化，保持夜曲登录开启；现有 Cloudflare Access 入口须仅允许本人身份，不设置 Everyone/Bypass，并确保不能绕过入口直接访问源站。Access 配置与上线验证留到域名切换时执行，参见 [Cloudflare 官方说明](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)。
 
-实际切换后检查有效 HTTPS 证书、未授权身份被拒、管理员诊断 `client.https=true`，以及会话和设备 Cookie 均为 `Secure; HttpOnly; SameSite=Lax`；不能用本地测试代替线上结论。
+实际切换后检查有效 HTTPS 证书、未授权身份被拒、使用可信代理时管理员诊断 `client.https=true`，以及会话和设备 Cookie 均为 `Secure; HttpOnly; SameSite=Lax`；不能用本地测试代替线上结论。
+
+### 共享 Docker 网关：仅收紧公网 Cookie
+
+Mac 上的 Tunnel 经 NAS 发布端口访问 Bridge 容器时，Docker 网关可能同时代表代理与普通内网请求。不要因此信任共享网关。V2.1.1 可配置：
+
+```yaml
+    environment:
+      - NOCTURNE_SECURE_COOKIE_HOSTS=jingbo.men
+```
+
+只在请求 `Host` 准确匹配配置域名时，为会话和设备 Cookie（包括清除 Cookie）强制添加 `Secure`；保留 `HttpOnly`、`SameSite=Lax` 和 host-only 范围。内网 IP 的 HTTP 登录保持原样。支持逗号或空白分隔的多个域名、大小写和 DNS 末尾点归一化；不含协议、端口、路径、IP 或通配符，错误配置启动退出。
+
+此配置只增加 Cookie 限制，不证明请求实际经过 HTTPS，不改变 `client.https`、真实 IP、代理信任或限流。忽略 `X-Forwarded-Host`。公开域名必须通过 HTTPS 访问，HTTP 下浏览器不会正常使用 Secure Cookie；Cloudflare Access 与源站隔离仍需保留。代理须保留公网 Host。修改后重新登录，再在浏览器开发工具检查两个夜曲 Cookie 的 Secure / HttpOnly / SameSite=Lax；共享网关下 `client.https=false` 是预期结果。
 
 ### 可信代理：`TRUSTED_PROXY_CIDRS`
 
@@ -81,14 +94,14 @@ TLS 在反向代理终止，夜曲上游为 HTTP。代理目标须使用容器�
 
 > 连接诊断：服务器看到的直连地址 **172.17.0.1** → 识别为客户端 172.17.0.1（收到了转发头，但 172.17.0.1 不在 TRUSTED_PROXY_CIDRS 里…）
 
-「直连地址」就是要填的值（也可以访问 `/api/health`，管理员登录时会多出 `client.peer` / `client.ip` 字段；日志里也会提示一次）。
+「直连地址」只有确认仅代表受控代理、没有混入普通请求时才可填写（也可以访问 `/api/health`，管理员登录时会多出 `client.peer` / `client.ip` 字段；日志里也会提示一次）。
 填好、重建容器后再看：应显示「→ 识别为客户端 <你的公网 IP>（经可信代理）」。常见情况：
 
 | 部署方式 | 夜曲看到的直连地址（通常） | 建议填写 |
 | --- | --- | --- |
-| 群晖 DSM 反向代理 → `localhost:8088`（bridge 网络；仅当 `ports` 没有绑定具体 IP 时可用，绑定了如 `192.168.50.141:8088` 就要填那个 IP，见下一行） | Docker bridge 网关，例如 `172.17.0.1`；自定义 compose 网络常见 `172.18.0.1`、`172.19.0.1`… | 诊断里显示的那个网关地址 |
-| 群晖 DSM 反向代理 → `NAS的IP:8088` | NAS 自己的内网 IP（如 `192.168.1.10`），有时也是网关地址 | 诊断里显示的地址 |
-| Lucky（host 网络 / 套件）| 同上：网关地址或 NAS IP | 诊断里显示的地址 |
+| 群晖 DSM 反向代理 → `localhost:8088`（bridge 网络；仅当 `ports` 没有绑定具体 IP 时可用，绑定了如 `192.168.50.141:8088` 就要填那个 IP，见下一行） | Docker bridge 网关，例如 `172.17.0.1`；自定义 compose 网络常见 `172.18.0.1`、`172.19.0.1`… | 先确认网关不混合普通请求；共享网关不应信任 |
+| 群晖 DSM 反向代理 → `NAS的IP:8088` | NAS 自己的内网 IP（如 `192.168.1.10`），有时也是网关地址 | 只在确认仅代表受控代理时填写 |
+| Lucky（host 网络 / 套件）| 同上：网关地址或 NAS IP | 只在确认仅代表受控代理时填写 |
 | Cloudflare Tunnel（cloudflared 容器在同一 compose 网络） | cloudflared 容器的 IP（如 `172.20.0.3`，重建后可能变化） | 优先只填该代理 IP；需要 CIDR 时只含受控代理，不信任共享容器网段 |
 
 > ⚠️ 只填你自己的代理。**不要**填 `0.0.0.0/0`，也尽量不要把整个家庭局域网（如 `192.168.1.0/24`）都填进去 ——
@@ -96,7 +109,7 @@ TLS 在反向代理终止，夜曲上游为 HTTP。代理目标须使用容器�
 >
 > **不配置时的后果**：通过反向代理来的所有访客在夜曲看来都是同一个代理地址：按 IP 的登录限流会合并计算
 > （别人输错 5 次，其他人也要等 10 分钟；你自己的「已知设备」不受影响），「内网不受用户名封禁」的豁免对这些请求**不生效**，
-> 登录 Cookie 也不会带 `Secure`（浏览器到代理这一段仍然是 HTTPS，只是 Cookie 少了这个标记）。直接用内网 IP 访问不受影响。
+> 若未配置 `NOCTURNE_SECURE_COOKIE_HOSTS`，登录 Cookie 也不会带 `Secure`（浏览器到代理这一段仍然是 HTTPS，只是 Cookie 少了这个标记）。直接用内网 IP 访问不受影响。
 
 ---
 
@@ -182,10 +195,11 @@ sh tools/restore.sh <备份.tar.gz> <新空目录>
 | `STATUS_INTERVAL` | `30` | 服务状态检测间隔（秒，最小 10） |
 | `PROBE_TIMEOUT` | `4` | 单次检测超时（秒） |
 | `SESSION_DAYS` | `30` | 登录有效天数 |
-| `NOCTURNE_COOKIE_PREFIX` | `nocturne_` | Cookie 名前缀（2.0.0-rc.2 起）：会话 cookie 叫 `<前缀>sid`、已知设备 cookie 叫 `<前缀>dev`，默认就是原来的 `nocturne_sid` / `nocturne_dev`（改了前缀，所有设备要重新登录一次）。浏览器的 cookie **不按端口区分**：同一主机名下跑两个实例（例如生产 8088 + 测试 8089）时给其中一个换前缀（如 `nocturne_v2test_`），登录和「已知设备」就互不覆盖。只能用字母、数字、`_` `.` `-`，1–32 个字符、以字母或数字开头；不支持 `__Host-` / `__Secure-`（它们要求每个响应都带 `Secure`，本程序只在 HTTPS 请求上加）。不合法时启动报错退出。`HttpOnly` / `SameSite=Lax` / `Secure` 规则不变 |
+| `NOCTURNE_COOKIE_PREFIX` | `nocturne_` | Cookie 名前缀（2.0.0-rc.2 起）：会话 cookie 叫 `<前缀>sid`、已知设备 cookie 叫 `<前缀>dev`，默认就是原来的 `nocturne_sid` / `nocturne_dev`（改了前缀，所有设备要重新登录一次）。浏览器的 cookie **不按端口区分**：同一主机名下跑两个实例（例如生产 8088 + 测试 8089）时给其中一个换前缀（如 `nocturne_v2test_`），登录和「已知设备」就互不覆盖。只能用字母、数字、`_` `.` `-`，1–32 个字符、以字母或数字开头；不支持 `__Host-` / `__Secure-`（它们要求每个响应都带 `Secure`，本程序不能保证所有域名的响应均带 Secure）。不合法时启动报错退出。`HttpOnly` / `SameSite=Lax` / `Secure` 规则不变 |
 | `DOCKER_SOCK` | `/var/run/docker.sock` | Docker socket 路径，或 `tcp://主机:端口`（docker-socket-proxy） |
 | `PROBE_PRIVATE_ONLY` | 未设置 | 设为 `1` 时状态检测**只访问内网地址**（10/8、172.16/12、192.168/16、100.64/10、fc00::/7、回环；`.local` / `.lan` / `.home.arpa` 也必须解析到这些地址）。外网域名会显示为「未检测」。默认不限制，因为外网地址通常就是公网域名 |
 | `PROBE_TLS_STRICT` | 未设置 | 设为 `1` 时校验 HTTPS 证书；默认不校验（家里的自签名证书也算在线） |
+| `NOCTURNE_SECURE_COOKIE_HOSTS` | 空 | 指定准确公网域名的 Cookie 强制 Secure；仅增加限制，不改变 HTTPS/IP/代理判断。内网 IP 的 HTTP 登录保持兼容。见上文 |
 | `TRUSTED_PROXY_CIDRS` | 空（不信任转发头） | 可信反向代理的地址（IP / CIDR，逗号分隔）。只有直连对端在这里面时才读 `X-Forwarded-For` / `X-Real-IP` / `X-Forwarded-Proto`。见「外网访问 / HTTPS」 |
 | `PROBE_ALLOW` | 空 | **普通账户**的项目允许由 NAS 探测的目标：IP / CIDR（所有解析结果都要在范围内）、主机名或 `*.域名`、`*`，都可带 `:端口`，例如 `192.168.1.0/24,nas.lan:5000,*:8096`。空 = 普通账户的地址一律由浏览器自己检测。管理员的项目不受影响 |
 | `PROBE_MAX_PER_USER` / `PROBE_MAX_TOTAL` | `200` / `2000` | 每轮检测：每个账户最多多少个地址 / 总共多少个（多出的地址由浏览器检测） |
@@ -215,7 +229,7 @@ CI=true JSDOM_PATH=/path/to/node_modules/jsdom npm test
 
 链接仅允许 http/https，旧无效值保留但不可点击；旧 data URL 图片自动迁移。当前有 DENY/nosniff 等响应头，尚未启用页面 CSP（内联脚本多）。认证同步事务的磁盘 I/O 与 DSM 真机性能见 [工程报告](docs/phase2-engineering-report.md)，本地与 Linux 测试不代替真实断电或域名上线验收。
 
-- [当前发布记录](docs/v2.1.0-report.md)
+- [当前发布记录](docs/v2.1.1-report.md)
 - [账户事务](docs/auth-transactions.md)、[恢复保护](docs/restore-recovery.md)、[停写备份](docs/stopped-backup.md)
 - [按需工程验证](docs/engineering-verification.md)、[人工验收](docs/v2.0-manual-acceptance.md)
 - [历史阶段归档](docs/archive/README.md)；RC 报告仍保留在 docs/ 供升级核查。

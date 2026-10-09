@@ -362,12 +362,42 @@ function cookieNames(raw) {
 }
 const COOKIE_CFG = cookieNames(process.env.NOCTURNE_COOKIE_PREFIX);
 const COOKIE = COOKIE_CFG.sid || "nocturne_sid";
+/** Cookie 专用域名策略：只增加 Secure，不参与 HTTPS / 客户端 IP / 代理信任判断。 */
+function cookieHostname(raw, allowPort = false) {
+  if (typeof raw !== "string") return "";
+  let host = raw.toLowerCase();
+  if (allowPort && host.includes(":")) {
+    const m = /^([^:]+):([0-9]{1,5})$/.exec(host);
+    if (!m || +m[2] < 1 || +m[2] > 65535) return "";
+    host = m[1];
+  }
+  host = host.replace(/\.$/, "");
+  if (host.length > 253 || net.isIP(host) || !host.includes(".")) return "";
+  return host.split(".").every(x => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(x)) ? host : "";
+}
+function secureCookieHosts(raw) {
+  const hosts = new Set();
+  if (raw == null || !String(raw).trim()) return { hosts };
+  const entries = String(raw).trim().split(/[\s,]+/);
+  for (const entry of entries) {
+    const host = cookieHostname(entry);
+    if (!host) return { hosts, error: "NOCTURNE_SECURE_COOKIE_HOSTS 必须是准确的 DNS 域名（不含协议、端口、路径、IP 或通配符）" };
+    hosts.add(host);
+  }
+  return { hosts };
+}
+const SECURE_COOKIE_CFG = secureCookieHosts(process.env.NOCTURNE_SECURE_COOKIE_HOSTS);
+function secureCookie(req) {
+  // 重复 Host 不用于域名策略；不读取 X-Forwarded-Host 或请求 URL 的 authority。
+  const hostCount = (req.rawHeaders || []).filter((x, i) => i % 2 === 0 && x.toLowerCase() === "host").length;
+  return isHttps(req) || (hostCount === 1 && SECURE_COOKIE_CFG.hosts.has(cookieHostname(req.headers.host, true)));
+}
 /** HTTPS 判定：只有直连对端是可信代理（TRUSTED_PROXY_CIDRS）时才看 X-Forwarded-Proto，否则只认本连接是否加密 */
 function isHttps(req) { return clientInfo(req).https; }
 /** 追加一条 Set-Cookie（同一响应可以设多个 cookie） */
 function addCookie(req, res, name, value, maxAge) {
   const parts = [name + "=" + (value || ""), "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=" + maxAge];
-  if (isHttps(req)) parts.push("Secure");
+  if (secureCookie(req)) parts.push("Secure");
   const prev = res.getHeader("Set-Cookie");
   res.setHeader("Set-Cookie", [...(Array.isArray(prev) ? prev : prev ? [String(prev)] : []), parts.join("; ")]);
 }
@@ -2011,6 +2041,7 @@ const server = http.createServer(async (req, res) => {
 
 function main() {
   if (COOKIE_CFG.error) { console.error(stamp(), "配置错误：" + COOKIE_CFG.error); process.exit(2); }
+  if (SECURE_COOKIE_CFG.error) { console.error(stamp(), "配置错误：" + SECURE_COOKIE_CFG.error); process.exit(2); }
   ensureDirs();
   authStore = createAuthStore(DATA_DIR, { users: usersShape, sessions: sessionsShape });
   try { authStore.recover(); } catch { throw storageError(authStore.journal, "auth-transaction", "RECOVERY_FAILED"); }
@@ -2036,6 +2067,6 @@ function main() {
 }
 if (require.main === module) { try { main(); } catch (e) { if (!e.storage) throw e; console.error(stamp(), "启动已停止：关键持久化数据异常；原文件保留"); process.exitCode = 2; } }
 else module.exports = { // 供 test/ 下的单元测试使用；作为程序运行时不导出
-  cookieNames, normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo, forwardedProto, legacyKey,
+  cookieNames, cookieHostname, secureCookieHosts, normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo, forwardedProto, legacyKey,
   atomicWrite,
 };

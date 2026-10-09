@@ -11,6 +11,7 @@ services:
       - "8088:8080"          # 浏览器访问 http://NAS的IP:8088
     environment:
       - TZ=Asia/Shanghai
+      # - NOCTURNE_SECURE_COOKIE_HOSTS=jingbo.men # 指定域名的 Cookie 强制 Secure；不信任转发头，内网 IP 的 HTTP 登录不受影响
       # - NOCTURNE_NO_AUTH=1   # 关闭登录（仅限纯内网使用）
       # - STATUS_INTERVAL=30   # 状态检测间隔（秒）
       # - PROBE_PRIVATE_ONLY=1 # 状态检测只访问内网地址
