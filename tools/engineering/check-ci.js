@@ -21,7 +21,7 @@ function checkWorkflow(doc) {
     }
   }
   assert.deepEqual(doc.jobs.linux.strategy.matrix.include, [{ arch: "amd64", runner: "ubuntu-24.04" }, { arch: "arm64", runner: "ubuntu-24.04-arm" }]);
-  assert.equal(doc.jobs.linux.env.DOCKER_CONFIG, "${{ runner.temp }}/nocturne-docker-${{ matrix.arch }}");
+  assert.equal(doc.jobs.linux.env.DOCKER_CONFIG, "/tmp/nocturne-docker-${{ github.run_id }}-${{ matrix.arch }}");
   return true;
 }
 function checkDockerConfig(config) {

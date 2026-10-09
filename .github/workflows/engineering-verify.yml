@@ -62,7 +62,7 @@
         }
       },
       "env": {
-        "DOCKER_CONFIG": "${{ runner.temp }}/nocturne-docker-${{ matrix.arch }}"
+        "DOCKER_CONFIG": "/tmp/nocturne-docker-${{ github.run_id }}-${{ matrix.arch }}"
       },
       "steps": [
         {

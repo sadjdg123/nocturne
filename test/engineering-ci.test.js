@@ -4,6 +4,7 @@ const { checkWorkflow, checkDockerConfig } = require("../tools/engineering/check
 const workflow = JSON.parse(fs.readFileSync(path.join(__dirname, "../.github/workflows/engineering-verify.yml")));
 test("验证工作流只有隔离分支和读取权限", () => assert.equal(checkWorkflow(workflow), true));
 for (const [name, change] of [
+  ["job 不可用的 runner context", x => { x.jobs.linux.env.DOCKER_CONFIG = "${{ runner.temp }}/nocturne-docker-${{ matrix.arch }}"; }],
   ["根镜像写权限", x => { x.permissions.packages = "write"; }],
   ["job 写权限", x => { x.jobs.linux.permissions.packages = "write"; }],
   ["main 触发", x => { x.on.push.branches.push("main"); }],
