@@ -1,7 +1,9 @@
 # 夜曲 Nocturne · 开发交接（Codex / 接手者阅读）
 
 一句话：群晖 NAS 自托管起始页。后端 `server.js` 单文件、零依赖（Node 22 内置模块），前端是 `public/` 里的原生 JS / HTML / CSS，没有构建步骤。
-当前维护者为 Codex。可靠性修复已独立验收；发布前工程验证在隔离分支 `verify/phase2-engineering`，测试源码冻结于 `018a696a8b1f6893b714f0d462af22ba0cf0fbc3`。`v2` 暂停推送，`main` 保持 V1.1；已发布候选仍为 **`2.0.0-rc.4`**，开发代码尚无发布镜像。
+当前维护者为 Codex。可靠性修复与原生 Linux 双架构验证已通过，已整理到 `v2`，本次版本为 **`2.0.0-rc.5`**；发布结果见 `docs/v2.0-rc5-report.md`。`main` 保持 V1.1。
+
+用户已简化日常流程：**开发 → 自动测试 → GitHub v2 → 现有 Actions 构建新 SHA 镜像 → 用户人工升级 NAS**。普通修复和日常迭代由 Codex 连续完成；新功能先讨论需求，重大高风险修改单独确认。下方历史阶段报告中的逐阶段批准和 v2 禁推限制已被这一授权取代，不再作为日常发布前置条件。
 
 **三条红线**：不改 `main`（合并需要用户明确批准）；永远不碰生产数据 / NAS（Hark 与开发环境都没有 NAS 访问权，部署由用户自己在群晖上做）；不覆盖已发布的镜像标签。
 
@@ -35,7 +37,7 @@ RC.4 构建后用 GHCR 匿名查询复核过：旧标签仍指向上表的 diges
 2. 第一阶段及认证事务边界/退休清理补修已通过用户独立验收。先读 `auth-transactions.md`、`restore-recovery.md`、`stopped-backup.md` 和 `phase2-engineering-report.md`。
 3. RC.4 已加入 `gen-released-assets.js` 与缓存清单。后续每次发布继续登记固定提交；修改被引用资源必须更新缓存 URL，运行生成器 `--check` 和缓存回归。
 4. 测试工作流只允许隔离分支、`contents: read` / `packages: none`，现有生产 `docker.yml` 未改。补齐本机 workflow 权限后，工程 CI [37913738091](https://github.com/sadjdg123/nocturne/actions/runs/37913738091) 通过：原生 amd64/arm64 各 510/510、零失败/零跳过；每架构启动 12/12、工具 102/102、隔离 registry 9/9。三份 job 权限日志只有 Contents/Metadata read，无镜像写权限。
-5. 后续发布机制启用、版本号、合并、镜像发布和 NAS 升级均须另行批准。禁止直接推送 `v2` / `main`、创建发布标签或覆盖镜像。
+5. 当前授权允许整理到 v2、更新 RC.5、测试及使用现有 Actions 发布全新 SHA 镜像。日常修复按文首流程执行；main 不修改，旧镜像标签不覆盖，NAS 和生产数据由用户自行操作。
 
 ---
 
@@ -146,10 +148,10 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
 - 标签：`:latest` 与分支名只在默认分支（main）；`v2` 只产出 `sha-<7 位提交>`；semver tag 产出 `X.Y.Z` / `X.Y`。**镜像标签对应触发构建的代码提交**，之后的仅文档提交不会有镜像。
 - digest：看 build 任务日志里 `docker/build-push-action` 的 `containerimage.digest`（多架构 manifest list）。也可匿名核对（包是公开的）：
   `curl -s "https://ghcr.io/token?scope=repository:sadjdg123/nocturne:pull"` 取 token，再 `curl -sI -H "Authorization: Bearer <token>" -H "Accept: application/vnd.oci.image.index.v1+json" https://ghcr.io/v2/sadjdg123/nocturne/manifests/<tag>` 看 `docker-content-digest`。
-- 当前推送方式为 Git 整提交，仅隔离开发分支；禁用向 main/v2 及发布标签推送。原 Hark 逐文件 Contents API 流程已退出日常开发。
+- 当前推送方式为 Git 整提交至 v2，保留已验证修复的清晰历史；不修改 main。发布前以只读 GHCR 查询确认新的 SHA 标签不存在，发布后核对完整 revision、双架构和 digest，并比对旧标签。原 Hark 逐文件 Contents API 流程已退出日常开发。
 - 新 `engineering-verify.yml`：只允许 `verify/phase2-engineering` push，原生 amd64/arm64 runner、完整历史、固定 action SHA、checkout 不保留凭据、独立无认证 Docker 配置。构建使用 `--load`，测试注册表仅内部网络，生产 GHCR 无写权限。
 - 工程 CI 已实际通过，检出 `d30eca2f32d92e997d65f887612678ac8b275220`；本机补充验收文档提交不改变验证源码。日志/artifacts 校验结果见工程报告和 remote-ci/ 证据。本地可运行 `DOCKER_CONFIG=<无凭据配置目录> sh tools/engineering/verify-local.sh arm64 <日志目录>`。所有 Docker 操作须指向隔离 daemon；不挂载宿主数据或 docker.sock 到容器。
-- 防覆盖辅助模块通过只读 GHCR 与真实隔离 registry 测试，尚未接入发布工作流。共享发布锁、收敛所有写入者权限及正式工作流变更仍是发布前批准事项，不能把进程内锁当作跨 CI 的原子保护。
+- 防覆盖辅助模块通过只读 GHCR 与真实隔离 registry 测试，保留供后续使用；本次沿用现有生产 docker.yml，不启用新的发布机制。普通 v2 push 只产出新的 sha-<7 位提交>，不生成 latest/main/v2 或版本别名；不要重跑已完成的发布来覆盖已有标签。
 
 ## 6. 部署流程（用户在群晖上自己做）
 
@@ -176,6 +178,6 @@ python3 tools/e2e/rc_regression.py [输出目录]   # Chromium 端到端回归�
 - 提交信息：`<类型>(<范围>): <中文说明>`，类型 `fix` / `test` / `docs` / `tools` / `release`，范围如 `rc3`；修复与回归测试同一提交或紧邻提交，回归测试必须能在旧代码上失败。
 - 文档、报告、界面文字一律简体中文；文档 / 日志 / 报告里不写任何秘密（密码、令牌、会话、哈希）。
 - 不加新功能、不改界面设计，除非用户明确要求；最小改动，沿用已有 toast / 诊断等 UI。
-- 只在独立开发分支；不直接推送/合并 `v2` 或 `main`，不创建发布标签，不发布镜像；正式发布需要用户批准。
+- 普通修复可在开发分支整理后提交到 v2，测试通过后使用现有 Actions 发布新 SHA 镜像；不修改 main，不覆盖以前的镜像标签。新功能和重大高风险修改先取得用户确认。
 - 永远不碰 NAS / 生产数据；需要真实环境验证时给用户脚本和步骤。
-- 测试分支推送后：核对远端完整 SHA 和只读 CI 权限、两个 Linux job、全部日志与零跳过；构建产物仅本地。正式发布流程另行批准，不沿用原自动 push 作为验收步骤。
+- 发布后：核对远端完整 SHA、现有 Docker CI 测试/构建结果、GHCR 完整 digest/双架构和旧镜像未变，给用户简要更新说明及人工升级入口；不执行 NAS 升级。
