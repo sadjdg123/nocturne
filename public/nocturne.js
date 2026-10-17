@@ -292,6 +292,27 @@
     if (snapshot() === raw) ls("del", DIRTY);
   }
   function schedule() { if (!N.user) return; markDirty(); clearTimeout(timer); timer = setTimeout(push, 800); }
+  /** 迁移后的规范化读取只可替换同一份已确认快照；等待期间的新编辑必须保留。 */
+  function canonicalizeAccepted(raw, ver) {
+    var controller = typeof AbortController === "function" ? new AbortController() : null, timeout;
+    var deadline = new Promise(function (resolve) {
+      timeout = setTimeout(function () {
+        resolve(null);
+        if (controller) controller.abort();
+      }, 10000);
+    });
+    return Promise.race([api("GET", "config", undefined, controller ? { signal: controller.signal } : undefined), deadline]).then(function (d) {
+      if (snapshot() !== raw || serverVer !== ver || conflictInfo) return;
+      if (!d || !d.data || d.version < ver) return;
+      A.state = adopt(d.data); A.save(); A.render();
+      markSynced(d.version, snapshot());
+    }).catch(function (e) {
+      if (e && e.status === 401) expired();
+    }).finally(function () {
+      clearTimeout(timeout);
+      if (snapshot() !== lastSent) { markDirty(); dirty = true; }
+    });
+  }
   /** opts.keepalive：页面切到后台时用，body 不超过 60KB 才带 keepalive（超过会被浏览器直接拒绝） */
   function push(opts) {
     opts = opts && typeof opts === "object" && (opts.keepalive || opts.retry) ? opts : {};
@@ -322,11 +343,11 @@
       warned = false; badWarned = false;
       if (d.stale) { lastSent = raw; return pull(true).then(null, function (e) { if (e && e.status === 401) expired(); }); } // 旧版服务器的补推判定
       markSynced(d.version, raw); opDone(raw);
-      if (d.duplicate && d.current > d.version) pull(false).then(null, function () {}); // 这次修改其实早就同步过，之后服务器又有新版本：拉下来（本机若又改过则保留本机）
-      else if (d.migrated) pull(true).then(null, function () {}); // 服务器把旧的 data URL 壁纸 / 图标转成了文件
       if (d.forced) A.toast("已用本机版本覆盖 · 服务器上原来的版本已存入「较早的版本」", { duration: 6000 });
       if (d.guardWarning && N.user && N.user.admin) api("GET", "health").then(function (h) { guardCheck(h, true); }, function () { guardCheck(null, true); });
       setTimeout(pullStatus, 4000); // 新地址由服务器尽快检测
+      if (d.duplicate && d.current > d.version) pull(false).then(null, function () {}); // 这次修改其实早就同步过，之后服务器又有新版本：拉下来（本机若又改过则保留本机）
+      else if (d.migrated) return canonicalizeAccepted(raw, d.version);
     }, function (e) {
       if (restore) restoreNext = true;
       if (e.status === 401) return expired();
@@ -349,7 +370,7 @@
       }
       if (!warned) { warned = true; A.toast(e.status === 413 ? "配置太大，未能同步到 NAS" : "暂时无法同步到 NAS，已保存在本机，稍后自动重试"); }
       setTimeout(schedule, 15000);
-    }).then(function () { inflight = false; if (dirty) schedule(); });
+    }).finally(function () { inflight = false; if (dirty) schedule(); });
   }
   function normalize(s) {
     s.settings = Object.assign(structuredClone(A.defaults.settings), s.settings || {});
