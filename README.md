@@ -15,7 +15,7 @@
 需要 DSM 7.2+ Container Manager，操作由用户自行完成。
 
 1. 准备项目目录与 data/，复制 docker-compose.yml。
-2. 将 `image:` 替换为 [版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest) 的 V2 正式版固定镜像。模板的 latest 仍是 V1.1，不要用它升级 V2。
+2. 模板已固定到 V2.1.2 的已验证镜像；后续按 [版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest) 更新固定镜像。
 3. 按实际用户设置 PUID/PGID（常见 1026/100），确认端口不冲突，然后创建并启动项目。
 4. 在内网打开 `http://NAS的IP:8088`，创建管理员（新密码 8–200 字）。初始化前不要公开入口，防止他人抢先创建。
 5. 确认健康、配置保存与重启持久性。新安装有副本站工具可选，见 [人工验收](docs/v2.0-manual-acceptance.md)。
@@ -162,7 +162,7 @@ Mac 上的 Tunnel 经 NAS 发布端口访问 Bridge 容器时，Docker 网关可
 
 ## 更新、备份与恢复
 
-当前正式版与历史镜像统一见 [开发交接版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest)。生产固定到 `标签@digest`；SHA 标签按项目约定不覆盖，GHCR 本身不保证标签不可变。`:latest` 跟随 main，仍为 V1.1。
+当前正式版与历史镜像统一见 [开发交接版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest)。生产固定到 `标签@digest`；SHA 标签按项目约定不覆盖，GHCR 本身不保证标签不可变。main 是当前正式维护分支；`:latest` 和 `:main` 跟随它最近一次成功构建，历史镜像与回滚记录保留。
 
 1. 用户停止唯一写入实例，按 [停写完整备份](docs/stopped-backup.md) 保存并校验整个 `data/`。
 2. 将 compose 的 image 改成目标 `标签@digest`，拉取并重建。
@@ -223,7 +223,7 @@ CI=true JSDOM_PATH=/path/to/node_modules/jsdom npm test
 
 运行不需要 npm install；完整测试需要测试专用 jsdom@24，以及 Python/dash/BusyBox 等环境。CI 安装 jsdom，镜像不包含它。详细开发环境、数据布局、API 和验证范围见 [开发交接](docs/HANDOFF-CODEX.md)。
 
-直接打开 public/index.html 仍支持纯静态模式。字体子集再生成用 tools/subset-fonts.py；不会进入运行依赖。开发流程：相关测试 → v2 → 现有 Actions 全量测试/双架构构建 → 新 SHA 镜像 → 用户自行升级。main 保持 V1.1，不覆盖旧镜像，不操作生产 NAS。
+直接打开 public/index.html 仍支持纯静态模式。字体子集再生成用 tools/subset-fonts.py；不会进入运行依赖。开发流程：相关测试 → main → 现有 Actions 全量测试/双架构构建 → 新 SHA 镜像 → 用户自行升级。v2 保留既有开发历史；日常修复从 main 开始。不覆盖历史 SHA 镜像，不操作生产 NAS。
 
 ## 安全与维护边界
 

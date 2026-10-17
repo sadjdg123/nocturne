@@ -1,14 +1,14 @@
 # 夜曲 Nocturne · 开发交接
 
-V2.1.2 修复迁移同步期间的新编辑保护，保留 Midnight 布局和公网域名 Secure Cookie 策略；数据、认证和备份恢复沿用 V2.0.0。当前分支 v2，main 保持 V1.1。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
+V2.1.2 修复迁移同步期间的新编辑保护，保留 Midnight 布局和公网域名 Secure Cookie 策略；数据、认证和备份恢复沿用 V2.0.0。main 是当前正式维护入口，已接入 V2.1.2；v2 保留既有开发历史。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
 
-**边界**：不改 main、不覆盖已有镜像标签、不操作 NAS/生产数据。jingbo.men 后续作为本人私人首页；本次不改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
+**边界**：经用户授权，日常修复在 main 维护并使用现有 Actions 发布；不覆盖历史 SHA 镜像标签、不操作 NAS/生产数据。latest/main 是随正式分支更新的浮动镜像标签。jingbo.men 作为本人私人首页；不擅自修改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
 
 ## 0. 维护入口
 
 ### 0.1 版本 / 镜像 / digest
 
-正式版发布结果见 [V2.1.2 发布记录](v2.1.2-report.md)。使用以下固定镜像，latest 仍为 V1.1：
+正式版发布结果见 [V2.1.2 发布记录](v2.1.2-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
@@ -21,7 +21,7 @@ V2.1.2 修复迁移同步期间的新编辑保护，保留 Midnight 布局和公
 | RC.3 `2.0.0-rc.3` | `v2@e4de70bc25df4bce6b586bdff523a269bae105eb` | `ghcr.io/sadjdg123/nocturne:sha-e4de70b@sha256:e37da36ff107dac5df6f6af17c624f06d3ec5a2478b40be6703f80fe75e8d47b` | 37843878107（204 / 204） |
 | RC.2 `2.0.0-rc.2` | `v2@3d5beaf4c5327d02312ab9096e9ba4dc9e095db2` | `ghcr.io/sadjdg123/nocturne:sha-3d5beaf@sha256:08ff9c086757ab68a8d2fbff2ba97bbd8a87f9fe8a6b6aaf162c7a1320e9444e` | 37838079107（180 / 180） |
 | RC.1 `2.0.0-rc.1`（历史基线） | `v2@2ee09835ea780cc2885f389a62b9cde188b13f2e` | `ghcr.io/sadjdg123/nocturne:sha-2ee0983@sha256:85ee7ab40781b3d6284e52a4152f852a8b2e6f27a96e91375f296f13d2d277fa` | — |
-| V1.1 `1.1.x` | `main@3e6da3cf80c59fda12fa0a719afb8745829679b4` | `ghcr.io/sadjdg123/nocturne:sha-3e6da3c@sha256:58a4c8349242ca80ca4a46681410eafcbbb41e0411c3567e3cbef9abff19e861` | — |
+| V1.1 `1.1.x`（历史回滚基线） | `3e6da3cf80c59fda12fa0a719afb8745829679b4` | `ghcr.io/sadjdg123/nocturne:sha-3e6da3c@sha256:58a4c8349242ca80ca4a46681410eafcbbb41e0411c3567e3cbef9abff19e861` | — |
 
 ### 0.2 按任务查阅
 
@@ -33,8 +33,8 @@ V2.1.2 修复迁移同步期间的新编辑保护，保留 Midnight 布局和公
 ### 0.3 最短开发流程
 
 1. 读相关代码，最小修复；本地语法检查与对应回归（旧代码失败、新代码通过）。认证/存储修复保留必要故障注入。
-2. 推 v2，现有 Actions 一次全量测试和双架构构建。相同源码无新问题不重复全量验收；Linux 异常重启、恢复、性能验证按改动影响执行。
-3. 发布前只读确认新 SHA 标签不存在；发布后核对 CI 零失败/零跳过、唯一新 SHA 标签、完整 revision、双架构和 digest。不重跑已完成的发布；发布/标签规则变动或异常时才逐一核对旧标签。
+2. 日常修复推 main，现有 Actions 一次全量测试和双架构构建。相同源码无新问题不重复全量验收；Linux 异常重启、恢复、性能验证按改动影响执行。
+3. 发布前只读确认新 SHA 标签不存在；发布后核对 CI 零失败/零跳过、新 SHA 标签、完整 revision、双架构和 digest。main 构建同时更新 latest/main 浮动标签；历史 SHA 标签不覆盖。不重跑已完成的发布；发布/标签规则变动或异常时才逐一核对旧标签。
 4. 交付简要更新、CI 链接和固定镜像，用户自行升级。仅文档/工具维护无需镜像时先本地验证，提交 [skip ci]；不得跳过产品发布验证。不默认制作长报告或证据包。
 5. 修改静态资源须更新缓存 URL；发布成功后更新 tools/gen-released-assets.js、清单与缓存回归，再以 [skip ci] 登记实际镜像到 tools/v2test/lib.sh 与版本表，不重复构建。
 
