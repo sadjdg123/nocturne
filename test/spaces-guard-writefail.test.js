@@ -11,7 +11,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { startServer, client } = require("./helpers");
+const { startServer, client, waitFor } = require("./helpers");
 const { v11Root } = require("./v11");
 
 const V11 = v11Root();
@@ -198,6 +198,8 @@ test("启动自愈：旁路缺失 / 写坏（半截 JSON）/ 旧格式（RC.1）
   for (const [why, damage] of Object.entries(cases)) {
     damage();
     ({ srv, c } = await run("new", T));
+    const expectedLog = "spaces guard: healed admin v2 (" + why + ")";
+    assert.ok(await waitFor(() => srv.log().includes(expectedLog)), why + "：等待自愈完成日志");
     const log = srv.log();
     await srv.stop();
     assert.ok(log.includes("spaces guard: healed admin v2 (" + why + ")"), why + "：" + log);

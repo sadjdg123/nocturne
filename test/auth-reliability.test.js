@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), os = require("node:os"), crypto = require("node:crypto");
 const { once } = require("node:events"), { spawn } = require("node:child_process");
-const { ROOT, startServer, client, cfg, sleep, freePort } = require("./helpers");
+const { ROOT, startServer, client, cfg, sleep, freePort, waitFor } = require("./helpers");
 const CODE = process.env.NOCTURNE_AUTH_TEST_ROOT || ROOT;
 const PW = "admin-pass-1", BOB = "bob-pass-12", NEW = "changed-pass-12";
 function temp(t) { const d = fs.mkdtempSync(path.join(os.tmpdir(), "nc-auth-")); t.after(() => fs.rmSync(d, { recursive: true, force: true })); return d; }
@@ -154,10 +154,14 @@ test("滑动续期失败不延长磁盘，重试后先持久化再继续使用",
   assert.equal((await c.get("/api/config")).status, 200); assert.ok(JSON.parse(fs.readFileSync(sf))[key].expires > sessions[key].expires);
 });
 test("过期清理写失败不覆盖认证文件，下次清理经事务成功", async t => {
+  let s;
+  t.after(async () => { if (s) await s.stop(); }); // 在 fixture 的临时目录清理钩子之前停止重启进程。
   const f = await fixture(t); await f.srv.stop(); const sf = path.join(f.d, "sessions.json"), sessions = JSON.parse(fs.readFileSync(sf));
   const key = crypto.createHash("sha256").update(f.bob.jar.get("nocturne_sid")).digest("hex"); sessions[key].expires = Date.now() - 1000; fs.writeFileSync(sf, JSON.stringify(sessions));
   const before = fs.readFileSync(sf); fs.writeFileSync(f.ctl, "once_rename sessions\\.json\\.\\d+\\.[0-9a-f]{8}\\.tmp$\n");
-  const s = await startServer({ root: CODE, dataDir: f.d, env: { NODE_OPTIONS: "--require=" + path.join(ROOT, "test/fsfail.js"), FSFAIL_CTL: f.ctl } }); t.after(() => s.stop()); await sleep(2300);
-  assert.ok(fs.readFileSync(sf).equals(before)); const c = client(s.base); for (const [k,v] of f.bob.jar) c.jar.set(k,v); assert.equal((await c.get("/api/config")).status, 401); await sleep(2300);
-  assert.ok(!JSON.parse(fs.readFileSync(sf))[key]);
+  s = await startServer({ root: CODE, dataDir: f.d, env: { NODE_OPTIONS: "--require=" + path.join(ROOT, "test/fsfail.js"), FSFAIL_CTL: f.ctl } });
+  // 先确认故障确已发生并完成回退，再触发重试；固定 sleep 可能在繁忙机器上抢先重置防抖计时。
+  assert.ok(await waitFor(() => !fs.readFileSync(f.ctl, "utf8").trim() && s.log().includes("save sessions")), "首次清理必须实际触发注入故障");
+  assert.ok(fs.readFileSync(sf).equals(before)); const c = client(s.base); for (const [k,v] of f.bob.jar) c.jar.set(k,v); assert.equal((await c.get("/api/config")).status, 401);
+  assert.ok(await waitFor(() => !JSON.parse(fs.readFileSync(sf))[key]), "重试必须实际持久化清理结果");
 });
