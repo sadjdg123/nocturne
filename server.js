@@ -845,8 +845,8 @@ function preV2Snapshot() {
   try {
     const copy = (rel) => {
       const src = path.join(DATA_DIR, rel); let st; try { st = fs.statSync(src); } catch (e) { return; }
-      if (st.isDirectory()) { for (const f of fs.readdirSync(src).sort()) if (!f.endsWith(".tmp")) copy(path.join(rel, f)); return; }
-      if (!st.isFile()) return;
+      if (st.isDirectory()) { for (const f of fs.readdirSync(src).sort()) copy(path.join(rel, f)); return; }
+      if (!st.isFile() || TMP_RE.test(path.basename(rel))) return;
       const buf = fs.readFileSync(src), dst = path.join(tmp, rel);
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.writeFileSync(dst, buf, { mode: 0o600 });
