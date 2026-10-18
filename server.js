@@ -1899,14 +1899,13 @@ async function api(req, res, url) {
     if (m === "GET" || m === "HEAD") {
       const w = findWallpaper(me.name);
       if (!w) return json(res, 404, { error: "没有自定义壁纸" });
-      const etag = '"' + w.st.size.toString(36) + "-" + Math.round(w.st.mtimeMs).toString(36) + '"';
+      const buf = fs.readFileSync(w.file), etag = '"' + sha(buf) + '"';
       const headers = {
         "Content-Type": WP_TYPES[w.ext], ETag: etag, "Last-Modified": new Date(w.st.mtimeMs).toUTCString(), Vary: "Cookie",
-        // 前端用 ?v=<上传时间> 区分版本，同一个 v 的内容不会变
-        "Cache-Control": url.searchParams.has("v") ? "private, max-age=31536000, immutable" : "private, no-cache",
+        "Cache-Control": "private, no-cache",
       };
       if (req.headers["if-none-match"] === etag) { res.writeHead(304, headers); return res.end(); }
-      return send(res, 200, fs.readFileSync(w.file), headers);
+      return send(res, 200, buf, headers);
     }
     if (m === "PUT" || m === "POST") {
       const ct = String(req.headers["content-type"] || "").toLowerCase();
