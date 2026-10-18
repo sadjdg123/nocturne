@@ -69,8 +69,8 @@
     });
   };
   /** 导出时把 NAS 上的图标内嵌成 data URL（导入到别的实例 / 纯静态页也能显示）；壁纸文件太大，不内嵌 */
-  A.exportState = function () {
-    var s = structuredClone(A.state), jobs = [];
+  A.exportState = function (state) {
+    var s = structuredClone(state === undefined ? A.state : state), jobs = [];
     (s.groups || []).forEach(function (g) { (g.items || []).forEach(function (i) {
       var ic = i.icon, v = ic && ic.type === "image" && String(ic.value || "");
       if (!v || !/^api\/icons\//.test(v)) return;
@@ -392,7 +392,7 @@
   }
 
   /* ------------------------------------------------------- 冲突面板 */
-  var cfBack = null, cfSheet = null;
+  var cfBack = null, cfSheet = null, serverChoice = null;
   function fmtWhen(t) {
     var d = new Date(t); if (isNaN(d)) return "";
     var p = function (n) { return (n < 10 ? "0" : "") + n; };
@@ -404,11 +404,12 @@
     var a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
-  function exportLocal() {
-    var name = "yeqv-local-" + stampName() + ".json";
-    return (A.exportState ? A.exportState() : Promise.resolve(A.state)).then(function (st) { downloadJSON(name, st); }, function () { downloadJSON(name, A.state); });
+  function exportLocal(state) {
+    var name = "yeqv-local-" + stampName() + ".json", captured = structuredClone(state === undefined ? A.state : state);
+    return Promise.resolve().then(function () { return A.exportState ? A.exportState(captured) : captured; }).then(function (st) { downloadJSON(name, st); });
   }
   function closeConflict() {
+    serverChoice = null;
     if (!cfSheet) return;
     var sh = cfSheet, bk = cfBack; cfSheet = cfBack = null;
     sh.classList.remove("is-on"); bk.classList.remove("is-on");
@@ -440,7 +441,7 @@
     cfSheet.addEventListener("click", function (e) {
       var b = e.target.closest("[data-cf]"); if (!b || b.disabled) return;
       var a = b.getAttribute("data-cf");
-      if (a === "export") exportLocal().then(function () { A.toast("已导出本机版本"); });
+      if (a === "export") exportLocal().then(function () { A.toast("已发起本机版本文件下载"); }, function (e) { A.toast("无法导出本机版本：" + (e.message || "下载失败")); });
       else if (a === "later") later();
       else if (a === "local") { forceNext = { expect: info.version }; conflictInfo = null; closeConflict(); lastSent = null; push(); }
       else if (a === "server") useServer(b);
@@ -451,21 +452,36 @@
     A.toast("本机修改暂未同步（已保存在本机）", { duration: 10000, action: "处理冲突", onAction: showConflict });
   }
   function useServer(btn) {
-    var raw = snapshot(), all = cfSheet ? cfSheet.querySelectorAll("button") : [];
+    var choice = { raw: snapshot(), baseVersion: serverVer, info: conflictInfo, sheet: cfSheet, localState: structuredClone(A.state) };
+    var all = choice.sheet ? choice.sheet.querySelectorAll("button") : [];
+    serverChoice = choice;
     Array.prototype.forEach.call(all, function (x) { x.disabled = true; });
     btn.textContent = "处理中…";
-    var unlockBtns = function () { Array.prototype.forEach.call(all, function (x) { x.disabled = false; }); btn.textContent = "使用服务器版"; };
-    api("POST", "config/stash", { baseVersion: serverVer, data: JSON.parse(raw) }).then(null, function (e) {
+    var active = function () { return serverChoice === choice && cfSheet === choice.sheet && conflictInfo === choice.info; };
+    var unlockBtns = function () { if (!active()) return; serverChoice = null; Array.prototype.forEach.call(all, function (x) { x.disabled = false; }); btn.textContent = "使用服务器版"; };
+    var keepChoice = function () {
+      if (!active()) return false;
+      if (serverVer === choice.baseVersion && snapshot() === choice.raw) return true;
+      unlockBtns(); A.toast("本机内容已变化，修改已保留，请重新处理冲突");
+      return false;
+    };
+    api("POST", "config/stash", { baseVersion: choice.baseVersion, data: JSON.parse(choice.raw) }).then(function () { return "nas"; }, function (e) {
+      if (!keepChoice()) return;
       if (e.status === 401) throw e;
-      if (e.status === 400 || e.status === 413) return exportLocal().then(function () { A.toast("本机版本无法存到 NAS（" + e.message + "），已导出成文件", { duration: 8000 }); });
+      if (e.status === 400 || e.status === 413) return exportLocal(choice.localState).then(function () { return "download"; });
       throw e;
-    }).then(function () { return api("GET", "config"); }).then(function (d) {
-      if (!d || !d.data) throw new Error("服务器上没有配置");
-      conflictInfo = null; closeConflict();
-      A.state = adopt(d.data); A.save(); A.render();
-      markSynced(d.version, snapshot()); opDone(raw);
-      A.toast("已改用服务器版本 · 本机版本已存入「较早的版本」", { duration: 6000 });
+    }).then(function (destination) {
+      if (!keepChoice()) return;
+      return api("GET", "config").then(function (d) {
+        if (!keepChoice()) return;
+        if (!d || !d.data || !Number.isSafeInteger(d.version) || d.version < choice.baseVersion) throw new Error("服务器配置无效");
+        conflictInfo = null; closeConflict();
+        A.state = adopt(d.data); A.save(); A.render();
+        markSynced(d.version, snapshot()); opDone(choice.raw);
+        A.toast(destination === "nas" ? "已改用服务器版本 · 本机版本已存入「较早的版本」" : "已改用服务器版本 · 已发起本机版本文件下载", { duration: 6000 });
+      });
     }).then(null, function (e) {
+      if (!active()) return;
       unlockBtns();
       if (e.status === 401) return expired();
       A.toast(e.message ? "暂时拿不到服务器版本：" + e.message : "暂时拿不到服务器版本");
