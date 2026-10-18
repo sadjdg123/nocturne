@@ -169,6 +169,35 @@ test("a stalled cache recovery does not block explicit recovery or let its late 
   assert.equal(h.stored("nocturne.ver"), "1");
 });
 
+for (const action of ["reset", "import"]) {
+  test("late recovery GET retains explicit same-content " + action + " before PUT acknowledgement", { skip: SKIP }, async t => {
+    const raw = "{broken", h = await page(t, { backend: true, version: 5, raw, dirty: true });
+    const pending = h.gets()[0], displayed = JSON.stringify(h.A.state);
+    if (action === "reset") h.win.document.querySelector('[data-d="confirm"]').click();
+    else importFile(h, structuredClone(h.A.defaults));
+    await settle();
+    const chosen = JSON.stringify(h.A.state);
+    assert.equal(chosen, displayed, "the explicit choice equals the displayed fallback defaults");
+    assert.equal(h.raw(), chosen);
+    assert.equal(h.stored("nocturne.cacheRecovery"), raw);
+    assert.equal(h.puts().length, 0, "the recovery GET resolves before the save debounce");
+    pending.resolve({ version: 5, data: { settings: { title: "older NAS recovery response" }, groups: [] } });
+    await settle();
+    assert.equal(h.A.state.settings.title, h.A.defaults.settings.title, "the old response cannot replace the explicit choice");
+    assert.equal(JSON.stringify(h.A.state), chosen);
+    assert.equal(h.raw(), chosen);
+    assert.equal(h.stored("nocturne.cacheRecovery"), raw);
+    assert.equal(h.stored("nocturne.dirty"), "1");
+    assert.equal(h.stored("nocturne.ver"), "1");
+    await h.advance(900);
+    assert.equal(h.puts().length, 1);
+    assert.equal(h.puts()[0].body.baseVersion, 5);
+    assert.equal(h.puts()[0].body.data.settings.title, h.A.defaults.settings.title);
+    assert.deepEqual(h.puts()[0].body.data.groups, JSON.parse(chosen).groups);
+    assert.deepEqual(h.errors, []);
+  });
+}
+
 for (const action of ["import", "reset"]) {
   test("validated explicit " + action + " may recover a malformed cache", { skip: SKIP }, async t => {
     const h = await page(t, { backend: true, version: 0, raw: "{broken", dirty: true });
@@ -264,7 +293,69 @@ test("malformed canonical configuration cannot replace an accepted local snapsho
   assert.deepEqual(h.errors, []);
 });
 
-test("legacy import retains supplied identities and extensions while filling missing IDs without collisions", { skip: SKIP }, async t => {
+for (const [label, groupId, itemId] of [["string control", "group", "item"], ["zero group", 0, "item"], ["zero item", "group", 0]]) {
+  test("imported " + label + " remains editable through the actual page controls", { skip: SKIP }, async t => {
+    const h = await page(t), doc = h.win.document;
+    importFile(h, { settings: {}, groups: [{ id: groupId, name: "Imported group", items: [{ id: itemId, title: "Imported item", lan: "http://item.test/" }] }] });
+    await settle();
+    doc.querySelector('.x-menu [data-m="edit"]').click();
+    await settle();
+    assert.equal(doc.body.classList.contains("editing"), true);
+    doc.querySelector("#x-groups a[data-id]").dispatchEvent(new h.win.MouseEvent("click", { bubbles: true, cancelable: true }));
+    await settle();
+    const actions = doc.querySelector(".x-sheet.is-on");
+    assert.ok(actions, "clicking the imported tile offers its item actions");
+    assert.match(actions.textContent, /编辑/);
+    actions.querySelector('[data-i="2"]').click();
+    await settle();
+    assert.equal(h.A.state.groups[0].items.length, 2, "the actual duplicate action finds the imported item");
+    assert.equal(h.A.state.groups[0].items[1].title, "Imported item");
+    const options = doc.querySelector("#x-groups .x-gmore");
+    assert.ok(options, "the imported group offers its group actions");
+    options.click();
+    doc.querySelector('.x-sheet.is-on [data-i="0"]').click();
+    const form = doc.querySelector(".x-sheet.is-on form");
+    assert.ok(form, "the group rename action opens its form");
+    form.querySelector("input").value = "Renamed group";
+    form.dispatchEvent(new h.win.Event("submit", { bubbles: true, cancelable: true }));
+    assert.equal(h.A.state.groups[0].name, "Renamed group");
+    assert.equal(JSON.parse(h.raw()).groups[0].name, "Renamed group");
+    assert.equal(String(h.A.state.groups[0].id), String(groupId));
+    assert.equal(String(h.A.state.groups[0].items[0].id), String(itemId));
+    assert.deepEqual(h.errors, []);
+  });
+}
+
+test("imported numeric engine selection and zero space references retain their identities", { skip: SKIP }, async t => {
+  const h = await page(t), doc = h.win.document, opened = [];
+  h.win.open = (...args) => opened.push(args);
+  importFile(h, {
+    settings: { engine: 0, engines: [{ id: "other", name: "Other", url: "https://other.test?q=%s", on: true }, { id: 0, name: "Zero", url: "https://zero.test?q=%s", on: true }] },
+    groups: [{ id: 0, name: "Referenced group", items: [{ id: 0, title: "Referenced item", lan: "http://item.test/" }] }],
+    spacesVersion: 1, spaces: [{ id: "s-zero", name: "Zero references", groupIds: ["0"], itemIds: ["0"] }],
+  });
+  await settle();
+  assert.equal(h.A.state.settings.engine, "0");
+  assert.equal(h.A.state.settings.engines[1].id, "0");
+  assert.ok(doc.querySelector('#x-engines [data-eng="0"][aria-pressed="true"]'));
+  doc.getElementById("x-q").value = "zero query";
+  doc.getElementById("x-search").dispatchEvent(new h.win.Event("submit", { bubbles: true, cancelable: true }));
+  assert.equal(opened[0][0], "https://zero.test?q=zero%20query");
+  doc.querySelector('[data-eid="other"] .x-en').click();
+  assert.equal(h.A.state.settings.engine, "other");
+  doc.querySelector('[data-eid="0"] .x-en').click();
+  assert.equal(h.A.state.settings.engine, "0");
+  doc.querySelector('[data-space="s-zero"]').click();
+  assert.ok(doc.querySelector('[data-space="s-zero"][aria-current="true"]'));
+  assert.deepEqual([...doc.querySelectorAll("#x-groups .x-group")].map(el => el.getAttribute("data-gid")), ["0"]);
+  assert.deepEqual([...doc.querySelectorAll("#x-groups [data-id]")].map(el => el.getAttribute("data-id")), ["0"]);
+  const saved = JSON.parse(h.raw());
+  assert.deepEqual(saved.spaces[0].groupIds, ["0"]);
+  assert.deepEqual(saved.spaces[0].itemIds, ["0"]);
+  assert.deepEqual(h.errors, []);
+});
+
+test("legacy import canonicalizes numeric identities and retains extensions while filling missing IDs without collisions", { skip: SKIP }, async t => {
   const h = await page(t);
   h.A.util.uid = () => "taken";
   const data = {
@@ -274,8 +365,8 @@ test("legacy import retains supplied identities and extensions while filling mis
   };
   importFile(h, data); await settle();
   assert.equal(h.A.state.settings.title, 7);
-  assert.equal(h.A.state.groups[0].id, 0);
-  assert.equal(h.A.state.settings.engines[0].id, 0);
+  assert.equal(h.A.state.groups[0].id, "0");
+  assert.equal(h.A.state.settings.engines[0].id, "0");
   assert.equal(h.A.state.groups[2].id, "__proto__");
   assert.equal(h.A.state.groups[2].items[0].id, "constructor");
   for (const members of [h.A.state.groups, h.A.state.groups.flatMap(g => g.items), h.A.state.settings.engines]) {

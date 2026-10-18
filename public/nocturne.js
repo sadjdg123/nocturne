@@ -387,11 +387,11 @@
     return s;
   }
   function pull(intent, opts, raw) {
-    var read = { raw: raw === undefined ? snapshot() : raw, baseVersion: serverVer, confirmedRaw: lastSent };
+    var read = { raw: raw === undefined ? snapshot() : raw, baseVersion: serverVer, confirmedRaw: lastSent, cacheRejected: A.cacheRejected };
     if (conflictInfo || snapshot() !== read.raw || (!intent && (read.confirmedRaw === null || read.raw !== read.confirmedRaw))) return Promise.resolve(false);
     return api("GET", "config", undefined, opts).then(function (d) {
       if (!d || !d.data || !Number.isSafeInteger(d.version) || d.version < 0) return false;
-      if (conflictInfo || snapshot() !== read.raw || serverVer !== read.baseVersion || lastSent !== read.confirmedRaw) return false;
+      if (conflictInfo || snapshot() !== read.raw || serverVer !== read.baseVersion || lastSent !== read.confirmedRaw || A.cacheRejected !== read.cacheRejected) return false;
       if (d.version < serverVer || (!intent && d.version === serverVer)) return false;
       acceptConfig(d.data);
       markSynced(d.version, snapshot());

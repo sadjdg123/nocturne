@@ -779,7 +779,7 @@
         document.addEventListener("visibilitychange", function () { if (!document.hidden) tick(); });
       })();
     </script>
-    <script src="nocturne.js?v=2026101803"></script>
+    <script src="nocturne.js?v=2026101804"></script>
     <script>
       /* Stage 2a · edit mode. Uses only the App API.
          "edit-item" / "add-item" listeners set d.handled = true; otherwise a 即将上线 toast shows. */
@@ -2123,7 +2123,7 @@
         }
         function fillIds(list) {
           var seen = new Set();
-          list.forEach(function (item) { if (item.id != null) seen.add(String(item.id)); });
+          list.forEach(function (item) { if (item.id != null) { item.id = String(item.id); seen.add(item.id); } });
           list.forEach(function (item) {
             if (item.id != null) return;
             var base = A.util.uid(), id = base, suffix = 0;
@@ -2149,6 +2149,7 @@
             var items = [];
             merged.groups.forEach(function (g) { if (g.items == null) g.items = []; items = items.concat(g.items); });
             fillIds(merged.groups); fillIds(items); fillIds(merged.settings.engines);
+            if (typeof merged.settings.engine === "number") merged.settings.engine = String(merged.settings.engine);
             if (SPm) SPm.normalize(merged); /* 重名加序号、清悬空引用（文件里没有 spaces = 只有「全部」） */
             if (!window.NocturneConfigShape.valid(merged)) return showErr("文件不是有效的夜曲配置");
             download("yeqv-before-import-" + stamp(true) + ".json");
