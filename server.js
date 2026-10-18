@@ -1058,12 +1058,13 @@ async function iconUsage(name, replaceId) {
   return { count, bytes };
 }
 /** 上传前检查配额；超了先试着清理一次没被引用的旧图标（仍受 24 小时宽限期保护），还超就 413。必须在 withUserLock 里调用。 */
-async function checkIconQuota(name, id, size) {
-  const over = (u) => u.count + 1 > ICON_MAX_FILES || u.bytes + size > ICON_MAX_BYTES;
-  if (!over(await iconUsage(name, id))) return;
-  await cleanupIcons(name).catch((e) => log("icon cleanup", name, e.message));
-  const u = await iconUsage(name, id);
-  if (over(u)) throw Object.assign(new Error("上传的图标已达上限（每个账户最多 " + ICON_MAX_FILES + " 个、共 " + Math.round(ICON_MAX_BYTES / 1048576) + "MB），请先删掉一些不用的图标"), { status: 413, usage: u });
+async function checkIconQuota(name, additions, replaceId, candidate) {
+  if (!additions.count) return;
+  const over = (u) => u.count + additions.count > ICON_MAX_FILES || u.bytes + additions.bytes > ICON_MAX_BYTES;
+  if (!over(await iconUsage(name, replaceId))) return;
+  await cleanupIcons(name, candidate).catch((e) => log("icon cleanup", name, e.message));
+  const u = await iconUsage(name, replaceId);
+  if (over(u)) throw Object.assign(new Error("上传的图标已达上限（每个账户最多 " + ICON_MAX_FILES + " 个、共 " + Math.round(ICON_MAX_BYTES / 1048576) + "MB），请先删掉一些不用的图标"), { status: 413, iconQuota: true, usage: u });
 }
 async function removeIcon(name, id) {
   if (!ICON_ID.test(id)) return;
@@ -1074,32 +1075,35 @@ function allItems(data) {
   for (const g of (data && Array.isArray(data.groups) ? data.groups : [])) for (const it of (g && Array.isArray(g.items) ? g.items : [])) if (it && typeof it === "object") out.push(it);
   return out;
 }
-/** 配置里的 data URL 图标 → 文件。返回改动数量。必须在 withUserLock 里调用。 */
-async function migrateIcons(name, data) {
-  let n = 0;
+async function planIcons(name, data) {
+  let files;
+  try { files = await fsp.readdir(iconDir(name)); } catch (e) { if (e.code !== "ENOENT") throw e; files = []; }
+  const used = iconRefs(data, new Set()), icons = [];
+  for (const f of files) { const m = /^([A-Za-z0-9_-]{16,64})\.(png|jpg|webp)$/.exec(f); if (m) used.add(m[1]); }
   for (const it of allItems(data)) {
     const ic = it.icon;
     if (!ic || ic.type !== "image" || typeof ic.value !== "string" || !ic.value.startsWith("data:")) continue;
     const m = /^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=\s]+)$/i.exec(ic.value);
     if (!m) continue; // SVG 等：保持原样（只在 <img> 里显示，不执行脚本）
     const buf = Buffer.from(m[2], "base64");
-    if (!sniffImage(buf) || buf.length > MAX_ICON) continue;
-    const id = newIconId();
-    try { await storeIcon(name, id, buf); } catch (e) { log("icon migrate", name, e.message); continue; }
+    const ext = sniffImage(buf);
+    if (!ext || buf.length > MAX_ICON) continue;
+    let id; do { id = newIconId(); } while (used.has(id));
+    used.add(id);
+    icons.push({ id, buf, file: path.join(iconDir(name), id + "." + ext) });
     it.icon = Object.assign({}, ic, { value: "api/icons/" + id });
-    n++;
   }
-  if (n) log("icons migrated from data URL", name, n);
-  return n;
+  return icons;
 }
 function iconRefs(data, set) {
   for (const it of allItems(data)) { const m = it.icon && typeof it.icon.value === "string" && ICON_REF.exec(it.icon.value); if (m) set.add(m[1]); }
   return set;
 }
 /** 清理没被当前配置和备份引用的图标文件（尽力而为）。必须在 withUserLock 里调用。 */
-async function cleanupIcons(name) {
+async function cleanupIcons(name, candidate) {
   let files; try { files = await fsp.readdir(iconDir(name)); } catch (e) { return; }
   const refs = iconRefs(readConfig(name).data, new Set());
+  iconRefs(candidate, refs);
   for (const f of await listBackups(name)) iconRefs((readJSON(f, null) || {}).data, refs);
   const markFile = path.join(iconDir(name), ".orphans.json"), marks = readJSON(markFile, {}), now = Date.now(), next = {};
   let changed = false;
@@ -1112,10 +1116,33 @@ async function cleanupIcons(name) {
   }
   if (changed || JSON.stringify(next) !== JSON.stringify(marks)) await writeJSON(markFile, next);
 }
-/** data URL 壁纸 / 图标 → 文件。返回是否改动了 data。必须在 withUserLock 里调用。 */
-async function migrateData(name, data) {
-  const a = await migrateWallpaper(name, data), b = await migrateIcons(name, data);
-  return a || b > 0;
+async function withMigratedData(name, data, save, optional) {
+  const candidate = JSON.parse(JSON.stringify(data)), icons = await planIcons(name, candidate);
+  try {
+    await checkIconQuota(name, { count: icons.length, bytes: icons.reduce((n, icon) => n + icon.buf.length, 0) }, null, candidate);
+  } catch (e) {
+    if (!optional || !e.iconQuota) throw e;
+    log("icon migration skipped (quota)", optional, name, e.message);
+    return save(data, false);
+  }
+  const allocated = [];
+  try {
+    for (const icon of icons) {
+      allocated.push(icon);
+      await storeIcon(name, icon.id, icon.buf);
+    }
+    const wallpaper = await migrateWallpaper(name, candidate);
+    const result = await save(candidate, wallpaper || icons.length > 0);
+    if (icons.length) log("icons migrated from data URL", name, icons.length);
+    return result;
+  } finally {
+    if (allocated.length) {
+      let refs;
+      try { refs = iconRefs(readConfig(name).data, new Set()); }
+      catch (e) { log("icon migration cleanup deferred", name, e.message); }
+      if (refs) for (const icon of allocated) if (!refs.has(icon.id)) await fsp.rm(icon.file, { force: true }).catch((e) => log("icon migration cleanup", name, e.message));
+    }
+  }
 }
 async function migrateAll() {
   for (const name of allUserNames()) {
@@ -1124,7 +1151,7 @@ async function migrateAll() {
       await guardHeal(name).catch((e) => log("spaces guard heal", name, e.message));
       await guardRecover(name).catch((e) => log("spaces guard", name, e.message));
       const cur = readConfig(name);
-      if (cur.data && await migrateData(name, cur.data)) await writeConfig(name, cur.data);
+      if (cur.data) await withMigratedData(name, cur.data, (data, migrated) => migrated ? writeConfig(name, data) : cur, "startup");
     }).catch((e) => { if (!e.storage) log("migrate", name, e.message); }); // 坏账户配置不阻止其他账户，不对坏文件自愈。
   }
 }
@@ -1793,7 +1820,7 @@ async function api(req, res, url) {
       const doc = await withUserLock(me.name, async () => {
         await guardRecover(me.name).catch((e) => log("spaces guard", me.name, e.message));
         const d = readConfig(me.name);
-        return d.data && await migrateData(me.name, d.data) ? writeConfig(me.name, d.data) : d;
+        return d.data ? withMigratedData(me.name, d.data, (data, migrated) => migrated ? writeConfig(me.name, data) : d, "read") : d;
       });
       const rec = guardNotice(me.name);
       return json(res, 200, rec ? Object.assign(publicDoc(doc), { recovered: rec }) : publicDoc(doc));
@@ -1839,7 +1866,7 @@ async function api(req, res, url) {
         const sp = reconcileSpaces(b, cur); // 旧版前端保存时沿用服务器上的空间定义 + 清悬空引用（改了内容 → migrated，前端会重新拉取）
         const spFix = sp.kept || sp.pruned > 0 || sp.restored > 0;
         const spInfo = spFix ? { migrated: true, ...(sp.kept ? { spacesKept: true } : {}), ...(sp.pruned ? { spacesPruned: sp.pruned } : {}), ...(sp.restored ? { spacesRestored: sp.restored } : {}) } : {};
-        const same = () => cur.data && (JSON.stringify(cur.data) === JSON.stringify(b.data) || dataHash(b.data) === currentHash(cur));
+        const same = (data = b.data) => cur.data && (JSON.stringify(cur.data) === JSON.stringify(data) || dataHash(data) === currentHash(cur));
         if (same()) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, ...spInfo };
         const forced = mismatch && b.force === true && b.expectVersion != null && +b.expectVersion === curV;
         if (mismatch && !forced) {
@@ -1847,17 +1874,18 @@ async function api(req, res, url) {
           return { status: 409, error: "另一台设备在这之后改过配置，未覆盖", conflict: true, version: curV, updatedAt: cur.updatedAt,
             groups, items: allItems(cur.data).length, spaces: spacesCount(cur.data), unchanged: true };
         }
-        const migrated = await migrateData(me.name, b.data);
-        if (migrated && same()) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, migrated: true, ...spInfo };
-        // 快照：被强制覆盖 / 恢复较早的版本前，当前版本一定先存一份；普通保存按 30 分钟 / 20 个版本的节奏存
-        if (cur.data) {
-          if (forced) await addBackup(me.name, cur, "replaced");
-          else if (b.restore === true) await addBackup(me.name, cur, "restore");
-          else if (await snapshotDue(me.name, cur)) await addBackup(me.name, cur, "auto");
-        }
-        const doc = await writeConfig(me.name, b.data, opId, inHash);
-        await cleanupIcons(me.name).catch((e) => log("icon cleanup", me.name, e.message));
-        return { version: doc.version, updatedAt: doc.updatedAt, overwrote: forced, ...(forced ? { forced: true } : {}), ...(migrated ? { migrated: true } : {}), ...spInfo, ...(doc.guardWarning ? { guardWarning: doc.guardWarning } : {}) };
+        return withMigratedData(me.name, b.data, async (data, migrated) => {
+          if (migrated && same(data)) return { version: curV, updatedAt: cur.updatedAt, overwrote: false, unchanged: true, migrated: true, ...spInfo };
+          // 快照：被强制覆盖 / 恢复较早的版本前，当前版本一定先存一份；普通保存按 30 分钟 / 20 个版本的节奏存
+          if (cur.data) {
+            if (forced) await addBackup(me.name, cur, "replaced");
+            else if (b.restore === true) await addBackup(me.name, cur, "restore");
+            else if (await snapshotDue(me.name, cur)) await addBackup(me.name, cur, "auto");
+          }
+          const doc = await writeConfig(me.name, data, opId, inHash);
+          await cleanupIcons(me.name).catch((e) => log("icon cleanup", me.name, e.message));
+          return { version: doc.version, updatedAt: doc.updatedAt, overwrote: forced, ...(forced ? { forced: true } : {}), ...(migrated ? { migrated: true } : {}), ...spInfo, ...(doc.guardWarning ? { guardWarning: doc.guardWarning } : {}) };
+        });
       });
       if (!r.unchanged) probeSoon();
       delete r.unchanged;
@@ -1903,7 +1931,7 @@ async function api(req, res, url) {
       if (!/^image\/(jpeg|png|webp)\b/.test(ct)) return json(res, 415, { error: "需要 image/jpeg、image/png 或 image/webp（不支持 SVG）" });
       const buf = await readRaw(req, MAX_ICON);
       const nid = id || newIconId();
-      const ext = await withUserLock(me.name, async () => { assertAlive(me, req); await checkIconQuota(me.name, nid, buf.length); return storeIcon(me.name, nid, buf); });
+      const ext = await withUserLock(me.name, async () => { assertAlive(me, req); await checkIconQuota(me.name, { count: 1, bytes: buf.length }, nid); return storeIcon(me.name, nid, buf); });
       return json(res, 200, { ok: true, id: nid, type: WP_TYPES[ext], size: buf.length, url: "api/icons/" + nid });
     }
     if (!ICON_ID.test(id)) return json(res, id ? 400 : 405, { error: id ? "图标 id 不合法" : "Method Not Allowed" });
