@@ -74,7 +74,7 @@ async function openPage(base, c, opts = {}) {
         if (closed) return new Promise(() => {});
         rec.status = r.status;
         try { rec.res = JSON.parse(buf.toString("utf8")); } catch (e) { /* not json */ }
-        return { ok: r.ok, status: r.status, json: async () => JSON.parse(buf.toString("utf8")), blob: async () => new win.Blob([buf]), text: async () => buf.toString("utf8") };
+        return { ok: r.ok, status: r.status, json: async () => JSON.parse(buf.toString("utf8")), blob: async () => new win.Blob([buf], { type: r.headers.get("content-type") || "" }), text: async () => buf.toString("utf8") };
       };
     },
   });

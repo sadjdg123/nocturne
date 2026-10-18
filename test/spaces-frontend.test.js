@@ -5,21 +5,28 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { seedAccount, startServer, client, sleep } = require("./helpers");
+const { seedAccount, startServer, client, sleep, waitFor } = require("./helpers");
 const { openPage, importFile, SKIP } = require("./browser");
 
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
+const ICON_ID = "AbCdEfGhIjKlMnOp1234", ICON_PATH = "/api/icons/" + ICON_ID;
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
+const INLINE = "data:image/png;base64," + PNG.toString("base64");
 function serverData() { const d = structuredClone(FIX); delete d.settings.net; delete d.recent; return d; }
 const opt = { skip: SKIP, timeout: 60000 };
 /** jsdom 里的对象来自另一个 realm：按 JSON 比较 */
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const deq = (a, b, m) => assert.deepEqual(plain(a), plain(b), m);
 
-async function seeded(t, data, version = 7) {
+async function seeded(t, data, version = 7, opts = {}) {
   const srv = await startServer({ seed: (dir) => {
     seedAccount(dir);
     fs.mkdirSync(path.join(dir, "config"), { recursive: true });
     fs.writeFileSync(path.join(dir, "config", "admin.json"), JSON.stringify({ version, updatedAt: "2026-10-01T00:00:00.000Z", data }));
+    if (opts.icon) {
+      fs.mkdirSync(path.join(dir, "icons", "admin"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "icons", "admin", ICON_ID + ".png"), PNG);
+    }
   } });
   t.after(() => srv.stop());
   const c = client(srv.base);
@@ -147,27 +154,65 @@ test("account switch on one device: never shows the previous account's spaces or
 });
 
 test("JSON import: malformed spaces rejected (state unchanged); duplicate names / dangling refs cleaned; export contains spaces", opt, async (t) => {
-  const { srv, c } = await seeded(t, Object.assign(serverData(), { spaces: [{ id: "s1", name: "原空间", groupIds: ["mzq1a0lq8x2"] }] }));
+  const { srv, c } = await seeded(t, Object.assign(serverData(), { spaces: [{ id: "s1", name: "原空间", groupIds: ["mzq1a0lq8x2"] }] }), 7, { icon: true });
+  const icon = await c.get(ICON_PATH);
+  assert.equal(icon.status, 200, "the current NAS icon is actually available for the automatic backup");
+  assert.equal(icon.headers.get("content-type"), "image/png");
+  assert.deepEqual(icon.body, PNG);
   const p = await openPage(srv.base, c, {});
   t.after(() => p.close());
   await p.idle(800);
   const before = JSON.stringify(p.A.state);
-  importFile(p, Object.assign(serverData(), { spaces: [{ id: "all", name: "x", groupIds: [] }] }));
-  await sleep(300);
+  const read = blob => new Promise((resolve, reject) => { const reader = new p.win.FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsText(blob); });
   const err = p.win.document.querySelector("[data-err]");
+  importFile(p, Object.assign(serverData(), { spaces: [{ id: "all", name: "x", groupIds: [] }] }));
+  assert.ok(await waitFor(() => !err.hidden && /空间定义不合法/.test(err.textContent)), "malformed spaces are visibly rejected");
   assert.match(err.textContent, /空间定义不合法/);
   assert.equal(JSON.stringify(p.A.state), before, "nothing imported");
   importFile(p, Object.assign(serverData(), { spaces: [{ id: "a", name: "日常", groupIds: ["chips00daily", "nope"] }, { id: "b", name: "日常", groupIds: [], itemIds: ["gone"] }] }));
-  await sleep(300);
+  assert.ok(await waitFor(() => p.A.state.spaces.some(space => space.id === "a")), "a complete backup permits the valid import");
   deq(p.A.state.spaces, [{ id: "a", name: "日常", groupIds: ["chips00daily"] }, { id: "b", name: "日常 2", groupIds: [], itemIds: [] }]);
+  assert.equal(p.win.__downloads.length, 1, "import downloads the current configuration before replacement");
+  const backup = JSON.parse(await read(p.win.__downloads[0]));
+  const expectedBackup = JSON.parse(before);
+  expectedBackup.groups.flatMap(group => group.items).find(item => item.id === "jf00000001").icon.value = INLINE;
+  deq(backup, expectedBackup, "the complete automatic backup contains the real PNG bytes and MIME type");
   await p.idle();
   deq((await c.get("/api/config")).json.data.spaces.map((s) => s.name), ["日常", "日常 2"]);
   // export (设置 → 数据 → 导出配置) includes spaces
   p.win.document.querySelector('[data-d="export"]').click();
-  await sleep(200);
-  const blob = (p.win.__downloads || []).at(-1);
-  const txt = await new Promise((r) => { const fr = new p.win.FileReader(); fr.onload = () => r(fr.result); fr.readAsText(blob); });
-  deq(JSON.parse(txt).spaces.map((s) => s.id), ["a", "b"]);
+  assert.ok(await waitFor(() => p.win.__downloads.length === 2), "the explicit export completes with all NAS icon bytes");
+  const exported = JSON.parse(await read(p.win.__downloads[1]));
+  deq(exported.spaces.map((s) => s.id), ["a", "b"]);
+  const expectedExport = plain(p.A.state);
+  expectedExport.groups.flatMap(group => group.items).find(item => item.id === "jf00000001").icon.value = INLINE;
+  deq(exported, expectedExport);
+  assert.equal(p.win.__clicked.length, 2, "both complete backups initiate their downloads");
+  deq(p.errors, []);
+});
+
+test("JSON import: a missing current NAS icon visibly fails closed without changing spaces, cache or server version", opt, async (t) => {
+  const { srv, c } = await seeded(t, Object.assign(serverData(), { spaces: [{ id: "s1", name: "原空间", groupIds: ["mzq1a0lq8x2"] }] }));
+  assert.equal((await c.get(ICON_PATH)).status, 404, "the current fixture has no owned image file");
+  assert.equal(fs.existsSync(path.join(srv.dataDir, "icons", "admin", ICON_ID + ".png")), false);
+  const p = await openPage(srv.base, c, {});
+  t.after(() => p.close());
+  assert.ok(await waitFor(() => p.A.state.spaces && p.A.state.spaces[0].id === "s1"), "the existing server configuration is loaded");
+  const before = JSON.stringify(p.A.state), raw = p.storage()["yeqv.v1"], server = (await c.get("/api/config")).json;
+  assert.equal(server.version, 7);
+  const err = p.win.document.querySelector("[data-err]");
+  importFile(p, Object.assign(serverData(), { spaces: [{ id: "a", name: "新空间", groupIds: ["chips00daily"] }] }));
+  assert.ok(await waitFor(() => !err.hidden && /备份失败.*未导入.*HTTP 404/.test(err.textContent)), "the actual missing icon prevents replacement");
+  assert.equal(JSON.stringify(p.A.state), before);
+  assert.equal(p.storage()["yeqv.v1"], raw);
+  assert.equal((p.win.__downloads || []).length, 0);
+  deq(p.win.__clicked || [], []);
+  assert.doesNotMatch(p.win.document.getElementById("x-toast-msg").textContent, /已导出|已导入/);
+  assert.equal(p.A.undo(), false, "a failed backup adds no undo entry");
+  await p.idle();
+  assert.equal(p.puts().length, 0);
+  deq((await c.get("/api/config")).json, server);
+  deq(p.errors, []);
 });
 
 test("409 conflict sheet with spaces: 「使用服务器版」 adopts the server's spaces; 「恢复较早的版本」 restores spaces", opt, async (t) => {

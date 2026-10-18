@@ -9,8 +9,13 @@ const path = require("node:path");
 const net = require("node:net");
 const { spawn, spawnSync } = require("node:child_process");
 const { openStatic, importFile, SKIP, sleep, ROOT, byText } = require("./browser");
+const { waitFor } = require("./helpers");
 
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
+const PORTABLE = structuredClone(FIX);
+for (const group of PORTABLE.groups) for (const item of group.items) {
+  if (item.icon.type === "image" && /^api\/icons\//.test(item.icon.value)) item.icon.value = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+}
 const HAS_PY = spawnSync("python3", ["--version"]).status === 0;
 const NO_PY = HAS_PY ? false : (process.env.CI ? false : "python3 不可用（CI 上有）");
 if (!HAS_PY && process.env.CI) throw new Error("CI 里必须有 python3（纯静态模式测试）");
@@ -26,12 +31,13 @@ async function pyServer(t) {
 }
 
 async function flow(t, url) {
-  const p = await openStatic({ url, storage: { "yeqv.v1": JSON.stringify(FIX) } });
+  const p = await openStatic({ url, storage: { "yeqv.v1": JSON.stringify(PORTABLE) } });
   t.after(() => p.close());
   const { win, A } = p, doc = win.document;
   assert.deepEqual(p.errors, []);
   assert.equal(win.NOCTURNE, undefined, "static mode");
   assert.ok(!("spaces" in JSON.parse(p.storage()["yeqv.v1"])), "old cache not rewritten with a spaces field");
+  assert.equal(p.storage()["yeqv.v1"], JSON.stringify(PORTABLE), "the portable V1.1 cache is not rewritten on startup");
   assert.equal(doc.querySelectorAll("#x-groups .x-group").length, FIX.groups.length, "全部");
   // create a space through the real sheet
   doc.querySelector('[data-m="spaces"]').click();
@@ -54,14 +60,42 @@ async function flow(t, url) {
   // export carries spaces; import validates (malformed → refused) and accepts a valid file
   const exported = JSON.parse(JSON.stringify(p2.A.state));
   assert.equal(exported.spaces[0].name, "娱乐");
+  const read = blob => new Promise((resolve, reject) => { const reader = new p2.win.FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsText(blob); });
+  p2.win.document.querySelector('[data-d="export"]').click();
+  assert.ok(await waitFor(() => (p2.win.__downloads || []).length === 1), "the complete portable configuration is downloaded");
+  assert.deepEqual(JSON.parse(await read(p2.win.__downloads[0])), exported, "the downloaded JSON retains every space, group, item and extension");
   const bad = structuredClone(exported); bad.spaces[0].theme = "neon";
-  importFile(p2, bad); await sleep(80);
+  const err = p2.win.document.querySelector("[data-err]");
+  importFile(p2, bad);
+  assert.ok(await waitFor(() => !err.hidden && /空间定义不合法/.test(err.textContent)), "malformed spaces are visibly rejected");
   assert.equal(p2.A.state.spaces[0].theme, undefined, "malformed import refused");
   const good = structuredClone(exported); good.spaces.push({ id: "s-x", name: "导入的", groupIds: ["st0rage9kq2"], accent: { hue: 1 } });
-  importFile(p2, good); await sleep(80);
+  importFile(p2, good);
+  assert.ok(await waitFor(() => p2.A.spaces.list().some(space => space.id === "s-x")), "the valid import replaces the configuration after backup");
   assert.deepEqual(JSON.parse(JSON.stringify(p2.A.spaces.list().map((s) => s.name))), ["娱乐", "导入的"]);
   assert.deepEqual(JSON.parse(JSON.stringify(p2.A.spaces.list()[1].accent)), { hue: 1 }, "extension field survives import");
+  assert.equal(p2.win.__downloads.length, 2, "import downloads one complete backup before replacement");
+  assert.deepEqual(JSON.parse(await read(p2.win.__downloads[1])), exported);
+  assert.equal(p2.win.__clicked.length, 2, "both complete backups initiate their downloads");
+  assert.deepEqual(JSON.parse(JSON.stringify(p2.A.state.groups)), exported.groups, "all existing group and item IDs survive import");
+  assert.ok(p.reqs.concat(p2.reqs).every((r) => !/\/api\//.test(r.path)), "export and import send no sync / api requests in static mode");
   assert.deepEqual(p.errors.concat(p2.errors), []);
+
+  const blocked = await openStatic({ url, storage: { "yeqv.v1": JSON.stringify(FIX) } });
+  t.after(() => blocked.close());
+  const before = JSON.stringify(blocked.A.state), raw = blocked.storage()["yeqv.v1"];
+  const blockedError = blocked.win.document.querySelector("[data-err]");
+  assert.equal(blocked.A.exportState, undefined, "static mode has no NAS exporter");
+  importFile(blocked, good);
+  assert.ok(await waitFor(() => !blockedError.hidden && /备份失败.*未导入.*NAS 图标/.test(blockedError.textContent)), "an unavailable current NAS icon visibly blocks replacement");
+  assert.equal(JSON.stringify(blocked.A.state), before, "an incomplete backup retains the exact current configuration");
+  assert.equal(blocked.storage()["yeqv.v1"], raw, "the old cache remains byte-identical");
+  assert.equal((blocked.win.__downloads || []).length, 0);
+  assert.deepEqual(blocked.win.__clicked || [], []);
+  assert.doesNotMatch(blocked.win.document.getElementById("x-toast-msg").textContent, /已导出|已导入/);
+  assert.equal(blocked.A.undo(), false, "a rejected import adds no undo entry");
+  assert.ok(blocked.reqs.every((r) => !/\/api\//.test(r.path)), "an unavailable NAS icon causes no static API request");
+  assert.deepEqual(blocked.errors, []);
 }
 
 test("static: python3 -m http.server", { skip: SKIP || NO_PY, timeout: 60000 }, async (t) => { await flow(t, await pyServer(t)); });
