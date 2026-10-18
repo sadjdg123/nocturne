@@ -341,7 +341,7 @@
     if (size > 800 * 1024 && !bigWarned) { bigWarned = true; A.toast("配置已有 " + Math.round(size / 1024) + "KB，接近上限，可以删掉一些不用的上传图片"); }
     api("PUT", "config", body, { raw: str, keepalive: opts.keepalive && size < KEEPALIVE_MAX }).then(function (d) {
       warned = false; badWarned = false;
-      if (d.stale) { lastSent = raw; return pull(true).then(null, function (e) { if (e && e.status === 401) expired(); }); } // 旧版服务器的补推判定
+      if (d.stale) { lastSent = raw; return pull("stale", undefined, raw).then(null, function (e) { if (e && e.status === 401) expired(); }); } // 旧版服务器的补推判定
       markSynced(d.version, raw); opDone(raw);
       if (d.forced) A.toast("已用本机版本覆盖 · 服务器上原来的版本已存入「较早的版本」", { duration: 6000 });
       if (d.guardWarning && N.user && N.user.admin) api("GET", "health").then(function (h) { guardCheck(h, true); }, function () { guardCheck(null, true); });
@@ -378,12 +378,13 @@
     if (window.NocturneSpaces) window.NocturneSpaces.normalize(s); // 空间：清悬空引用（例如回滚到旧版期间删掉的分组）；没有 spaces 字段时不动
     return s;
   }
-  /** 从服务器拉取（启动时缓存过期、或切回页面时其他设备改过）。本机有未同步的修改时（非 force）不拉，绝不丢本机修改 */
-  function pull(force, opts) {
+  function pull(intent, opts, raw) {
+    var read = { raw: raw === undefined ? snapshot() : raw, baseVersion: serverVer, confirmedRaw: lastSent };
+    if (conflictInfo || snapshot() !== read.raw || (!intent && (read.confirmedRaw === null || read.raw !== read.confirmedRaw))) return Promise.resolve(false);
     return api("GET", "config", undefined, opts).then(function (d) {
-      if (!d || !d.data) return false;
-      if (!force && d.version <= serverVer) return false;
-      if (!force && snapshot() !== lastSent && lastSent !== null) return false; // 本机有未同步的修改：保留本机，推送时由服务器判冲突
+      if (!d || !d.data || !Number.isSafeInteger(d.version) || d.version < 0) return false;
+      if (conflictInfo || snapshot() !== read.raw || serverVer !== read.baseVersion || lastSent !== read.confirmedRaw) return false;
+      if (d.version < serverVer || (!intent && d.version === serverVer)) return false;
       A.state = adopt(d.data); A.save(); A.render();
       markSynced(d.version, snapshot());
       return true;
@@ -699,12 +700,12 @@
       push();
       start = Promise.resolve();
     } else if (N.stale) {
+      serverVer = localVer;
+      lastSent = snapshot();
       // 信号差时别一直只看到壁纸：5 秒拉不到就先显示本机缓存
       var ac = window.AbortController ? new AbortController() : null, to = ac && setTimeout(function () { ac.abort(); }, 5000);
-      start = pull(true, ac ? { signal: ac.signal } : null).then(function () { clearTimeout(to); unlock(); }, function (e) {
+      start = pull("bootstrap", ac ? { signal: ac.signal } : null).then(function () { clearTimeout(to); unlock(); }, function (e) {
         clearTimeout(to); unlock();
-        lastSent = snapshot(); // 只推送之后真正的修改，避免用旧缓存覆盖服务器
-        serverVer = localVer; // 本机缓存基于旧版本：之后的推送会被识别为冲突（留备份），切回页面时也会再拉
         if (e.status === 401) return expired();
         A.toast("连不上 NAS，先显示本机缓存");
       });
@@ -732,6 +733,7 @@
       A.on("render", schedule);
       var save = A.save;
       A.save = function () { save.apply(this, arguments); schedule(); };
+      if (snapshot() !== lastSent) schedule();
       pullStatus();
       setInterval(function () { if (!document.hidden) pullStatus(); }, 30000);
       document.addEventListener("visibilitychange", function () {
