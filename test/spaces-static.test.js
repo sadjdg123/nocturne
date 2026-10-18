@@ -14,7 +14,7 @@ const { waitFor } = require("./helpers");
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
 const PORTABLE = structuredClone(FIX);
 for (const group of PORTABLE.groups) for (const item of group.items) {
-  if (item.icon.type === "image" && /^api\/icons\//.test(item.icon.value)) item.icon.value = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+  if (item.icon.type === "image" && /^api\/icons\//.test(item.icon.value)) item.icon.value = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
 }
 const HAS_PY = spawnSync("python3", ["--version"]).status === 0;
 const NO_PY = HAS_PY ? false : (process.env.CI ? false : "python3 不可用（CI 上有）");

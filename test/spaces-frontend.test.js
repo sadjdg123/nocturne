@@ -10,7 +10,7 @@ const { openPage, importFile, SKIP } = require("./browser");
 
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
 const ICON_ID = "AbCdEfGhIjKlMnOp1234", ICON_PATH = "/api/icons/" + ICON_ID;
-const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", "base64");
 const INLINE = "data:image/png;base64," + PNG.toString("base64");
 function serverData() { const d = structuredClone(FIX); delete d.settings.net; delete d.recent; return d; }
 const opt = { skip: SKIP, timeout: 60000 };
