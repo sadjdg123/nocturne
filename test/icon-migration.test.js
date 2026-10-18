@@ -71,6 +71,55 @@ async function migratedImages(c, data) {
   }
 }
 
+for (const blocked of [false, true]) {
+  test("metadata-only config GET and PUT tolerate " + (blocked ? "a regular-file icon directory blocker" : "an ordinary icon directory"), async t => {
+    const original = { settings: { title: "Metadata fixture" }, groups: [] };
+    const f = await launch(t, { data: original, seed(dir) {
+      fs.mkdirSync(path.join(dir, "icons"));
+      if (blocked) fs.writeFileSync(path.join(dir, "icons/default"), "owned icon directory blocker");
+      else fs.mkdirSync(path.join(dir, "icons/default"));
+    } });
+    const media = mediaTree(f.dataDir), data = { settings: { title: "Metadata-only edit" }, groups: [] };
+    const get = await f.c.get("/api/config");
+    const put = await f.c.put("/api/config", { baseVersion: 1, data });
+    assert.deepEqual({ get: get.status, put: put.status }, { get: 200, put: 200 });
+    assert.deepEqual(get.json.data, original);
+    assert.equal(get.json.version, 1);
+    assert.equal(put.json.version, 2);
+    assert.deepEqual(readDoc(f.dataDir).data, data);
+    const saved = await f.c.get("/api/config");
+    assert.equal(saved.status, 200);
+    assert.equal(saved.json.version, 2);
+    assert.deepEqual(saved.json.data, data);
+    assert.deepEqual(mediaTree(f.dataDir), media);
+    if (blocked) assert.equal(fs.statSync(path.join(f.dataDir, "icons/default")).isFile(), true);
+    assert.equal((await f.c.get("/api/health")).status, 200);
+    assert.equal(f.child.exitCode, null);
+  });
+}
+
+test("eligible inline allocation reports a real icon directory error without changing config or resources", async t => {
+  const f = await launch(t, { data: { settings: { title: "Retained metadata" }, groups: [] }, seed(dir) {
+    fs.mkdirSync(path.join(dir, "icons"));
+    fs.writeFileSync(path.join(dir, "icons/default"), "owned icon directory blocker");
+    fs.mkdirSync(path.join(dir, "wallpapers"));
+    fs.writeFileSync(path.join(dir, "wallpapers/default.png"), PNG);
+  } });
+  const before = fs.readFileSync(configPath(f.dataDir)), media = mediaTree(f.dataDir), candidate = inline(1);
+  candidate.settings.wallpaper = { id: "custom", url: INLINE };
+  assert.equal((await f.c.put("/api/config", { baseVersion: 1, data: candidate })).status, 500);
+  assert.deepEqual(fs.readFileSync(configPath(f.dataDir)), before);
+  assert.deepEqual(mediaTree(f.dataDir), media);
+  const legacy = JSON.stringify(doc(candidate, true));
+  fs.writeFileSync(configPath(f.dataDir), legacy);
+  assert.equal((await f.c.get("/api/config")).status, 500);
+  assert.equal(fs.readFileSync(configPath(f.dataDir), "utf8"), legacy);
+  assert.deepEqual(mediaTree(f.dataDir), media);
+  assert.match(f.log(), /ENOTDIR/);
+  assert.equal((await f.c.get("/api/health")).status, 200);
+  assert.equal(f.child.exitCode, null);
+});
+
 test("501 identical inline icons reject before config, icon or wallpaper writes", async t => {
   const f = await launch(t), candidate = inline(501);
   assert.equal((await f.c.req("PUT", "/api/wallpaper", PNG, { "Content-Type": "image/png" })).status, 200);

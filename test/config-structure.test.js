@@ -293,7 +293,7 @@ test("malformed canonical configuration cannot replace an accepted local snapsho
   assert.deepEqual(h.errors, []);
 });
 
-for (const [label, groupId, itemId] of [["string control", "group", "item"], ["zero group", 0, "item"], ["zero item", "group", 0]]) {
+for (const [label, groupId, itemId] of [["string control", "group", "item"], ["zero group", 0, "item"], ["zero item", "group", 0], ["empty item", "group", ""], ["empty group", "", "item"]]) {
   test("imported " + label + " remains editable through the actual page controls", { skip: SKIP }, async t => {
     const h = await page(t), doc = h.win.document;
     importFile(h, { settings: {}, groups: [{ id: groupId, name: "Imported group", items: [{ id: itemId, title: "Imported item", lan: "http://item.test/" }] }] });
@@ -306,10 +306,30 @@ for (const [label, groupId, itemId] of [["string control", "group", "item"], ["z
     const actions = doc.querySelector(".x-sheet.is-on");
     assert.ok(actions, "clicking the imported tile offers its item actions");
     assert.match(actions.textContent, /编辑/);
-    actions.querySelector('[data-i="2"]').click();
+    actions.querySelector('[data-i="0"]').click();
+    await settle();
+    const editor = doc.querySelector(".x-is.is-on");
+    assert.ok(editor, "the actual Edit action opens the item form");
+    const beforeEdit = { mode: editor.getAttribute("aria-label"), title: editor.querySelector('[name="nm"]').value, url: editor.querySelector('[name="url"]').value };
+    const importedId = h.A.state.groups[0].items[0].id;
+    for (const [name, value] of [["nm", "Edited item"], ["url", "http://edited.test/"]]) {
+      const input = editor.querySelector('[name="' + name + '"]');
+      input.value = value;
+      input.dispatchEvent(new h.win.Event("input", { bubbles: true }));
+    }
+    editor.querySelector('[data-a="save"]').click();
+    await settle();
+    assert.equal(h.A.state.groups[0].items.length, 1, "Save updates the existing imported item without appending another");
+    assert.deepEqual(beforeEdit, { mode: "编辑项目", title: "Imported item", url: "http://item.test/" });
+    assert.equal(h.A.state.groups[0].items[0].id, importedId);
+    assert.equal(h.A.state.groups[0].items[0].title, "Edited item");
+    assert.equal(h.A.state.groups[0].items[0].wan, "http://edited.test/");
+    assert.equal(JSON.parse(h.raw()).groups[0].items[0].title, "Edited item");
+    doc.querySelector("#x-groups a[data-id]").dispatchEvent(new h.win.MouseEvent("click", { bubbles: true, cancelable: true }));
+    doc.querySelector('.x-sheet.is-on [data-i="2"]').click();
     await settle();
     assert.equal(h.A.state.groups[0].items.length, 2, "the actual duplicate action finds the imported item");
-    assert.equal(h.A.state.groups[0].items[1].title, "Imported item");
+    assert.equal(h.A.state.groups[0].items[1].title, "Edited item");
     const options = doc.querySelector("#x-groups .x-gmore");
     assert.ok(options, "the imported group offers its group actions");
     options.click();
@@ -321,10 +341,31 @@ for (const [label, groupId, itemId] of [["string control", "group", "item"], ["z
     assert.equal(h.A.state.groups[0].name, "Renamed group");
     assert.equal(JSON.parse(h.raw()).groups[0].name, "Renamed group");
     assert.equal(String(h.A.state.groups[0].id), String(groupId));
-    assert.equal(String(h.A.state.groups[0].items[0].id), String(itemId));
+    if (itemId === "") assert.ok(typeof importedId === "string" && importedId.length > 0, "an empty legacy item identity receives a usable ID");
+    else assert.equal(String(h.A.state.groups[0].items[0].id), String(itemId));
     assert.deepEqual(h.errors, []);
   });
 }
+
+test("imported empty engine identity preserves selection and search through the actual page controls", { skip: SKIP }, async t => {
+  const h = await page(t), doc = h.win.document, opened = [];
+  h.win.open = url => opened.push(url);
+  importFile(h, {
+    settings: { engine: "", engines: [{ id: "other", name: "Other", url: "https://other.test?q=%s", on: true }, { id: "", name: "Empty", url: "https://empty.test?q=%s", on: true }] },
+    groups: [],
+  });
+  await settle();
+  assert.equal(h.A.state.settings.engine, "");
+  assert.equal(h.A.state.settings.engines[1].id, "");
+  assert.ok(doc.querySelector('#x-engines [data-eng=""][aria-pressed="true"]'));
+  doc.querySelector('#x-engines [data-eng="other"]').click();
+  doc.querySelector('#x-engines [data-eng=""]').click();
+  doc.getElementById("x-q").value = "empty query";
+  doc.getElementById("x-search").dispatchEvent(new h.win.Event("submit", { bubbles: true, cancelable: true }));
+  assert.equal(opened[0], "https://empty.test?q=empty%20query");
+  assert.equal(JSON.parse(h.raw()).settings.engine, "");
+  assert.deepEqual(h.errors, []);
+});
 
 test("imported numeric engine selection and zero space references retain their identities", { skip: SKIP }, async t => {
   const h = await page(t), doc = h.win.document, opened = [];
@@ -360,7 +401,7 @@ test("legacy import canonicalizes numeric identities and retains extensions whil
   h.A.util.uid = () => "taken";
   const data = {
     settings: { title: 7, user: { x: 1 }, show: "yes", wallpaper: "abc", engines: [{ id: 0, url: "https://a.test?q=%s" }, { id: "taken", url: "https://b.test?q=%s" }, { url: "https://c.test?q=%s" }] },
-    groups: [{ id: 0, items: null }, { id: "taken" }, { id: "__proto__", items: [{ id: "constructor", title: 3, lan: "http://a.test" }, { title: "missing", wan: "https://b.test" }] }, { items: [{ id: "taken", title: "existing", lan: "http://c.test" }, { title: "missing two", wan: "https://d.test" }] }],
+    groups: [{ id: 0, items: null }, { id: "taken" }, { id: "__proto__", items: [{ id: "constructor", title: 3, lan: "http://a.test" }, { title: "missing", wan: "https://b.test" }] }, { items: [{ id: "taken", title: "existing", lan: "http://c.test" }, { title: "missing two", wan: "https://d.test" }, { id: "", title: "empty legacy ID", wan: "https://empty.test" }] }],
     future: { untouched: [1, 2] }, spaces: [{ id: "s-a", name: "Imported", groupIds: ["__proto__"], accent: { hue: 1 } }], spacesVersion: 1,
   };
   importFile(h, data); await settle();
@@ -373,6 +414,7 @@ test("legacy import canonicalizes numeric identities and retains extensions whil
     assert.ok(members.every(x => x.id != null));
     assert.equal(new Set(members.map(x => String(x.id))).size, members.length);
   }
+  assert.ok(h.A.state.groups.flatMap(g => g.items).every(item => typeof item.id === "string" && item.id.length > 0));
   assert.deepEqual(JSON.parse(h.raw()).future, { untouched: [1, 2] });
   assert.deepEqual(JSON.parse(h.raw()).spaces[0].accent, { hue: 1 });
   assert.deepEqual(h.errors, []);

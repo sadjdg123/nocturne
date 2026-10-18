@@ -1076,10 +1076,8 @@ function allItems(data) {
   return out;
 }
 async function planIcons(name, data) {
-  let files;
-  try { files = await fsp.readdir(iconDir(name)); } catch (e) { if (e.code !== "ENOENT") throw e; files = []; }
-  const used = iconRefs(data, new Set()), icons = [];
-  for (const f of files) { const m = /^([A-Za-z0-9_-]{16,64})\.(png|jpg|webp)$/.exec(f); if (m) used.add(m[1]); }
+  const icons = [];
+  let used;
   for (const it of allItems(data)) {
     const ic = it.icon;
     if (!ic || ic.type !== "image" || typeof ic.value !== "string" || !ic.value.startsWith("data:")) continue;
@@ -1088,6 +1086,12 @@ async function planIcons(name, data) {
     const buf = Buffer.from(m[2], "base64");
     const ext = sniffImage(buf);
     if (!ext || buf.length > MAX_ICON) continue;
+    if (!used) {
+      let files;
+      try { files = await fsp.readdir(iconDir(name)); } catch (e) { if (e.code !== "ENOENT") throw e; files = []; }
+      used = iconRefs(data, new Set());
+      for (const f of files) { const m = /^([A-Za-z0-9_-]{16,64})\.(png|jpg|webp)$/.exec(f); if (m) used.add(m[1]); }
+    }
     let id; do { id = newIconId(); } while (used.has(id));
     used.add(id);
     icons.push({ id, buf, file: path.join(iconDir(name), id + "." + ext) });

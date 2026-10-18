@@ -2184,6 +2184,7 @@
             merged.settings = Object.assign(structuredClone(A.defaults.settings), data.settings || {});
             var items = [];
             merged.groups.forEach(function (g) { if (g.items == null) g.items = []; items = items.concat(g.items); });
+            items.forEach(function (item) { if (item.id === "") delete item.id; });
             fillIds(merged.groups); fillIds(items); fillIds(merged.settings.engines);
             if (typeof merged.settings.engine === "number") merged.settings.engine = String(merged.settings.engine);
             if (SPm) SPm.normalize(merged); /* 重名加序号、清悬空引用（文件里没有 spaces = 只有「全部」） */
