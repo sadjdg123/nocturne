@@ -779,7 +779,7 @@
         document.addEventListener("visibilitychange", function () { if (!document.hidden) tick(); });
       })();
     </script>
-    <script src="nocturne.js?v=2026101804"></script>
+    <script src="nocturne.js?v=2026101807"></script>
     <script>
       /* Stage 2a · edit mode. Uses only the App API.
          "edit-item" / "add-item" listeners set d.handled = true; otherwise a 即将上线 toast shows. */
@@ -2026,18 +2026,18 @@
         function undoToast(msg) { A.toast(msg, { action: "撤销", onAction: A.undo }); }
         function pad(n) { return (n < 10 ? "0" : "") + n; }
         function stamp(t) { var d = new Date(); return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + (t ? "-" + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) : ""); }
-        function save(name, st) {
-          var url = URL.createObjectURL(new Blob([JSON.stringify(st, null, 2)], { type: "application/json" }));
-          var a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        async function save(name, st) {
+          var url = URL.createObjectURL(new Blob([JSON.stringify(st, null, 2)], { type: "application/json" })), a;
+          try { a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); }
+          finally { if (a) a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 1000); }
         }
-        function hasFileIcons() {
-          return A.state.groups.some(function (g) { return (g.items || []).some(function (i) { return i.icon && i.icon.type === "image" && /^api\/icons\//.test(String(i.icon.value || "")); }); });
+        function hasFileIcons(state) {
+          return state.groups.some(function (g) { return (g.items || []).some(function (i) { return i.icon && i.icon.type === "image" && /^api\/icons\//.test(String(i.icon.value || "")); }); });
         }
-        /* NAS 上存成文件的图标在导出时内嵌成 data URL（A.exportState 由后端模块提供）；没有就直接同步下载 */
-        function download(name) {
-          if (A.exportState && hasFileIcons()) return A.exportState().then(function (st) { save(name, st); }, function () { save(name, A.state); });
-          save(name, A.state);
+        async function download(name, captured) {
+          if (A.exportState) return save(name, await A.exportState(captured));
+          if (hasFileIcons(captured)) throw new Error("无法读取 NAS 图标，请连接原 NAS 后重试");
+          return save(name, captured);
         }
 
         /* ---- 搜索 ---- */
@@ -2099,23 +2099,54 @@
           '<div class="x-cf" data-cf hidden><p>会清空所有分组和设置。恢复前会自动导出一份备份。</p><div class="x-acts"><button type="button" class="x-pb is-red" data-d="confirm">恢复默认</button><button type="button" class="x-pb" data-d="cancel">取消</button></div></div></div>' +
           '<p class="x-foot5">配置只保存在这台设备的浏览器里</p>';
         var err = D.querySelector("[data-err]"), file = D.querySelector("[data-file]"), cf = D.querySelector("[data-cf]"), resetBtn = D.querySelector('[data-d="reset"]');
+        var replacement = null;
         function showErr(m) { err.textContent = m || ""; err.hidden = !m; }
-        function showCf(on) { cf.hidden = !on; resetBtn.setAttribute("aria-expanded", on); }
+        function showCf(on) {
+          cf.hidden = !on; resetBtn.setAttribute("aria-expanded", on);
+          if (!on && replacement && replacement.kind === "reset") replacement = null;
+        }
+        function beginReplacement(kind) {
+          var intent = { kind: kind, state: structuredClone(A.state) };
+          intent.raw = JSON.stringify(intent.state);
+          replacement = intent;
+          return intent;
+        }
+        function currentReplacement(intent) {
+          if (replacement !== intent) return false;
+          if (JSON.stringify(A.state) === intent.raw) return true;
+          showErr("本机内容已变化，未替换配置，请重新操作");
+          return false;
+        }
+        async function replaceState(intent, candidate, label, message) {
+          try {
+            if (!currentReplacement(intent)) return;
+            await download("yeqv-before-" + label + "-" + stamp(true) + ".json", intent.state);
+            if (!currentReplacement(intent)) return;
+            if (A.commit(function (s) { Object.keys(s).forEach(function (k) { delete s[k]; }); Object.assign(s, candidate); }, label, true) === false) return showErr("无法备份损坏的本机缓存，未" + (label === "reset" ? "恢复默认" : "导入"));
+            if (label === "reset") showCf(false);
+            undoToast(message);
+          } catch (e) {
+            if (replacement === intent) showErr("备份失败，未" + (label === "reset" ? "恢复默认" : "导入") + "：" + (e.message || "无法下载文件"));
+          }
+        }
         D.addEventListener("click", function (e) {
           var b = e.target.closest("[data-d]"); if (!b) return;
           var a = b.getAttribute("data-d");
           if (a === "export") {
-            download("yeqv-backup-" + stamp() + ".json");
-            var w = A.state.settings.wallpaper;
-            A.toast(w && w.id === "custom" && w.file ? "已导出配置 · 壁纸文件不包含在导出里" : "已导出配置", w && w.file ? { duration: 6000 } : undefined);
+            showErr("");
+            var captured = structuredClone(A.state), w = captured.settings.wallpaper;
+            download("yeqv-backup-" + stamp() + ".json", captured).then(function () {
+              A.toast(w && w.id === "custom" && w.file ? "已导出配置 · 壁纸文件不包含在导出里" : "已导出配置", w && w.file ? { duration: 6000 } : undefined);
+            }, function (e) { showErr("导出失败：" + (e.message || "无法下载文件")); });
           }
           else if (a === "import") file.click();
           else if (a === "reset") showCf(cf.hidden);
           else if (a === "cancel") showCf(false);
           else if (a === "confirm") {
-            download("yeqv-before-reset-" + stamp(true) + ".json");
-            if (A.commit(function (s) { Object.keys(s).forEach(function (k) { delete s[k]; }); Object.assign(s, structuredClone(A.defaults)); }, "reset", true) === false) return showErr("无法备份损坏的本机缓存，未恢复默认");
-            showCf(false); undoToast("已恢复默认");
+            var intent = beginReplacement("reset"), candidate = structuredClone(A.defaults);
+            if (!window.NocturneConfigShape.valid(candidate)) return showErr("默认配置格式不正确，未恢复默认");
+            showErr("");
+            replaceState(intent, candidate, "reset", "已恢复默认");
           }
         });
         function valid(d) {
@@ -2134,7 +2165,9 @@
         D.addEventListener("change", function (e) {
           e.stopPropagation();
           var f = file.files && file.files[0]; file.value = ""; if (!f) return;
-          f.text().then(function (txt) {
+          var intent = beginReplacement("import");
+          Promise.resolve().then(function () { return f.text(); }).then(function (txt) {
+            if (!currentReplacement(intent)) return;
             var data; try { data = JSON.parse(txt); } catch (x) { data = null; }
             if (!valid(data)) return showErr("文件不是有效的夜曲配置");
             var SPm = window.NocturneSpaces, badS = SPm ? SPm.check(data, { lenient: true }) : [];
@@ -2152,10 +2185,8 @@
             if (typeof merged.settings.engine === "number") merged.settings.engine = String(merged.settings.engine);
             if (SPm) SPm.normalize(merged); /* 重名加序号、清悬空引用（文件里没有 spaces = 只有「全部」） */
             if (!window.NocturneConfigShape.valid(merged)) return showErr("文件不是有效的夜曲配置");
-            download("yeqv-before-import-" + stamp(true) + ".json");
-            if (A.commit(function (s) { Object.keys(s).forEach(function (k) { delete s[k]; }); Object.assign(s, merged); }, "import", true) === false) return showErr("无法备份损坏的本机缓存，未导入");
-            undoToast("已导入");
-          }, function () { showErr("文件不是有效的夜曲配置"); });
+            return replaceState(intent, merged, "import", "已导入");
+          }).catch(function () { if (replacement === intent) showErr("文件不是有效的夜曲配置"); });
         });
 
         A.on("render", drawEngines);

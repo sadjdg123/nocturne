@@ -69,14 +69,20 @@
     });
   };
   /** 导出时把 NAS 上的图标内嵌成 data URL（导入到别的实例 / 纯静态页也能显示）；壁纸文件太大，不内嵌 */
-  A.exportState = function (state) {
+  A.exportState = async function (state) {
     var s = structuredClone(state === undefined ? A.state : state), jobs = [];
     (s.groups || []).forEach(function (g) { (g.items || []).forEach(function (i) {
       var ic = i.icon, v = ic && ic.type === "image" && String(ic.value || "");
       if (!v || !/^api\/icons\//.test(v)) return;
-      jobs.push(fetch(v, { credentials: "same-origin" }).then(function (r) { if (!r.ok) throw 0; return r.blob(); }).then(function (b) {
-        return new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { ic.value = fr.result; res(); }; fr.onerror = function () { res(); }; fr.readAsDataURL(b); });
-      }).then(null, function () {}));
+      jobs.push(fetch(v, { credentials: "same-origin" }).then(function (r) { if (!r.ok) throw new Error("图标下载失败（HTTP " + r.status + "）"); return r.blob(); }).then(function (b) {
+        return new Promise(function (res, reject) {
+          var fr = new FileReader();
+          fr.onload = function () { ic.value = fr.result; res(); };
+          fr.onerror = function () { reject(fr.error || new Error("图标读取失败")); };
+          fr.onabort = function () { reject(new Error("图标读取已取消")); };
+          fr.readAsDataURL(b);
+        });
+      }));
     }); });
     return Promise.all(jobs).then(function () { return s; });
   };
@@ -407,14 +413,14 @@
     return (d.getMonth() + 1) + "月" + d.getDate() + "日 " + p(d.getHours()) + ":" + p(d.getMinutes());
   }
   function stampName() { var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; }; return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()); }
-  function downloadJSON(name, obj) {
-    var url = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" }));
-    var a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  async function downloadJSON(name, obj) {
+    var url = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" })), a;
+    try { a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); }
+    finally { if (a) a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 1000); }
   }
-  function exportLocal(state) {
+  async function exportLocal(state) {
     var name = "yeqv-local-" + stampName() + ".json", captured = structuredClone(state === undefined ? A.state : state);
-    return Promise.resolve().then(function () { return A.exportState ? A.exportState(captured) : captured; }).then(function (st) { downloadJSON(name, st); });
+    return downloadJSON(name, await A.exportState(captured));
   }
   function closeConflict() {
     serverChoice = null;
