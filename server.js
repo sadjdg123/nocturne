@@ -18,6 +18,7 @@ const os = require("node:os");
 const { createAuthStore } = require("./auth-store");
 const URLCHECK = require("./public/urlcheck.js"); // 与前端共用的 URL 白名单校验
 const SPACES = require("./public/spaces.js"); // 与前端共用的场景空间模型（V2.0）
+const CONFIG_SHAPE = require("./public/config-shape.js");
 
 const PORT = +process.env.PORT || 8080;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -123,7 +124,7 @@ function sessionsShape(d) {
 }
 function configShape(d) {
   return object(d) && Number.isSafeInteger(d.version) && d.version >= 0 && validConfig(d.data) &&
-    !Array.isArray(d.data.settings) && (d.hist === undefined || (Array.isArray(d.hist) && d.hist.every((h) => object(h) && Number.isSafeInteger(h.v) && h.v >= 0 && typeof h.h === "string"))) &&
+    (d.hist === undefined || (Array.isArray(d.hist) && d.hist.every((h) => object(h) && Number.isSafeInteger(h.v) && h.v >= 0 && typeof h.h === "string"))) &&
     (d.ops === undefined || (Array.isArray(d.ops) && d.ops.every((o) => object(o) && typeof o.id === "string" && Number.isSafeInteger(o.v) && o.v >= 0)));
 }
 function entriesStrict(dir, kind) {
@@ -925,8 +926,7 @@ function reconcileSpaces(body, cur) {
   return { kept, pruned: SPACES.prune(data), restored };
 }
 function validConfig(d) {
-  return d && typeof d === "object" && !Array.isArray(d) && d.settings && typeof d.settings === "object" && Array.isArray(d.groups) &&
-    d.groups.every((g) => g && typeof g === "object" && (g.items == null || Array.isArray(g.items)));
+  return CONFIG_SHAPE.valid(d);
 }
 /** 配置里「新出现的」不安全地址（导航只许 http/https，搜索模板 http(s)+%s，图片另有白名单）。
  *  已经存在于当前版本或备份里的旧值不算新的：放行，免得历史配置一改就无法同步（前端渲染时会把它们当作无效地址、不可点击）。 */

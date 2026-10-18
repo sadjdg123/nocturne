@@ -47,7 +47,7 @@ function harness(options = {}) {
     A: app, N: { version: 1, user: { name: "admin" } },
     DIRTY: "nocturne.dirty", VER: "nocturne.ver", OWNER: "nocturne.owner", KEEPALIVE_MAX: 60000,
     TextEncoder, Uint8Array, Int32Array, structuredClone, crypto: crypto.webcrypto,
-    window: { NocturneSpaces: Spaces }, AbortController: options.abort ? AbortController : undefined,
+    window: { NocturneSpaces: Spaces, NocturneConfigShape: require("../public/config-shape") }, AbortController: options.abort ? AbortController : undefined,
     wpMigrating: null, pullStatus() {}, expired() {}, conflict() {},
     migrateLocalWallpaper: () => Promise.resolve(false),
     bytes: (value) => Buffer.byteLength(value, "utf8"),

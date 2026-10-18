@@ -445,6 +445,7 @@
     <script src="cmdrank.js?v=3"></script>
     <script src="spaces.js?v=3"></script>
     <script src="status.js?v=1"></script>
+    <script src="config-shape.js?v=2026101803"></script>
     <script>
       (function () {
         "use strict";
@@ -452,6 +453,7 @@
         var $ = function (id) { return document.getElementById(id); };
         var U = window.NocturneURL; /* urlcheck.js：统一的 URL 白名单校验 */
         var SP = window.NocturneSpaces; /* spaces.js：V2.0 场景空间模型（只引用分组 / 项目 id） */
+        var CS = window.NocturneConfigShape;
 
         /* 按 id / 地址建表一律用无原型对象（dict）或 Map / Set：项目 / 分组 id 可以是 constructor、__proto__、toString 等（手工导入的 JSON），
          * 普通对象会读到 Object.prototype 上的函数、或被 __proto__ 改掉原型。选择器里的 id 用 sel() 转义。 */
@@ -505,29 +507,37 @@
         }
 
         var defaults = makeDefaults();
-        var memory = null;
+        var memory = null, rejectedCache = null;
         function load() {
+          var raw = null;
           try {
-            var raw = memory || localStorage.getItem(KEY);
-            if (raw) {
+            raw = memory === null ? localStorage.getItem(KEY) : memory;
+            if (raw !== null) {
               var s = JSON.parse(raw);
-              if (s && s.settings && Array.isArray(s.groups)) {
-                s.settings = Object.assign(structuredClone(defaults.settings), s.settings);
-                if (SP) SP.normalize(s); /* 本机缓存里的空间：清悬空引用 / 修复畸形条目（没有 spaces 字段时不动） */
-                return s;
-              }
+              if (!CS.valid(s)) throw new Error("缓存格式不正确");
+              s.settings = Object.assign(structuredClone(defaults.settings), s.settings);
+              if (SP) SP.normalize(s); /* 本机缓存里的空间：清悬空引用 / 修复畸形条目（没有 spaces 字段时不动） */
+              if (!CS.valid(s)) throw new Error("缓存格式不正确");
+              return s;
             }
-          } catch (e) { /* fall through to defaults */ }
+          } catch (e) { rejectedCache = raw; }
           return structuredClone(defaults);
         }
         var state = load();
         var undoStack = [];
         var handlers = Object.create(null);
 
-        function save() {
+        function save(recover) {
+          if (!CS.valid(state) || (rejectedCache !== null && recover !== true)) return false;
           var raw = JSON.stringify(state);
+          if (rejectedCache !== null) {
+            try { localStorage.setItem("nocturne.cacheRecovery", rejectedCache); }
+            catch (e) { toast("无法备份损坏的本机缓存，原始内容已保留，暂未替换配置", { duration: 12000 }); return false; }
+          }
+          rejectedCache = null;
           memory = raw;
           try { localStorage.setItem(KEY, raw); } catch (e) { /* storage blocked: memory only */ }
+          return true;
         }
         function on(evt, fn) { (handlers[evt] = handlers[evt] || []).push(fn); }
         function emit(evt, d) {
@@ -535,13 +545,16 @@
             try { fn(d); } catch (e) { console.error(e); }
           });
         }
-        function commit(fn, label) {
-          undoStack.push(structuredClone(state));
-          if (undoStack.length > 50) undoStack.shift();
+        function commit(fn, label, recover) {
+          var before = structuredClone(state);
           fn(state);
           if (SP) SP.prune(state); /* 删项目 / 删分组后清掉空间里的悬空引用（同一次提交，可一起撤销） */
-          save(); render();
+          if (save(recover) === false && recover === true) { state = before; render(); return false; }
+          undoStack.push(before);
+          if (undoStack.length > 50) undoStack.shift();
+          render();
           emit("change", { label: label || "" });
+          return true;
         }
         function undo() {
           if (!undoStack.length) { toast("没有可撤销的操作"); return false; }
@@ -696,6 +709,7 @@
         window.App = {
           get state() { return state; },
           set state(v) { state = v; },
+          get cacheRejected() { return rejectedCache !== null; },
           defaults: defaults,
           save: save, commit: commit, undo: undo, render: render,
           on: on, emit: emit, toast: toast,
@@ -765,7 +779,7 @@
         document.addEventListener("visibilitychange", function () { if (!document.hidden) tick(); });
       })();
     </script>
-    <script src="nocturne.js?v=2026101802"></script>
+    <script src="nocturne.js?v=2026101803"></script>
     <script>
       /* Stage 2a · edit mode. Uses only the App API.
          "edit-item" / "add-item" listeners set d.handled = true; otherwise a 即将上线 toast shows. */
@@ -2100,13 +2114,21 @@
           else if (a === "cancel") showCf(false);
           else if (a === "confirm") {
             download("yeqv-before-reset-" + stamp(true) + ".json");
-            A.commit(function (s) { Object.keys(s).forEach(function (k) { delete s[k]; }); Object.assign(s, structuredClone(A.defaults)); }, "reset");
+            if (A.commit(function (s) { Object.keys(s).forEach(function (k) { delete s[k]; }); Object.assign(s, structuredClone(A.defaults)); }, "reset", true) === false) return showErr("无法备份损坏的本机缓存，未恢复默认");
             showCf(false); undoToast("已恢复默认");
           }
         });
         function valid(d) {
-          return d && typeof d === "object" && Array.isArray(d.groups) && d.groups.every(function (g) {
-            return g && typeof g === "object" && (g.items == null || Array.isArray(g.items)) && (g.items || []).every(function (i) { return i && i.title && (i.lan || i.wan); });
+          return window.NocturneConfigShape.valid(d, { settingsOptional: true });
+        }
+        function fillIds(list) {
+          var seen = new Set();
+          list.forEach(function (item) { if (item.id != null) seen.add(String(item.id)); });
+          list.forEach(function (item) {
+            if (item.id != null) return;
+            var base = A.util.uid(), id = base, suffix = 0;
+            while (seen.has(String(id))) id = base + "-" + (++suffix);
+            item.id = id; seen.add(String(id));
           });
         }
         D.addEventListener("change", function (e) {
@@ -2122,12 +2144,15 @@
             var bad = A.util.url.checkConfig(data);
             if (bad.length) return showErr("文件里有 " + bad.length + " 个不安全的地址（只支持 http/https），未导入：" + bad.slice(0, 3).map(function (x) { return x.where + "「" + A.util.url.show(x.value) + "」"; }).join("；"));
             showErr("");
-            download("yeqv-before-import-" + stamp(true) + ".json");
             var base = structuredClone(A.defaults), merged = Object.assign(base, data);
-            merged.settings = Object.assign(structuredClone(A.defaults.settings), data.settings && typeof data.settings === "object" ? data.settings : {});
-            merged.groups.forEach(function (g) { g.items = g.items || []; g.id = g.id || A.util.uid(); g.items.forEach(function (i) { i.id = i.id || A.util.uid(); }); });
+            merged.settings = Object.assign(structuredClone(A.defaults.settings), data.settings || {});
+            var items = [];
+            merged.groups.forEach(function (g) { if (g.items == null) g.items = []; items = items.concat(g.items); });
+            fillIds(merged.groups); fillIds(items); fillIds(merged.settings.engines);
             if (SPm) SPm.normalize(merged); /* 重名加序号、清悬空引用（文件里没有 spaces = 只有「全部」） */
-            A.commit(function (s) { Object.keys(s).forEach(function (k) { delete s[k]; }); Object.assign(s, merged); }, "import");
+            if (!window.NocturneConfigShape.valid(merged)) return showErr("文件不是有效的夜曲配置");
+            download("yeqv-before-import-" + stamp(true) + ".json");
+            if (A.commit(function (s) { Object.keys(s).forEach(function (k) { delete s[k]; }); Object.assign(s, merged); }, "import", true) === false) return showErr("无法备份损坏的本机缓存，未导入");
             undoToast("已导入");
           }, function () { showErr("文件不是有效的夜曲配置"); });
         });

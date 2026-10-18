@@ -232,11 +232,17 @@
   }
   /** 拉下来的服务器配置 + 本机的设备状态 */
   function adopt(data) {
-    var s = normalize(data), cur = A.state || {};
+    var s = normalize(structuredClone(data)), cur = A.state || {};
     var net = cur.settings && cur.settings.net;
     if (net) s.settings.net = net; else delete s.settings.net;
     s.recent = Array.isArray(cur.recent) ? cur.recent.slice() : [];
     return s;
+  }
+  function acceptConfig(data) {
+    var candidate = adopt(data), previous = A.state;
+    A.state = candidate;
+    if (A.save(true) === false) { A.state = previous; throw new Error("无法保留损坏的本机缓存，配置未替换"); }
+    A.render();
   }
   /** SHA-256(UTF-8) → hex。纯 JS、同步：http:// 内网访问（非安全上下文）没有 crypto.subtle，两种情况结果一致。
    *  用来判断「这份内容是不是上次那次推送」→ 复用 opId；弱哈希会让不同内容撞上同一个 opId，被服务器当成重复推送吞掉。 */
@@ -291,7 +297,7 @@
     ls("set", VER, String(ver)); ls("set", OWNER, N.user.name);
     if (snapshot() === raw) ls("del", DIRTY);
   }
-  function schedule() { if (!N.user) return; markDirty(); clearTimeout(timer); timer = setTimeout(push, 800); }
+  function schedule() { if (!N.user || A.cacheRejected) return; markDirty(); clearTimeout(timer); timer = setTimeout(push, 800); }
   /** 迁移后的规范化读取只可替换同一份已确认快照；等待期间的新编辑必须保留。 */
   function canonicalizeAccepted(raw, ver) {
     var controller = typeof AbortController === "function" ? new AbortController() : null, timeout;
@@ -303,8 +309,8 @@
     });
     return Promise.race([api("GET", "config", undefined, controller ? { signal: controller.signal } : undefined), deadline]).then(function (d) {
       if (snapshot() !== raw || serverVer !== ver || conflictInfo) return;
-      if (!d || !d.data || d.version < ver) return;
-      A.state = adopt(d.data); A.save(); A.render();
+      if (!d || !d.data || !Number.isSafeInteger(d.version) || d.version < ver) return;
+      acceptConfig(d.data);
       markSynced(d.version, snapshot());
     }).catch(function (e) {
       if (e && e.status === 401) expired();
@@ -315,6 +321,7 @@
   }
   /** opts.keepalive：页面切到后台时用，body 不超过 60KB 才带 keepalive（超过会被浏览器直接拒绝） */
   function push(opts) {
+    if (A.cacheRejected) return;
     opts = opts && typeof opts === "object" && (opts.keepalive || opts.retry) ? opts : {};
     if (inflight) { dirty = true; return; }
     if (conflictInfo) return; // 冲突还没处理：先不推，本机修改照常存在本机（脏标记保留）
@@ -373,9 +380,10 @@
     }).finally(function () { inflight = false; if (dirty) schedule(); });
   }
   function normalize(s) {
+    if (!window.NocturneConfigShape.valid(s)) throw new Error("服务器配置格式不正确");
     s.settings = Object.assign(structuredClone(A.defaults.settings), s.settings || {});
-    s.groups = Array.isArray(s.groups) ? s.groups : [];
     if (window.NocturneSpaces) window.NocturneSpaces.normalize(s); // 空间：清悬空引用（例如回滚到旧版期间删掉的分组）；没有 spaces 字段时不动
+    if (!window.NocturneConfigShape.valid(s)) throw new Error("服务器配置格式不正确");
     return s;
   }
   function pull(intent, opts, raw) {
@@ -385,7 +393,7 @@
       if (!d || !d.data || !Number.isSafeInteger(d.version) || d.version < 0) return false;
       if (conflictInfo || snapshot() !== read.raw || serverVer !== read.baseVersion || lastSent !== read.confirmedRaw) return false;
       if (d.version < serverVer || (!intent && d.version === serverVer)) return false;
-      A.state = adopt(d.data); A.save(); A.render();
+      acceptConfig(d.data);
       markSynced(d.version, snapshot());
       return true;
     });
@@ -475,8 +483,8 @@
       return api("GET", "config").then(function (d) {
         if (!keepChoice()) return;
         if (!d || !d.data || !Number.isSafeInteger(d.version) || d.version < choice.baseVersion) throw new Error("服务器配置无效");
+        acceptConfig(d.data);
         conflictInfo = null; closeConflict();
-        A.state = adopt(d.data); A.save(); A.render();
         markSynced(d.version, snapshot()); opDone(choice.raw);
         A.toast(destination === "nas" ? "已改用服务器版本 · 本机版本已存入「较早的版本」" : "已改用服务器版本 · 已发起本机版本文件下载", { duration: 6000 });
       });
@@ -545,9 +553,9 @@
     function bkRestore(id, label) {
       api("GET", "config?backup=" + encodeURIComponent(id)).then(function (d) {
         if (!d || !d.data) throw new Error("这个版本已经不在了");
-        restoreNext = true; // 推上去时带 restore:true：当前版本先进服务器备份，可以再换回来
         if (d.data.spaces === undefined && Array.isArray(A.state.spaces)) d.data.spaces = structuredClone(A.state.spaces); // 恢复 V2 之前的备份：保留现有空间定义（悬空引用随后清掉）
-        A.state = adopt(d.data); A.save(); A.render(); // 内网/外网、最近使用是这台设备自己的，不跟着恢复
+        acceptConfig(d.data);
+        restoreNext = true; // 推上去时带 restore:true：当前版本先进服务器备份，可以再换回来
         bkClose();
         A.toast("已恢复到 " + label + "的版本");
       }).then(null, function (e) {
@@ -705,7 +713,13 @@
     containerField();
 
     var start, localVer = +ls("get", VER) || 0;
-    if (N.dirty && N.version) {
+    if (A.cacheRejected) {
+      unlock(); serverVer = N.version || 0; lastSent = null;
+      pull("recovery").catch(function (e) { if (e.status === 401) expired(); }).then(function () {
+        if (A.cacheRejected) A.toast("本机缓存无法读取，原始内容已保留。可导入配置、恢复默认或重新载入以重试 NAS", { duration: 12000 });
+      });
+      start = Promise.resolve();
+    } else if (N.dirty && N.version) {
       // 本机有上次没推上去的修改：先显示本机、推上去，绝不静默用服务器版覆盖。
       //  - 服务器没变：正常推送
       //  - 服务器变了：用本机旧的 ver 作 baseVersion 推。若这份修改其实已经同步过（同一个 opId）→ 服务器认出重复，拉最新版；
@@ -748,7 +762,7 @@
       A.on("change", schedule);
       A.on("render", schedule);
       var save = A.save;
-      A.save = function () { save.apply(this, arguments); schedule(); };
+      A.save = function () { var saved = save.apply(this, arguments); if (saved !== false) schedule(); return saved; };
       if (snapshot() !== lastSent) schedule();
       pullStatus();
       setInterval(function () { if (!document.hidden) pullStatus(); }, 30000);
@@ -762,6 +776,7 @@
       // 从往返缓存（bfcache）恢复：serverVer 可能已过时，先刷新，避免误报冲突
       window.addEventListener("pageshow", function (e) { if (e.persisted) { pull(false).then(null, function () {}); pullStatus(); } });
       window.addEventListener("pagehide", function () {
+        if (A.cacheRejected) return;
         if (snapshot() === lastSent || conflictInfo || snapshot() === rejectedRaw) return; // 冲突未处理 / 服务器已拒收这份空间设置时不发；正在发的那次可能会被页面卸载中断：照样补发（同一个 opId，服务器不会重复记版本）
         var raw = snapshot(), str = JSON.stringify({ baseVersion: serverVer, opId: opFor(raw), data: JSON.parse(raw), caps: CAPS });
         markDirty();
