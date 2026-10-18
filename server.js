@@ -1312,7 +1312,7 @@ function probe(url, restricted) {
         rejectUnauthorized: PROBE_TLS_STRICT, // 默认 false：家里的自签名证书也算在线
         // 只连接上面检查过的地址（不再二次解析，防 DNS rebinding）；Host / SNI 仍是原主机名
         // o.all：返回检查过的全部地址，Node 的 happy-eyeballs 才能从 IPv6 回退到 IPv4
-        lookup: (h, o, cb) => (o && o.all ? cb(null, v.addrs.map((a) => ({ address: a.address, family: a.family }))) : cb(null, v.addrs[0].address, v.addrs[0].family)),
+        lookup: (h, o, cb) => process.nextTick(() => (o && o.all ? cb(null, v.addrs.map((a) => ({ address: a.address, family: a.family }))) : cb(null, v.addrs[0].address, v.addrs[0].family))),
         headers: { "User-Agent": "Nocturne-StatusProbe/" + VERSION, Accept: "*/*", Connection: "close" },
       }, (res) => {
         const ms = Number(process.hrtime.bigint() - t0) / 1e6;
