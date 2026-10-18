@@ -1289,6 +1289,8 @@
           var v = F.url.value.trim(), u = v && parse(v); if (!u) return;
           var n = norm(v), p = priv(u), tgt = p ? F.lan : F.wan, oth = p ? F.wan : F.lan;
           F.url.value = n;
+          if (n === s.urlApplied) return;
+          s.urlApplied = n;
           if (s.copied && s.copied.el === oth && oth.value === s.copied.v) oth.value = "";
           tgt.value = n; s.copied = { el: tgt, v: n };
           if (!F.nm.value.trim()) { var g = guess(u); if (g) { F.nm.value = Array.from(g).slice(0, 20).join(""); count(); } }
@@ -1347,11 +1349,12 @@
           var gs = A.state.groups, g = gs.filter(function (x) { return x.id === o.gid; })[0], item = g && o.id ? g.items.filter(function (x) { return x.id === o.id; })[0] : null;
           if (o.id && !item) return;
           build(!item);
-          s = { id: item ? item.id : null, gid0: g ? g.id : null, mode: "auto", lib: "", bg: "", upload: "", qn: 0, touched: false };
+          s = { id: item ? item.id : null, gid0: g ? g.id : null, mode: "auto", lib: "", bg: "", upload: "", qn: 0, touched: false, urlApplied: "" };
           setGroup(g ? g.id : gs[0] ? gs[0].id : "__new");
           if (item) {
             var ic = item.icon || {}, v = ic.value || "";
             F.url.value = item.wan || item.lan || ""; F.nm.value = item.title || ""; F.lan.value = item.lan || ""; F.wan.value = item.wan || ""; F.desc.value = item.desc || "";
+            s.urlApplied = norm(F.url.value);
             F.aliases.value = Array.isArray(item.aliases) ? item.aliases.filter(function (x) { return typeof x === "string"; }).join(", ") : "";
             s.copied = { el: item.wan ? F.wan : F.lan, v: F.url.value }; s.bg = ic.bg || "";
             if (ic.type === "iconify" && v) { if (v !== "selfhst:" + slug(item.title || "")) { s.mode = "lib"; s.lib = v; } }
