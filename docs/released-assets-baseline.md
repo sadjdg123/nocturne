@@ -17,3 +17,7 @@ RC.5 构建成功后登记完整提交 `c5f36addc2d85b8ed24edb605015b7ff0be9070b
 ## V2.1.0 发布登记
 
 发布成功后登记完整提交 `1bb4b2087697f1b38cb0b0b0332377ec55f1778c` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-1bb4b20`。清单保留 V1.1、RC.1–RC.5 与 V2.0.0，增加 V2.1.0；Midnight 样式/行为使用新 URL（v4/v3），旧 URL 内容约束保持严格。
+
+## V2.1.3 发布登记
+
+发布后登记完整提交 `9c960614ab41f21159193519df04833a9e371a5f` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-9c96061`，清单保留全部历史版本。新增 config-shape.js 有独立缓存 URL，nocturne.js 使用新的版本 URL；共享 URL 的历史内容约束保持严格。

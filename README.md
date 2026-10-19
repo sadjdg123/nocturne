@@ -15,7 +15,7 @@
 需要 DSM 7.2+ Container Manager，操作由用户自行完成。
 
 1. 准备项目目录与 data/，复制 docker-compose.yml。
-2. 模板已固定到 V2.1.2 的已验证镜像；后续按 [版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest) 更新固定镜像。
+2. 模板已固定到 V2.1.3 的已验证镜像；后续按 [版本表](docs/HANDOFF-CODEX.md#01-版本--镜像--digest) 更新固定镜像。
 3. 按实际用户设置 PUID/PGID（常见 1026/100），确认端口不冲突，然后创建并启动项目。
 4. 在内网打开 `http://NAS的IP:8088`，创建管理员（新密码 8–200 字）。初始化前不要公开入口，防止他人抢先创建。
 5. 确认健康、配置保存与重启持久性。新安装有副本站工具可选，见 [人工验收](docs/v2.0-manual-acceptance.md)。

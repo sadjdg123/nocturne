@@ -12,7 +12,8 @@ V2.1.3 整合已独立复查的同步防丢、结构校验、备份完整性、�
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
-| **[V2.1.2（当前正式版）](v2.1.2-report.md)** | `v2@9557228e225bc8198977bcbb9cfc200ea61a00d6` | `ghcr.io/sadjdg123/nocturne:sha-9557228@sha256:01adec0f1af36b3c72227b899ea4797ddff41d01aef9ae39c729c4f5480bd5b9` | [39032263501](https://github.com/sadjdg123/nocturne/actions/runs/39032263501)（540/540，双架构） |
+| **[V2.1.3（当前正式版）](v2.1.3-report.md)** | `main@9c960614ab41f21159193519df04833a9e371a5f` | `ghcr.io/sadjdg123/nocturne:sha-9c96061@sha256:04f56a12e727ae6c215e36bfc66d9952fda2ad9361966a570fd2ed040d3199c4` | [39205996183](https://github.com/sadjdg123/nocturne/actions/runs/39205996183)（738/738，双架构） |
+| **[V2.1.2（上一正式版）](v2.1.2-report.md)** | `v2@9557228e225bc8198977bcbb9cfc200ea61a00d6` | `ghcr.io/sadjdg123/nocturne:sha-9557228@sha256:01adec0f1af36b3c72227b899ea4797ddff41d01aef9ae39c729c4f5480bd5b9` | [39032263501](https://github.com/sadjdg123/nocturne/actions/runs/39032263501)（540/540，双架构） |
 | **[V2.1.1（上一正式版）](v2.1.1-report.md)** | `v2@7508c9f69059b1cc71612749c1271fabd80e6d49` | `ghcr.io/sadjdg123/nocturne:sha-7508c9f@sha256:e249200989df5d75699834d7f9e401a2ee15ff711cbb40e1c7a20c0e37ea2a8a` | [37954611423](https://github.com/sadjdg123/nocturne/actions/runs/37954611423)（527/527，双架构） |
 | **[V2.1.0（上一正式版）](v2.1.0-report.md)** | `v2@1bb4b2087697f1b38cb0b0b0332377ec55f1778c` | `ghcr.io/sadjdg123/nocturne:sha-1bb4b20@sha256:b6dccc1ca3c9af6fb8af3fba21f45cd72d81b413fd439000e403a4abb1324174` | [37941520960](https://github.com/sadjdg123/nocturne/actions/runs/37941520960)（516/516，双架构） |
 | **[V2.0.0（上一正式版）](v2.0.0-report.md)** | `v2@93d9bec8e4e581107d375d57f9870b3353ade879` | `ghcr.io/sadjdg123/nocturne:sha-93d9bec@sha256:477db409164737bcf6c9439703c64052628aa91cff2f009b5d8056dd985d39e5` | [37926078600](https://github.com/sadjdg123/nocturne/actions/runs/37926078600)（512/512，双架构） |
