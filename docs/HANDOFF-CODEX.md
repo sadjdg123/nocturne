@@ -1,6 +1,6 @@
 # 夜曲 Nocturne · 开发交接
 
-V2.1.2 修复迁移同步期间的新编辑保护，保留 Midnight 布局和公网域名 Secure Cookie 策略；数据、认证和备份恢复沿用 V2.0.0。main 是当前正式维护入口，已接入 V2.1.2；v2 保留既有开发历史。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
+V2.1.3 整合已独立复查的同步防丢、结构校验、备份完整性、媒体配额/缓存与探测错误修复，并让图标配额统计在磁盘或权限异常时停止新增。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
 
 **边界**：经用户授权，日常修复在 main 维护并使用现有 Actions 发布；不覆盖历史 SHA 镜像标签、不操作 NAS/生产数据。latest/main 是随正式分支更新的浮动镜像标签。jingbo.men 作为本人私人首页；不擅自修改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
 
@@ -8,7 +8,7 @@ V2.1.2 修复迁移同步期间的新编辑保护，保留 Midnight 布局和公
 
 ### 0.1 版本 / 镜像 / digest
 
-正式版发布结果见 [V2.1.2 发布记录](v2.1.2-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
+正式版发布结果见 [V2.1.3 发布记录](v2.1.3-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
@@ -82,6 +82,7 @@ API（全部在 `/api` 下；除 health / me / setup / login 外需要登录）�
 | `status.js` | 状态的「可信」标注（只说测到的） |
 | `netmode.js` | 三态网络（自动 / 优先内网 / 优先外网）地址选择 |
 | `cmdrank.js` | 命令面板排序 |
+| `config-shape.js` | 前后端共用的配置集合与身份校验；保留未知扩展字段，拒绝坏候选并保护原缓存 |
 | `urlcheck.js` | URL 白名单（前后端共用：只收 http/https） |
 | `fonts/`、壁纸、图标 | 子集化 woff2（`tools/subset-fonts.py`）、默认壁纸、PWA 图标 |
 
