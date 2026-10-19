@@ -1048,12 +1048,12 @@ async function storeIcon(name, id, buf) {
 }
 /** 当前用户的图标文件数和总大小（replaceId：PUT 覆盖同一个 id 时，旧文件不计入） */
 async function iconUsage(name, replaceId) {
-  let files; try { files = await fsp.readdir(iconDir(name)); } catch (e) { return { count: 0, bytes: 0 }; }
+  let files; try { files = await fsp.readdir(iconDir(name)); } catch (e) { if (e.code !== "ENOENT") throw e; return { count: 0, bytes: 0 }; }
   let count = 0, bytes = 0;
   for (const f of files) {
     const m = /^([A-Za-z0-9_-]{16,64})\.(png|jpg|webp)$/.exec(f);
     if (!m || m[1] === replaceId) continue;
-    try { bytes += (await fsp.stat(path.join(iconDir(name), f))).size; count++; } catch (e) { /* 刚被删 */ }
+    try { bytes += (await fsp.stat(path.join(iconDir(name), f))).size; count++; } catch (e) { if (e.code !== "ENOENT") throw e; /* 刚被删 */ }
   }
   return { count, bytes };
 }
