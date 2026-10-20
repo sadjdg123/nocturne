@@ -1,6 +1,6 @@
 # 夜曲 Nocturne · 开发交接
 
-V2.1.3 整合已独立复查的同步防丢、结构校验、备份完整性、媒体配额/缓存与探测错误修复，并让图标配额统计在磁盘或权限异常时停止新增。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
+V2.2.0 把首页内联脚本/样式拆成带内容指纹的静态文件（首页压缩后约 2KB），带 `?v=` 的静态文件改为一年 immutable 缓存，并启用首页 CSP；V2.1.3 的同步、备份、媒体与探测修复全部保留。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
 
 **边界**：经用户授权，日常修复在 main 维护并使用现有 Actions 发布；不覆盖历史 SHA 镜像标签、不操作 NAS/生产数据。latest/main 是随正式分支更新的浮动镜像标签。jingbo.men 作为本人私人首页；不擅自修改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
 
@@ -8,7 +8,7 @@ V2.1.3 整合已独立复查的同步防丢、结构校验、备份完整性、�
 
 ### 0.1 版本 / 镜像 / digest
 
-正式版发布结果见 [V2.1.3 发布记录](v2.1.3-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
+正式版发布结果见 [V2.2.0 发布记录](v2.2.0-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
@@ -54,7 +54,7 @@ V2.1.3 整合已独立复查的同步防丢、结构校验、备份完整性、�
 | 校验 | `aliasesError`、`spacesError`、`reconcileSpaces`（按客户端 `caps` 决定是否接受 / 保留 `spaces`）、`newUnsafeUrls`（URL 白名单，旧值豁免规则见 README） |
 | wallpapers / icons | 壁纸 `wallpapers/<用户>.<ext>`（≤15MB，嗅探格式）；上传图标 `icons/<用户>/<id>.<ext>`（≤512KB、≤500 个 / 50MB，引用消失 24h 后清理）；旧 data URL 启动 / 同步时迁移成文件（`migrateAll`） |
 | status | 服务状态探测 `runProbes`（`STATUS_INTERVAL`，`vetTarget` 防 SSRF：私网 / 元数据地址规则、`PROBE_PRIVATE_ONLY`、`PROBE_ALLOW`、每账户 / 总量上限）；docker.sock（可选，只读）容器状态 |
-| static | `serveStatic` / `serveIndex`（注入 `window.NOCTURNE`：用户、版本、`recovered` 等；gzip；缓存刷新用资源指纹，见 `test/cache-bust.test.js`） |
+| static | `serveStatic`（字体与 `?v=` 引用 immutable，其余 1 天重新校验）/ `serveIndex`（注入 `<script type="application/json" id="nocturne-boot">`：用户、版本、`recovered` 等，由首帧启动脚本读成 `window.NOCTURNE`；`pageCsp` 按内联脚本内容 sha256 生成 CSP；gzip；缓存刷新见 `test/cache-bust.test.js`、`test/csp.test.js`） |
 | icon proxy | Iconify 上游代理 + `data/cache/` 磁盘缓存（大小 / 数量 / TTL 上限，6 小时清扫） |
 | API | `api()` 里按路径分支（见下表） |
 | server / main | 安全响应头；`main()`：cookie 配置校验（不合法退出码 2）→ `ensureDirs` → 认证事务恢复（失败停止启动）→ `loadState` → `preV2Snapshot` → `sweepStaleTmp` → `migrateAll`（每个账户：迁移 + `guardHeal` + `guardRecover`）→ listen → 探测 / 缓存定时器。`require()` 时不启动，只导出单元测试用的函数 |
@@ -76,7 +76,9 @@ API（全部在 `/api` 下；除 health / me / setup / login 外需要登录）�
 
 | 文件 | 作用 |
 |------|------|
-| `index.html` | 页面 + 核心 `window.App`（状态、渲染、编辑、命令面板、`toast`、撤销、设置面板）；纯静态模式（直接打开文件）也能用 |
+| `index.html` | 页面骨架 + 首帧前的两段内联脚本（`html[data-ui]`、后端启动数据）；纯静态模式（直接打开文件）也能用。不要再加内联脚本 / 样式 / `on*=` 事件属性 |
+| `app.js` / `app-ui.js` | 核心 `window.App`（状态、渲染、`toast`、撤销）/ 编辑、拖动、添加、状态、设置、命令面板、空间（原内联脚本，顺序与 IIFE 边界不变） |
+| `app.css` / `app-ui.css` | 原内联样式：基础样式在 `midnight.css` 之前、面板样式在之后（保持层叠顺序）。这四个文件的 `?v=` = 内容 sha256 前 10 位（`test/csp.test.js`） |
 | `nocturne.js` | NAS 模式同步层：登录界面、拉 / 推配置（防抖 800ms、opId、409 冲突面板、离线 dirty）、设置 → 账户（用户管理、连接诊断、「恢复较早的版本」）、找回提示、管理员旁路写入失败提示（RC.3） |
 | `spaces.js` | 空间模型（前后端共用）：`data.spaces=[{id,name,groupIds,itemIds?,excludeItemIds?,theme?,density?}]`，只存引用不复制项目；`check` / `prune` / `view` / `reorder` |
 | `midnight.js` / `midnight.css` | V2 新外观（本机设置，可切回经典） |
@@ -148,6 +150,6 @@ NAS 升级由用户执行：停唯一写入实例 → 完整备份校验 → 固
 - 同步认证事务和大资产删除可能阻塞事件循环；性能和适用边界见工程报告。不要借瘦身改事务、Cookie 默认名、空间语义或数据格式。
 - spaces 自动找回受最近20版本及指纹规则限制；RC.1 旧旁路无法当作新格式使用，必要时人工恢复快照。
 - 字体/图标/manifest 无版本 URL 时保持内容不变或换 URL；兼容与缓存清单不能按年龄删除。
-- 内联脚本多，页面 CSP 尚未启用；先讨论再处理，保持已验收 UI。Docker socket 风险见 README，默认不挂载。
+- 首页 CSP 已启用（V2.2.0）：script-src 不含 `unsafe-inline`，新增首帧内联脚本会自动按 hash 放行，其余代码放进带 `?v=` 的文件；图片 / 连接放开 http(s) 以支持任意图标、壁纸与浏览器探测。Docker socket 风险见 README，默认不挂载。
 
 提交：类型(范围): 简体中文说明；修复与对应回归靠近。日志/文档不含密码、令牌、会话或真实数据。tools/*.sh 用 sh 调用。保留有复现价值的历史材料，明确无用产物可清理，不为减少行数重构稳定模块。

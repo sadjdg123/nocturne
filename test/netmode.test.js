@@ -60,7 +60,7 @@ test("pick(): preferred address, single-address fallback, invalid / unsafe never
 
 test("browser global + index.html wiring: A.url is the single selector and uses netmode", () => {
   const fs = require("node:fs"), path = require("node:path");
-  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  const html = require("./page-source").pageSource(); // index.html + 它引用的 app.js / app-ui.js 等
   assert.match(html, /<script src="netmode\.js\?v=\d+"><\/script>/);
   assert.equal((html.match(/A\.url = function/g) || []).length, 1, "exactly one address selector");
   assert.match(html, /NM\.pick\(item, mode\(\), A\.util\.url\.safeNav\)/);

@@ -14,7 +14,7 @@ const { openPage, SKIP, sleep } = require("./browser");
 
 const ROOT = path.join(__dirname, "..");
 const CSS = fs.readFileSync(path.join(ROOT, "public", "midnight.css"), "utf8");
-const HTML = fs.readFileSync(path.join(ROOT, "public", "index.html"), "utf8");
+const HTML = require("./page-source").pageSource(); // index.html + 它引用的 app.js / app-ui.js 等
 const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "v1.1-config.json"), "utf8"));
 const LONG = "一个特别特别长的空间名称用来测试省略号显示";
 function data(many) {
@@ -77,6 +77,7 @@ test("dock CSS: background isolation (opaque gradient + hairline + inner highlig
   assert.match(m, /\.mn-kb \.mn-dockscrim \{ opacity: 0; \}/, "scrim hides with the soft keyboard");
   assert.match(m, /body\.editing \.x-dock \{ display: none; \}/, "edit bar replaces the dock instead of stacking on it");
   assert.match(CSS, /^\.mn-sky, \.mn-sp, \.mn-ind, \.mn-setui, \.mn-dockscrim \{ display: none; \}/m, "scrim hidden outside 新版 mobile (classic / desktop)");
+  assert.ok(HTML.indexOf("track.innerHTML = allSpaces()") > 0 && HTML.indexOf("SPC.reveal = reveal") > HTML.indexOf("track.innerHTML = allSpaces()"), "switcher code found");
   assert.doesNotMatch(HTML.slice(HTML.indexOf("track.innerHTML = allSpaces()"), HTML.indexOf("SPC.reveal = reveal")), /\.scrollIntoView\(/, "switcher no longer uses scrollIntoView (page jump)");
 });
 

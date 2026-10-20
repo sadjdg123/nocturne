@@ -38,7 +38,7 @@ test("latestCheck picks the newest checkedAt and ignores junk", () => {
 });
 
 test("index.html wires the action through statusAction/statusReport (no hard-coded 重新检测 for NAS)", () => {
-  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  const html = require("./page-source").pageSource(); // index.html + 它引用的 app.js / app-ui.js 等
   assert.match(html, /NocturneRank\.statusAction\(nasMode\(\)\)/);
   assert.match(html, /statusReport\(true, d, at\)/);
   assert.doesNotMatch(html, /重新读取 NAS 的检测结果/);

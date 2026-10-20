@@ -4,7 +4,7 @@
  *  2. 对每个已发布版本（V1.1 / RC.1 / RC.2 / RC.3 / RC.4 / RC.5 / V2.0.0 / V2.1.0 / V2.1.1 / V2.1.2 / V2.1.3，清单 test/fixtures/released-assets.json，由 tools/gen-released-assets.js 从远程提交生成）：
  *     浏览器会按固定 URL 缓存的每个本地静态文件（index.html 的 src / href / url()、css 里的 url()、manifest 图标），
  *     现在的 URL（路径 + ?v=）若和该版本用过的相同，内容必须逐字节相同；内容变了就必须换 ?v=。清单不依赖 git，CI 有完整历史时再按提交核对清单本身。
- *  3. 缓存头：index.html no-store；字体文件 immutable；fonts.css 与其他静态文件 1 天后重新校验 + ETag / 304 */
+ *  3. 缓存头：index.html no-store；字体文件与带 ?v= 的引用 immutable（V2.2.0 起）；fonts.css 与其他不带版本号的静态文件 1 天后重新校验 + ETag / 304 */
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
@@ -102,7 +102,7 @@ test("manifest matches the released commits (git objects; required in CI with fe
   if (!commitsSeen) t.diagnostic("released commits not in local git (remote commit SHAs differ from local); checked " + blobsSeen + " blobs only");
 });
 
-test("cache headers: index no-store; woff2 immutable; fonts.css and scripts revalidate with ETag / 304", async (t) => {
+test("cache headers: index no-store; woff2 and ?v= assets immutable; fonts.css and unversioned files revalidate with ETag / 304", async (t) => {
   const srv = await startServer();
   t.after(() => srv.stop());
   const c = client(srv.base);
@@ -112,9 +112,19 @@ test("cache headers: index no-store; woff2 immutable; fonts.css and scripts reva
   assert.match((await c.get("/fonts/" + font)).headers.get("cache-control"), /immutable/);
   const css = await c.get("/fonts/fonts.css");
   assert.equal(css.headers.get("cache-control"), "public, max-age=86400, must-revalidate", "fonts.css is not pinned for a year");
-  const jsUrl = "/" + idx.body.toString("utf8").match(/<script src="(nocturne\.js\?v=\d+)"/)[1];
+  const html = idx.body.toString("utf8");
+  const versioned = [...html.matchAll(/(?:src|href)="([\w./-]+\?v=[\w.-]+)"/g)].map((m) => m[1]);
+  assert.ok(versioned.length >= 10 && versioned.includes(html.match(/<script src="(nocturne\.js\?v=\d+)"/)[1]), "versioned refs: " + versioned.join(", "));
+  for (const u of versioned) {
+    const r = await c.get("/" + u);
+    assert.equal(r.status, 200, u);
+    assert.equal(r.headers.get("cache-control"), "public, max-age=31536000, immutable", u + " is pinned (content change ⇒ new ?v=)");
+  }
+  const jsUrl = "/" + html.match(/<script src="(nocturne\.js\?v=\d+)"/)[1];
   const js = await c.get(jsUrl);
-  assert.equal(js.headers.get("cache-control"), "public, max-age=86400, must-revalidate");
   const etag = js.headers.get("etag"); assert.ok(etag);
   assert.equal((await c.get(jsUrl, { "If-None-Match": etag })).status, 304);
+  for (const u of ["/nocturne.js", "/favicon.svg", "/site.webmanifest", "/nocturne.js?x=1", "/nocturne.js?v=1&x=2"]) {
+    assert.equal((await c.get(u)).headers.get("cache-control"), "public, max-age=86400, must-revalidate", u + " (no plain ?v=) still revalidates");
+  }
 });

@@ -1476,10 +1476,11 @@ const MIME = {
 };
 const COMPRESSIBLE = /^(text\/|application\/(json|javascript|manifest)|image\/svg)/;
 const staticCache = new Map(); // file -> {mtimeMs, buf, gz, etag}
+const VERSIONED = /^\?v=[\w.-]+$/; // index.html 里的 ?v= 引用（asset-refs.js 的同一口径）
 
 function acceptsGzip(req) { return /\bgzip\b/.test(String(req.headers["accept-encoding"] || "")); }
 
-function serveStatic(req, res, pathname) {
+function serveStatic(req, res, pathname, search) {
   let rel;
   try { rel = decodeURIComponent(pathname); } catch (e) { return send(res, 400, "Bad Request"); }
   if (rel.endsWith("/")) rel += "index.html";
@@ -1496,8 +1497,9 @@ function serveStatic(req, res, pathname) {
   }
   const headers = {
     "Content-Type": c.type, ETag: c.etag, "Last-Modified": new Date(st.mtimeMs).toUTCString(), Vary: "Accept-Encoding",
-    // 只有字体文件本身长期缓存（文件名变了才会换内容）；fonts.css 和其他静态文件 1 天后重新校验，更新靠 index.html 里的 ?v= 版本号
-    "Cache-Control": /\/fonts\/[^/]+\.woff2$/.test(file) ? "public, max-age=31536000, immutable" : "public, max-age=86400, must-revalidate",
+    // 字体文件（文件名变了才会换内容）和带 ?v= 的引用（内容变了必须换 ?v=，见 test/cache-bust.test.js）长期缓存、不再校验；
+    // 不带版本号的 fonts.css、图标、manifest 等 1 天后重新校验
+    "Cache-Control": /\/fonts\/[^/]+\.woff2$/.test(file) || VERSIONED.test(search || "") ? "public, max-age=31536000, immutable" : "public, max-age=86400, must-revalidate",
   };
   if (req.headers["if-none-match"] === c.etag) { res.writeHead(304, headers); return res.end(); }
   if (c.gz && acceptsGzip(req)) return send(res, 200, c.gz, Object.assign(headers, { "Content-Encoding": "gzip" }));
@@ -1505,10 +1507,18 @@ function serveStatic(req, res, pathname) {
 }
 
 let indexCache = null;
+/* 首页 CSP：脚本只许本站文件 + index.html 里首帧前必须执行的内联脚本（按内容 sha256 放行，改了内联脚本自动跟着变）。
+ * 内联 style 属性（--h 色相、背景色等）很多，style-src 保留 'unsafe-inline'。图片 / 连接放开 http(s)：
+ * 项目图标与壁纸可以是任意 http(s) 地址，纯静态 / 服务器未给结果时浏览器会直接探测项目地址；data: / blob: 用于旧版内嵌图片迁移与上传预览。 */
+function pageCsp(html) {
+  const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => "'sha256-" + crypto.createHash("sha256").update(m[1], "utf8").digest("base64") + "'");
+  return ["default-src 'self'", "script-src 'self' " + hashes.join(" "), "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: http: https:",
+    "connect-src 'self' data: blob: http: https:", "font-src 'self'", "manifest-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"].join("; ");
+}
 function serveIndex(req, res) {
   assertAuthStorage();
   const file = path.join(PUBLIC_DIR, "index.html"), st = fs.statSync(file);
-  if (!indexCache || indexCache.mtimeMs !== st.mtimeMs) indexCache = { mtimeMs: st.mtimeMs, html: fs.readFileSync(file, "utf8") };
+  if (!indexCache || indexCache.mtimeMs !== st.mtimeMs) { const html = fs.readFileSync(file, "utf8"); indexCache = { mtimeMs: st.mtimeMs, html, csp: pageCsp(html) }; }
   const u = currentUser(req);
   const boot = {
     backend: true, version: u ? readConfig(u.name).version || 0 : 0,
@@ -1516,11 +1526,12 @@ function serveIndex(req, res) {
   };
   const rec = u && guardNotice(u.name);
   if (rec) boot.recovered = rec; // 回滚写保护刚自动找回过空间：页面提示一次
-  const tag = "<script>window.NOCTURNE=" + JSON.stringify(boot).replace(/</g, "\\u003c") + ";</script>";
+  // 启动数据是不执行的 JSON 数据块（CSP 下不需要放行），由 index.html 里按 hash 放行的启动脚本读出成 window.NOCTURNE
+  const tag = '<script type="application/json" id="nocturne-boot">' + JSON.stringify(boot).replace(/</g, "\\u003c") + "</script>";
   const html = Buffer.from(indexCache.html.replace("<!--nocturne:boot-->", tag));
   const headers = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", Vary: "Cookie, Accept-Encoding", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
-    // 不允许被别的网站嵌进 iframe（点击劫持）；用不到的浏览器能力一律关掉。内联脚本较多，暂不启用 CSP。
-    "X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(), geolocation=()" };
+    // 不允许被别的网站嵌进 iframe（点击劫持）；用不到的浏览器能力一律关掉
+    "X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(), geolocation=()", "Content-Security-Policy": indexCache.csp };
   if (acceptsGzip(req)) return send(res, 200, zlib.gzipSync(html, { level: 6 }), Object.assign(headers, { "Content-Encoding": "gzip" }));
   send(res, 200, html, headers);
 }
@@ -2068,7 +2079,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method Not Allowed");
     // 旧浏览器/工具会直接请求 /favicon.ico：给 SVG 图标（登录前也可访问）
     if (url.pathname === "/" || url.pathname === "/index.html") await prepareAuth(req);
-    return serveStatic(req, res, url.pathname === "/favicon.ico" ? "/favicon.svg" : url.pathname);
+    return serveStatic(req, res, url.pathname === "/favicon.ico" ? "/favicon.svg" : url.pathname, url.search);
   } catch (e) {
     if (!e.status) log("error", req.method, url.pathname, e.stack || e.message);
     if (e.close) res.setHeader("Connection", "close"); // 没读完的请求体不再接收

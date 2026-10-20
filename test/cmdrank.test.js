@@ -69,7 +69,7 @@ test("aliases are inert text: odd input never throws and is not interpreted", ()
 });
 
 test("palette wiring: '>' action mode, quick-open menu entry, visualViewport, ranking module", () => {
-  const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  const html = require("./page-source").pageSource(); // index.html + 它引用的 app.js / app-ui.js 等
   assert.match(html, /<script src="cmdrank\.js\?v=\d+"><\/script>/);
   assert.match(html, /R\.rank\(items\.map/);
   for (const k of ["net:auto", "net:lan", "net:wan", "recheck", "edit", "settings", "add"]) assert.ok(html.includes('k: "' + k + '"'), k);

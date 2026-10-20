@@ -64,7 +64,7 @@ test("no mock / simulated values in production code", () => {
     const src = fs.readFileSync(path.join(pub, f), "utf8");
     assert.doesNotMatch(src, /模拟数据|模拟在线|mock(ed)? (status|latency)/i, f);
   }
-  const html = fs.readFileSync(path.join(pub, "index.html"), "utf8");
+  const html = require("./page-source").pageSource(); // index.html + 它引用的 app.js / app-ui.js 等
   assert.doesNotMatch(html, /Math\.round\(performance\.now\(\) - t0\)/, "browser probes are not timed");
 });
 
