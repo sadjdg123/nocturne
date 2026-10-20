@@ -972,6 +972,7 @@ function sniffImage(buf) {
   return null;
 }
 const wallpaperBase = (name) => path.join(WALLPAPER_DIR, name.toLowerCase());
+const wpEtags = new Map(); // lname -> {key: 文件身份, etag}：内容 ETag 缓存，写入 / 删除壁纸时作废
 function findWallpaper(name) {
   for (const ext of Object.keys(WP_TYPES)) {
     const f = wallpaperBase(name) + "." + ext;
@@ -983,11 +984,13 @@ async function storeWallpaper(name, buf) {
   const ext = sniffImage(buf);
   if (!ext) throw Object.assign(new Error("只支持 JPEG / PNG / WebP 图片"), { status: 415 });
   const file = wallpaperBase(name) + "." + ext;
+  wpEtags.delete(name.toLowerCase());
   await writeFileAtomic(file, buf);
   for (const e of Object.keys(WP_TYPES)) if (e !== ext) await fsp.rm(wallpaperBase(name) + "." + e, { force: true });
   return ext;
 }
 async function removeWallpaper(name) {
+  wpEtags.delete(name.toLowerCase());
   for (const e of Object.keys(WP_TYPES)) await fsp.rm(wallpaperBase(name) + "." + e, { force: true });
 }
 function readRaw(req, limit) {
@@ -1903,7 +1906,12 @@ async function api(req, res, url) {
     if (m === "GET" || m === "HEAD") {
       const w = findWallpaper(me.name);
       if (!w) return json(res, 404, { error: "没有自定义壁纸" });
-      const buf = fs.readFileSync(w.file), etag = '"' + sha(buf) + '"';
+      const idKey = [w.file, w.st.ino, w.st.size, w.st.mtimeMs, w.st.ctimeMs].join("|"), hit = wpEtags.get(me.name.toLowerCase());
+      let buf = null, etag = hit && hit.key === idKey ? hit.etag : null;
+      if (!etag || req.headers["if-none-match"] !== etag) {
+        buf = await fsp.readFile(w.file); etag = '"' + sha(buf) + '"';
+        wpEtags.set(me.name.toLowerCase(), { key: idKey, etag });
+      }
       const headers = {
         "Content-Type": WP_TYPES[w.ext], ETag: etag, "Last-Modified": new Date(w.st.mtimeMs).toUTCString(), Vary: "Cookie",
         "Cache-Control": "private, no-cache",

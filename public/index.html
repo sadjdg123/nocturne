@@ -564,13 +564,14 @@
           return true;
         }
 
+        var SAFE_BG = /^(#[0-9a-f]{3,8}|[a-z]{3,20}|(rgba?|hsla?)\([0-9.,%\s\/+-]{1,48}\))$/i;
         function hue(t) { var h = 0; String(t || "").split("").forEach(function (c) { h = (h * 31 + c.charCodeAt(0)) % 360; }); return h; }
         function iconHTML(icon, title) {
           icon = icon || {};
           var letter = esc((Array.from(String(title || "?").trim())[0] || "?").toUpperCase());
           /* --h：按名称算的色相，新版外观里给字母徽记（只在没有真实图标时出现）一个稳定、克制的底色 */
           var h = hue(title);
-          var bg = ' style="--h:' + h + (icon.bg ? ";background:" + esc(icon.bg) : "") + '"';
+          var bg = ' style="--h:' + h + (icon.bg && SAFE_BG.test(String(icon.bg)) ? ";background:" + esc(icon.bg) : "") + '"';
           var fail = ' data-l="' + letter + '" onerror="App.util._fail(this)"';
           var v = String(icon.value || "");
           if (icon.type === "iconify" && v.indexOf(":") > 0) {
