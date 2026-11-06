@@ -8,11 +8,12 @@ V2.2.1 把运行环境升级到 Node 24 LTS，并更新 CI 动作版本，运行
 
 ### 0.1 版本 / 镜像 / digest
 
-正式版发布结果见 [V2.2.0 发布记录](v2.2.0-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
+正式版发布结果见 [V2.2.1 发布记录](v2.2.1-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
-| **[V2.2.0（当前正式版）](v2.2.0-report.md)** | `main@d0ff57d72158ff5f5452511cff9f04a0dd6a3f67` | `ghcr.io/sadjdg123/nocturne:sha-d0ff57d@sha256:4e7e17972635aa60a71c81871bfe5a15ca8f1129aeda05d2bf36eee22569120e` | [39410720272](https://github.com/sadjdg123/nocturne/actions/runs/39410720272)（746/746，双架构） |
+| **[V2.2.1（当前正式版）](v2.2.1-report.md)** | `main@6e81cf35b74af035ef54ca942f8f8497fc91ac97` | `ghcr.io/sadjdg123/nocturne:sha-6e81cf3@sha256:8971215f644b2b827508061c0aa74ae0f2e0df8354e02c5bbb144c99cf537e24` | [42260299008](https://github.com/sadjdg123/nocturne/actions/runs/42260299008)（748/748，双架构） |
+| **[V2.2.0（上一正式版）](v2.2.0-report.md)** | `main@d0ff57d72158ff5f5452511cff9f04a0dd6a3f67` | `ghcr.io/sadjdg123/nocturne:sha-d0ff57d@sha256:4e7e17972635aa60a71c81871bfe5a15ca8f1129aeda05d2bf36eee22569120e` | [39410720272](https://github.com/sadjdg123/nocturne/actions/runs/39410720272)（746/746，双架构） |
 | **[V2.1.3（上一正式版）](v2.1.3-report.md)** | `main@9c960614ab41f21159193519df04833a9e371a5f` | `ghcr.io/sadjdg123/nocturne:sha-9c96061@sha256:04f56a12e727ae6c215e36bfc66d9952fda2ad9361966a570fd2ed040d3199c4` | [39205996183](https://github.com/sadjdg123/nocturne/actions/runs/39205996183)（738/738，双架构） |
 | **[V2.1.2（上一正式版）](v2.1.2-report.md)** | `v2@9557228e225bc8198977bcbb9cfc200ea61a00d6` | `ghcr.io/sadjdg123/nocturne:sha-9557228@sha256:01adec0f1af36b3c72227b899ea4797ddff41d01aef9ae39c729c4f5480bd5b9` | [39032263501](https://github.com/sadjdg123/nocturne/actions/runs/39032263501)（540/540，双架构） |
 | **[V2.1.1（上一正式版）](v2.1.1-report.md)** | `v2@7508c9f69059b1cc71612749c1271fabd80e6d49` | `ghcr.io/sadjdg123/nocturne:sha-7508c9f@sha256:e249200989df5d75699834d7f9e401a2ee15ff711cbb40e1c7a20c0e37ea2a8a` | [37954611423](https://github.com/sadjdg123/nocturne/actions/runs/37954611423)（527/527，双架构） |

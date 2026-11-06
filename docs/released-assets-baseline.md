@@ -25,3 +25,7 @@ RC.5 构建成功后登记完整提交 `c5f36addc2d85b8ed24edb605015b7ff0be9070b
 ## V2.2.0 发布登记
 
 发布后登记完整提交 `d0ff57d72158ff5f5452511cff9f04a0dd6a3f67` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-d0ff57d`，清单保留全部历史版本。首页内联脚本 / 样式拆出的 `app.js`、`app-ui.js`、`app.css`、`app-ui.css` 使用内容指纹 `?v=`（新 URL，与历史版本不共享）；带 `?v=` 的文件自本版起 immutable，同 URL 同内容约束更为关键，历史共享 URL 的内容约束保持严格。GitHub API 在登记环境不可用，清单用 `test/released-assets-reliability.test.js` 同款本地 git 树 / blob 读取生成（该测试断言离线生成与清单逐字节一致）。
+
+## V2.2.1 发布登记
+
+发布后登记完整提交 `6e81cf35b74af035ef54ca942f8f8497fc91ac97` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-6e81cf3`，清单保留全部历史版本。V2.2.1 只升级运行环境与 CI，29 个静态 URL 与内容和 V2.2.0 完全相同。
