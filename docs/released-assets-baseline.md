@@ -29,3 +29,7 @@ RC.5 构建成功后登记完整提交 `c5f36addc2d85b8ed24edb605015b7ff0be9070b
 ## V2.2.1 发布登记
 
 发布后登记完整提交 `6e81cf35b74af035ef54ca942f8f8497fc91ac97` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-6e81cf3`，清单保留全部历史版本。V2.2.1 只升级运行环境与 CI，29 个静态 URL 与内容和 V2.2.0 完全相同。
+
+## V2.2.2 发布登记
+
+发布后登记完整提交 `8015b72fd27e6fb48dbefaf8611bd7a8c62c45a3` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-8015b72`，清单保留全部历史版本。V2.2.2 只给 `index.html` 里的桌面壁纸加 `loading="lazy"`；`index.html` 本身 no-store，29 个静态 URL 与内容和 V2.2.1 相同。
