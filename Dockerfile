@@ -1,5 +1,5 @@
 # 夜曲 Nocturne · 零依赖 Node.js 镜像（linux/amd64 + linux/arm64）
-FROM node:22-alpine
+FROM node:24-alpine
 
 # TZ：日志按本地时间（带时区偏移）输出，改 TZ 环境变量即可
 # UV_THREADPOOL_SIZE：DNS 解析走 libuv 线程池（默认 4），状态探测并发 8，坏域名不再拖慢配置读写

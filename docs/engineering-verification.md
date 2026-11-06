@@ -6,7 +6,7 @@
 
 ## 前提
 
-完整 Git 历史、Node 22、支持 buildx 的隔离 Docker daemon、足够磁盘和内存。Docker 配置必须独立且没有 auths、credsStore 或 credHelpers；不要挂载生产数据、用户目录、Docker socket 或转发 SSH 凭据。构建可读取公开 Node/registry 基础镜像，容器回归为 network none，容器启动和注册表验证使用内部网络。
+完整 Git 历史、Node 24、支持 buildx 的隔离 Docker daemon、足够磁盘和内存。Docker 配置必须独立且没有 auths、credsStore 或 credHelpers；不要挂载生产数据、用户目录、Docker socket 或转发 SSH 凭据。构建可读取公开 Node/registry 基础镜像，容器回归为 network none，容器启动和注册表验证使用内部网络。
 
 测试容器仅获 NET_ADMIN 以添加容器内回环别名 `192.168.77.10/32` 与 `192.168.77.11/32`。后者是合成 nas.local 的固定解析，只连接容器自身，不访问外部 DNS 或 NAS。root 只设置别名与 docker cp 副本属主，然后降为 node（UID 1000）执行回归；chmod 故障测试不能以 root 跳过。测试代码复制至 `/work` 并由测试用户拥有，没有改变宿主 Git 安全设置。生产镜像本身以 PUID 1026、PGID 100 运行。恢复辅助容器的数据卷为只读源及新空目标卷。
 

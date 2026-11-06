@@ -1,6 +1,6 @@
 # 夜曲 Nocturne · 开发交接
 
-V2.2.0 把首页内联脚本/样式拆成带内容指纹的静态文件（首页压缩后约 2KB），带 `?v=` 的静态文件改为一年 immutable 缓存，并启用首页 CSP；V2.1.3 的同步、备份、媒体与探测修复全部保留。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 22 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
+V2.2.1 把运行环境升级到 Node 24 LTS，并更新 CI 动作版本，运行代码不变。V2.2.0 把首页内联脚本/样式拆成带内容指纹的静态文件（首页压缩后约 2KB），带 `?v=` 的静态文件改为一年 immutable 缓存，并启用首页 CSP；V2.1.3 的同步、备份、媒体与探测修复全部保留。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 24 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
 
 **边界**：经用户授权，日常修复在 main 维护并使用现有 Actions 发布；不覆盖历史 SHA 镜像标签、不操作 NAS/生产数据。latest/main 是随正式分支更新的浮动镜像标签。jingbo.men 作为本人私人首页；不擅自修改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
 
@@ -123,7 +123,7 @@ data/
 
 ## 3. 开发与测试
 
-运行：Node 22（engines >=20），无需 npm install。DATA_DIR=./data node server.js；测试专用 jsdom@24 通过 JSDOM_PATH 提供，CI 临时安装，运行镜像不包含。
+运行：Node 24（engines >=22），无需 npm install。DATA_DIR=./data node server.js；测试专用 jsdom@24 通过 JSDOM_PATH 提供，CI 临时安装，运行镜像不包含。
 
 ```sh
 npm run check
