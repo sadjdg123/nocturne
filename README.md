@@ -1,11 +1,11 @@
 # 夜曲 Nocturne
 
-**V2.2.2 · Midnight Edition**。群晖 NAS 自托管的私人起始页，Node 24 零运行依赖，原生 HTML/CSS/JS，无前端构建步骤。镜像支持 linux/amd64 和 linux/arm64。
+**V2.3.0 · Midnight Edition**。群晖 NAS 自托管的私人起始页，Node 24 零运行依赖，原生 HTML/CSS/JS，无前端构建步骤。镜像支持 linux/amd64 和 linux/arm64。
 
-- Midnight 与经典外观；手机底栏、场景空间、排序及撤销。
+- Midnight 与经典外观；手机底栏、场景空间、排序及撤销；手机首屏「常用」一行与 iPhone 式图标墙。
 - 多账户、跨设备配置同步、离线修改、冲突保护与配置快照。
-- 内外网地址选择、搜索别名、⌘K 快速打开、NAS 侧服务状态。
-- 自托管字体、图标代理缓存、自定义图片及 iPhone 主屏幕模式。
+- 内外网地址选择、搜索别名、⌘K 快速打开、输入网址直接打开、NAS 侧服务状态（只标出连不上的）。
+- 自托管字体、图标代理缓存、自定义图片、导入浏览器书签及 iPhone 主屏幕模式。
 - 损坏文件保护、账户/会话持久事务、完整备份与失败恢复保护。
 
 ![夜曲 Nocturne 桌面截图（示例数据）](docs/screenshot.jpg)
@@ -229,7 +229,7 @@ CI=true JSDOM_PATH=/path/to/node_modules/jsdom npm test
 
 链接仅允许 http/https，旧无效值保留但不可点击；旧 data URL 图片自动迁移。首页带 CSP（脚本只许本站文件和按 sha256 放行的两段首帧内联脚本，禁止内联事件处理器；内联样式属性仍允许）以及 DENY/nosniff 等响应头；带 `?v=` 的静态文件一年 immutable 缓存，内容变了必须换 `?v=`。认证同步事务的磁盘 I/O 与 DSM 真机性能见 [工程报告](docs/phase2-engineering-report.md)，本地与 Linux 测试不代替真实断电或域名上线验收。
 
-- [当前发布记录](docs/v2.2.2-report.md)
+- [当前发布记录](docs/v2.3.0-report.md)
 - [账户事务](docs/auth-transactions.md)、[恢复保护](docs/restore-recovery.md)、[停写备份](docs/stopped-backup.md)
 - [按需工程验证](docs/engineering-verification.md)、[人工验收](docs/v2.0-manual-acceptance.md)
 - [历史阶段归档](docs/archive/README.md)；RC 报告仍保留在 docs/ 供升级核查。

@@ -296,17 +296,21 @@
     });
   }
   var prevTA = "";
-  /* shared drag feel: always the pointer-driven fallback clone, which follows the finger on iOS Safari */
+  /* shared drag feel: always the pointer-driven fallback clone, which follows the finger on iOS Safari.
+   * 触屏要按住约 0.28 秒才拖起（鼠标不受影响）：编辑时上下滑动是滚动页面，不会一碰就把图标拖走 */
   function opts(o) {
     var base = {
-      forceFallback: true, fallbackOnBody: true, fallbackTolerance: 4, delay: 0, delayOnTouchOnly: true, touchStartThreshold: 4,
+      forceFallback: true, fallbackOnBody: true, fallbackTolerance: 4, delay: 280, delayOnTouchOnly: true, touchStartThreshold: 8,
       animation: 180, easing: "cubic-bezier(.2,.8,.2,1)",
       ghostClass: "is-ghost", chosenClass: "is-chosen", dragClass: "is-drag", fallbackClass: "is-floating",
-      onStart: onStart, onEnd: onEnd
+      onChoose: onChoose, onUnchoose: onUnchoose, onStart: onStart, onEnd: onEnd
     };
     for (var k in o) base[k] = o[k];
     return base;
   }
+  /* 按住够久、被选中的那一刻就接管触摸：之后的 touchmove 不再变成页面滚动（还没按够时手指一动就是正常滚动） */
+  function onChoose() { body.classList.add("dragging"); }
+  function onUnchoose() { if (!body.classList.contains("x-dragging")) body.classList.remove("dragging"); }
   function onStart() {
     body.classList.add("x-dragging", "dragging");
     prevTA = body.style.touchAction; body.style.touchAction = "none";
@@ -720,7 +724,7 @@
   /* ---- UI ---- */
   var nw = document.createElement("button");
   nw.type = "button"; nw.className = "x-net x-glass"; nw.setAttribute("aria-haspopup", "menu"); nw.setAttribute("aria-expanded", "false");
-  nw.innerHTML = '<i aria-hidden="true"></i><span></span>';
+  nw.innerHTML = '<i aria-hidden="true"></i><span></span><b class="x-nst" aria-hidden="true"></b>'; /* x-nst：新版里「N 个连不上」（经典不显示） */
   document.querySelector(".x-head").insertBefore(nw, document.getElementById("btn-menu"));
   var side = document.createElement("aside");
   side.className = "x-side"; side.setAttribute("aria-label", "状态与最近");
@@ -728,6 +732,11 @@
     '<circle class="bg" cx="20" cy="20" r="17"/><circle class="fg" cx="20" cy="20" r="17"/></svg><p class="x-cnt"></p></div><p class="x-sline"></p><p class="x-snote" hidden></p></section>' +
     '<section class="x-card x-glass" data-recent hidden><h2>最近使用</h2><div class="x-recent"></div></section>';
   groupsEl.after(side);
+  /* 常用（新版手机）：搜索栏下面一行，打开就能点到最常用的几个；只在新版手机上显示（CSS），经典与桌面不出现 */
+  var fav = document.createElement("section");
+  fav.className = "x-fav"; fav.setAttribute("aria-label", "常用"); fav.hidden = true;
+  fav.innerHTML = '<div class="x-fav-row"></div>';
+  document.getElementById("x-search").after(fav);
   var live = document.createElement("div");
   live.className = "x-sr"; live.setAttribute("role", "status"); live.setAttribute("aria-live", "polite");
   body.appendChild(live);
@@ -738,7 +747,8 @@
     var n = mode(), l = A.net.label();
     nw.setAttribute("data-eff", n);
     nw.querySelector("span").textContent = l;
-    nw.setAttribute("aria-label", "网络模式：" + (pref() === "auto" ? "自动，当前优先" + NAMES[n] : "优先" + NAMES[n]) + "。点按更改");
+    var nst = nw.querySelector(".x-nst").textContent;
+    nw.setAttribute("aria-label", "网络模式：" + (pref() === "auto" ? "自动，当前优先" + NAMES[n] : "优先" + NAMES[n]) + (nst ? "；" + nst : "") + "。点按更改");
     if (netOpen) drawNetMenu();
   }
   /* 状态检测永远覆盖全部项目（与空间无关）；这里的「在线 x / y」只统计当前空间看得见的图标项目 */
@@ -766,6 +776,15 @@
     });
     var sm = ST.summary(cs2), total = sm.total, sl = side.querySelector(".x-sline"), card = side.querySelector(".x-card");
     lastSummary = sm;
+    /* 一句话状态（新版头部胶囊）：服务器确认连不上的个数；全部都连不上时卡片上不再挂满红点（x-alldown，新版 CSS 处理） */
+    /* 「显示 → 系统状态」关掉：状态卡、图标上的小点、胶囊里的「N 个连不上」都不显示（检测照常在后台，命令面板仍可刷新） */
+    var showSt = (A.state.settings.show || {}).status !== false;
+    groupsEl.classList.toggle("x-nostatus", !showSt);
+    var nOff = !showSt || sm.counts.checking ? 0 : sm.counts.off;
+    nw.querySelector(".x-nst").textContent = nOff ? nOff + " 个连不上" : "";
+    nw.setAttribute("data-st", nOff ? "off" : "");
+    groupsEl.classList.toggle("x-alldown", sm.tone === "alloff");
+    syncNet();
     card.setAttribute("data-mode", sm.mode);
     side.querySelector(".x-cnt").innerHTML = !total ? "0<small>个服务</small>"
       : sm.mode === "browser" ? sm.counts.maybe + " / " + total + "<small>可能在线</small>"
@@ -784,7 +803,35 @@
       return '<a class="x-rt" href="' + esc(A.url(i)) + '" target="_blank" rel="noopener" data-rid="' + esc(id) + '">' + A.util.iconHTML(i.icon, i.title) + "<span>" + esc(i.title) + "</span></a>";
     }).join("");
   }
-  function refresh() { syncNet(); apply(); renderRecent(); }
+  /* 常用的排序：本机点按次数（localStorage「nocturne.freq」，不同步）为主、最近一次为辅。
+   * 只在载入和回到前台时重排——点完一个不会立刻换位置，手指记得住 */
+  var FREQ = "nocturne.freq", favOrder = [];
+  function freqs() { try { var o = JSON.parse(localStorage.getItem(FREQ) || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } }
+  function bump(id) {
+    var f = freqs(); f[id] = (+f[id] || 0) + 1;
+    var keys = Object.keys(f); if (keys.length > 60) keys.sort(function (a, b) { return f[a] - f[b]; }).slice(0, keys.length - 60).forEach(function (k) { delete f[k]; });
+    try { localStorage.setItem(FREQ, JSON.stringify(f)); } catch (e) { /* storage blocked */ }
+  }
+  function orderFav() {
+    var f = freqs(), rec = (A.state.recent || []).map(String), m = all(), ids = Object.keys(f).concat(rec).filter(function (id, i, a) { return a.indexOf(id) === i && m[id]; });
+    var rank = function (id) { var r = rec.indexOf(id); return (+f[id] || 0) * 10 + (r < 0 ? 0 : 8 - r); };
+    favOrder = ids.sort(function (a, b) { return rank(b) - rank(a); }).slice(0, 8);
+  }
+  function renderFav() {
+    var m = all(), sh = (A.state.settings.show || {}).recent !== false;
+    var ids = favOrder.filter(function (id) { return m[id]; });
+    if (!ids.length) { orderFav(); ids = favOrder.slice(); } /* 还一个都对不上（刚拿到服务器配置 / 换了账户）：重新排一次 */
+    /* 还没满 8 个：刚用过的新项目接在末尾（已有的不挪位置） */
+    (A.state.recent || []).map(String).forEach(function (id) { if (ids.length < 8 && m[id] && ids.indexOf(id) < 0) ids.push(id); });
+    fav.hidden = !sh || !ids.length;
+    fav.firstChild.innerHTML = ids.map(function (id) {
+      var i = m[id].item;
+      return '<a class="x-fv" href="' + esc(A.url(i)) + '" target="_blank" rel="noopener" data-rid="' + esc(id) + '">' + A.util.iconHTML(i.icon, i.title) + "<span>" + esc(i.title) + "</span></a>";
+    }).join("");
+  }
+  orderFav();
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) { orderFav(); renderFav(); } });
+  function refresh() { syncNet(); apply(); renderRecent(); renderFav(); }
 
   /* ---- status ---- */
   function timed(u, ms) {
@@ -907,7 +954,7 @@
   window.addEventListener("scroll", function () { if (netOpen) closeNet(false); }, { passive: true });
   function track(e) {
     if (e.defaultPrevented || body.classList.contains("editing") || (e.type === "auxclick" && e.button !== 1)) return;
-    var a = e.target.closest && e.target.closest("#x-groups [data-id], .x-side [data-rid]"); if (!a || a.tagName !== "A") return;
+    var a = e.target.closest && e.target.closest("#x-groups [data-id], .x-side [data-rid], .x-fav [data-rid]"); if (!a || a.tagName !== "A") return;
     remember(a.getAttribute("data-id") || a.getAttribute("data-rid"));
   }
   /** 记入「最近使用」（本机）：点图标 / 最近使用 / 离线芯片，或命令面板打开了一个不在当前空间里的项目 */
@@ -915,7 +962,8 @@
     if (id == null) return;
     var r = (A.state.recent || []).filter(function (x) { return x !== id; }); r.unshift(id);
     A.state.recent = keep.recent = r.slice(0, 8); A.save();
-    setTimeout(renderRecent, 0);
+    bump(id);
+    setTimeout(function () { renderRecent(); renderFav(); }, 0);
   }
   A.trackRecent = function (id) { if (!body.classList.contains("editing")) remember(String(id)); };
   document.addEventListener("click", track);
@@ -923,7 +971,7 @@
   /* 没有地址 / 地址无效的项目不可点击：不再打开一个空白的新标签页 */
   document.addEventListener("click", function (e) {
     if (body.classList.contains("editing")) return;
-    var a = e.target.closest && e.target.closest("#x-groups a[data-id], .x-side a[data-rid]");
+    var a = e.target.closest && e.target.closest("#x-groups a[data-id], .x-side a[data-rid], .x-fav a[data-rid]");
     if (!a || a.getAttribute("href") !== "#") return;
     e.preventDefault();
     var r = all()[a.getAttribute("data-id") || a.getAttribute("data-rid")], i = r && r.item;
@@ -1231,6 +1279,9 @@
   /* ---- 数据 ---- */
   D.innerHTML = '<p class="x-gt">备份</p><div class="x-gl"><button type="button" class="x-row x-rb" data-d="export">导出配置</button>' +
     '<button type="button" class="x-row x-rb" data-d="import">导入配置</button><p class="x-err" data-err role="alert" hidden></p><input type="file" accept="application/json,.json" hidden data-file></div>' +
+    '<p class="x-gt">书签</p><div class="x-gl"><button type="button" class="x-row x-rb" data-d="bm">导入浏览器书签</button>' +
+    '<div class="x-cf x-bm" data-bm hidden></div><input type="file" accept=".html,.htm,text/html" hidden data-bmfile></div>' +
+    '<p class="x-hint">在电脑浏览器里「导出书签」得到一个 .html 文件，选它即可；只追加，不会改动首页已有的内容，导入后可以撤销。</p>' +
     '<p class="x-gt">重置</p><div class="x-gl"><button type="button" class="x-row x-rb is-red" data-d="reset" aria-expanded="false">恢复默认</button>' +
     '<div class="x-cf" data-cf hidden><p>会清空所有分组和设置。恢复前会自动导出一份备份。</p><div class="x-acts"><button type="button" class="x-pb is-red" data-d="confirm">恢复默认</button><button type="button" class="x-pb" data-d="cancel">取消</button></div></div></div>' +
     '<p class="x-foot5">配置只保存在这台设备的浏览器里</p>';
@@ -1276,6 +1327,9 @@
       }, function (e) { showErr("导出失败：" + (e.message || "无法下载文件")); });
     }
     else if (a === "import") file.click();
+    else if (a === "bm") { bmBox.hidden = true; bmFile.value = ""; bmFile.click(); }
+    else if (a === "bm-cancel") { bmBox.hidden = true; bmPlan = null; }
+    else if (a === "bm-go") importBookmarks();
     else if (a === "reset") showCf(cf.hidden);
     else if (a === "cancel") showCf(false);
     else if (a === "confirm") {
@@ -1287,6 +1341,52 @@
   });
   function valid(d) {
     return window.NocturneConfigShape.valid(d, { settingsOptional: true });
+  }
+
+  /* ---- 导入浏览器书签（追加，不替换）：选文件 → 按文件夹预览、勾选 → 一次提交（一步撤销） ---- */
+  var BM = window.NocturneBookmarks, bmBox = D.querySelector("[data-bm]"), bmFile = D.querySelector("[data-bmfile]"), bmPlan = null;
+  bmFile.addEventListener("change", function () {
+    var f = bmFile.files && bmFile.files[0]; if (!f || !BM) return;
+    if (f.size > 20 * 1024 * 1024) { A.toast("文件太大（超过 20MB），不像是书签文件"); return; }
+    f.text().then(function (txt) {
+      var list = BM.parse(txt);
+      if (!list.length) { bmPlan = null; bmBox.hidden = false; bmBox.innerHTML = "<p>这个文件里没有找到网页书签。请在浏览器的书签管理里选「导出书签」，再选导出的 .html 文件。</p>" +
+        '<div class="x-acts"><button type="button" class="x-pb" data-d="bm-cancel">知道了</button></div>'; return; }
+      bmPlan = BM.plan(list, A.state, { max: 300 });
+      drawBm();
+    }, function () { A.toast("读取文件失败"); });
+  });
+  function drawBm() {
+    var p = bmPlan; bmBox.hidden = false;
+    if (!p.count) { bmBox.innerHTML = "<p>找到 " + p.total + " 个书签，都已经在首页上了，不用再导入。</p>" + '<div class="x-acts"><button type="button" class="x-pb" data-d="bm-cancel">知道了</button></div>'; return; }
+    bmBox.innerHTML = "<p>找到 " + p.total + " 个书签" + (p.dup ? "，其中 " + p.dup + " 个首页已经有了（或重复），会跳过" : "") + (p.cut ? "；一次最多导入 300 个，另外 " + p.cut + " 个这次不导入" : "") +
+      "。每个文件夹会成为一个分组，勾选要导入的：</p>" +
+      '<div class="x-bm-list">' + p.folders.map(function (f, n) {
+        return '<label class="x-bm-f"><input type="checkbox" checked data-bmf="' + n + '"><span>' + esc(f.name) + "</span><small>" + f.items.length + " 个</small></label>";
+      }).join("") + "</div>" +
+      '<div class="x-acts"><button type="button" class="x-pb is-amber" data-d="bm-go">导入</button><button type="button" class="x-pb" data-d="bm-cancel">取消</button></div>';
+    syncBm();
+  }
+  function bmPicked() { return bmPlan ? bmPlan.folders.filter(function (f, n) { var c = bmBox.querySelector('[data-bmf="' + n + '"]'); return c && c.checked; }) : []; }
+  function syncBm() {
+    var n = bmPicked().reduce(function (a, f) { return a + f.items.length; }, 0), go = bmBox.querySelector('[data-d="bm-go"]');
+    if (go) { go.textContent = n ? "导入 " + n + " 个" : "导入"; go.disabled = !n; }
+  }
+  bmBox.addEventListener("change", function (e) { if (e.target.matches("[data-bmf]")) syncBm(); });
+  function importBookmarks() {
+    var picked = bmPicked(); if (!picked.length) return;
+    var SPC = A.spaces, n = 0, ng = 0;
+    A.commit(function (st) {
+      picked.forEach(function (f) {
+        /* 同名分组已存在：接在它后面；否则新建一个图标分组（在某个空间里导入 → 新分组整组进这个空间） */
+        var g = st.groups.filter(function (x) { return x.name === f.name && x.style !== "chip"; })[0];
+        if (!g) { g = { id: A.util.uid(), name: f.name, style: "icon", items: [] }; st.groups.push(g); ng++; if (SPC) SPC.adoptGroup(st, g.id); }
+        if (!g.items) g.items = [];
+        f.items.forEach(function (b) { var it = BM.item(b, A.util.uid); g.items.push(it); n++; if (SPC) SPC.keepVisible(st, it.id); });
+      });
+    }, "import-bookmarks");
+    bmBox.hidden = true; bmPlan = null;
+    undoToast("已导入 " + n + " 个书签" + (ng ? "，新建 " + ng + " 个分组" : ""));
   }
   function fillIds(list) {
     var seen = new Set();
@@ -1449,7 +1549,8 @@
       (function () { var sa = statusText(); return { k: "recheck", t: sa.t, d: sa.d, g: "↻", kw: "刷新状态 重新检测 状态 刷新 在线 离线 status refresh recheck" }; })(),
       { k: "edit", t: editing ? "退出编辑" : "进入编辑", d: MOD + "E", g: "✎", kw: "编辑 edit 排序 拖动" },
       { k: "settings", t: "打开设置", d: MOD + ",", g: "⚙", kw: "设置 settings 壁纸 外观 preferences" },
-      { k: "add", t: "添加项目", d: "新建一个服务或链接", g: "+", kw: "添加 新建 add new item" }
+      { k: "add", t: "添加项目", d: "新建一个服务或链接", g: "+", kw: "添加 新建 add new item" },
+      { k: "undo", t: "撤销上一步", d: "删除、移动、改名等都能撤销（刷新页面前有效）", g: "↶", kw: "撤销 恢复 撤回 undo 误删 找回" }
     ].concat(spaceActions()).map(function (a) { a.cur = eff; return a; });
   }
   /* 空间相关的内置动作：「切换到空间：X」（含「全部」）与「管理空间」。只出现在操作里（排在服务 / 分组结果之后），不挤掉搜索结果 */
@@ -1507,6 +1608,9 @@
       var other = A.net && A.net.effective() === "lan" ? "net:wan" : "net:lan", order = [other, "edit", "add", "settings"], acts = actions();
       order.forEach(function (k) { acts.forEach(function (a) { if (a.k === k) out.push({ type: "action", sec: "操作", a: a, hits: [] }); }); });
     } else {
+      /* 输入的是网址：第一行就是「打开这个网址」，回车直接打开（和顶部搜索框一致） */
+      var direct = A.util.typedUrl ? A.util.typedUrl(raw) : "";
+      if (direct) out.push({ type: "url", sec: "打开网址", url: direct, hits: [] });
       /* 服务：标题精确 > 标题前缀 > 别名 > 标题模糊 > 描述 / 地址；同层里最近使用靠前；同一项目只出现一次 */
       R.rank(items.map(function (x) { return { item: x.i, urls: [A.url(x.i), x.i.lan, x.i.wan], x: x }; }), q, A.state.recent).slice(0, 12).forEach(function (o) {
         out.push({ type: "item", sec: "服务", x: o.entry.x, hits: o.r.hits || [], alias: o.r.alias, tier: o.r.tier });
@@ -1536,6 +1640,8 @@
       icon = '<span class="x-cmdk-g" aria-hidden="true">#</span>'; title = mark(r.g.name, r.hits); sub = (r.g.items || []).length + " 个项目"; tag = "分组";
     } else if (r.type === "action") {
       icon = '<span class="x-cmdk-g" aria-hidden="true">' + r.a.g + "</span>"; title = mark(r.a.t, r.hits); sub = esc(r.a.d); tag = "操作";
+    } else if (r.type === "url") {
+      icon = '<span class="x-cmdk-g" aria-hidden="true">↗</span>'; title = "打开 " + esc(host(r.url) || r.url); sub = esc(r.url); tag = "网址";
     } else {
       icon = '<span class="x-cmdk-g" aria-hidden="true">↗</span>'; title = "用 " + esc(r.e.name) + " 搜索 “" + esc(r.q) + "”"; sub = esc(host(r.e.url)); tag = "搜索";
     }
@@ -1590,6 +1696,7 @@
     if (r.type === "item") { record(r.x.i.id); go(A.url(r.x.i), newTab); }
     else if (r.type === "alt") { record(r.x.i.id); go(r.url, newTab); } // 只是按用户选的地址打开；能不能打开由浏览器决定，不记为「可访问」
     else if (r.type === "search") go(r.e.url.replace("%s", encodeURIComponent(r.q)), newTab);
+    else if (r.type === "url") go(r.url, newTab);
     else if (r.type === "group") {
       var sec = groupsEl.querySelector('.x-group[data-gid="' + A.util.sel(r.g.id) + '"]');
       if (!sec && A.spaces && A.spaces.selected() !== A.spaces.ALL) { /* 分组不在当前空间：先回到「全部」再定位 */
@@ -1622,6 +1729,7 @@
         var d = { gid: g && g.id, handled: false }; A.emit("add-item", d);
         if (!d.handled) A.toast("即将上线");
       } else if (k === "settings") A.emit("settings", { handled: false });
+      else if (k === "undo") { if (A.undo() !== false) A.toast("已撤销上一步"); }
     }
   }
 

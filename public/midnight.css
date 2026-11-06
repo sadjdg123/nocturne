@@ -10,6 +10,7 @@
 
 /* 经典外观里这些新版元素不出现 */
 .mn-sky, .mn-sp, .mn-ind, .mn-setui, .mn-dockscrim { display: none; }
+.x-nst, .x-fav { display: none; }
 
 /* ============================================================ 1 · tokens */
 html[data-ui="v2"] {
@@ -676,4 +677,70 @@ html[data-ui="v2"] body:not(.editing) .x-group[data-size="empty"] { display:none
   html[data-ui="v2"] .x-groups > .x-group { grid-column:auto; }
   html[data-ui="v2"] .x-tile { background:rgba(19,26,39,.90); }
   html[data-ui="v2"] .x-card { background:rgba(17,24,36,.93); }
+}
+
+/* ============================================================ V2.3 · 手机首屏、常用、一句话状态、图标墙 */
+/* 状态点只标出问题：在线 / 需登录 / 检测中不再挂点（离线是珊瑚点，无法确认是空心圈）；全部都连不上时连珊瑚点也不画、名字不压暗，
+   改由头部胶囊说一句「N 个连不上」（app-ui.js 写 .x-nst，data-st="off"） */
+html[data-ui="v2"] .x-tile > .dot.on, html[data-ui="v2"] .x-tile > .dot.auth, html[data-ui="v2"] .x-tile > .dot.checking { display: none; }
+html[data-ui="v2"] .x-groups.x-alldown .x-tile > .dot.off { display: none; }
+html[data-ui="v2"] .x-groups.x-alldown .x-tile[data-s="off"] > .x-name { color: var(--mn-paper); }
+html[data-ui="v2"] .x-net[data-st="off"] i { background: var(--mn-coral); box-shadow: 0 0 0 3px rgba(229, 144, 121, .16); }
+html[data-ui="v2"] .x-net[data-st="off"] .x-nst { display: inline; font: inherit; white-space: nowrap; }
+html[data-ui="v2"] .x-net[data-st="off"] .x-nst::before { content: "·"; margin: 0 6px; color: var(--mn-mist); }
+/* 桌面右栏：连不上的服务很多时，名单最多约 4 行，其余在框里滚动，不再把右栏撑得比正文还长 */
+html[data-ui="v2"] .x-offl ul { max-height: 136px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+
+@media (max-width: 767px) {
+  /* 手机胶囊放不下两句：有连不上的服务时只说「N 个连不上」，网络模式在点开的菜单里 */
+  html[data-ui="v2"] .x-net[data-st="off"] > span { display: none; }
+  html[data-ui="v2"] .x-net[data-st="off"] .x-nst::before { content: none; }
+
+  /* 首屏压缩：时钟与问候 / 日期并排，引擎并进搜索行；首个分组上移约一行图标 */
+  html[data-ui="v2"] .x-wrap { gap: 14px; }
+  html[data-ui="v2"] .x-hero { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "clock line"; column-gap: 14px; row-gap: 0; align-items: center; padding-top: 2px; }
+  html[data-ui="v2"] .x-hero:has(> .x-clock[hidden]) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "line"; }
+  html[data-ui="v2"] .x-clock { font-size: 54px; }
+  html[data-ui="v2"] .x-hero > .x-greet, html[data-ui="v2"] .x-hero > .x-date { min-width: 0; }
+  html[data-ui="v2"] .x-hero > .x-greet { font-size: 16px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  html[data-ui="v2"] .x-hero > .x-greet[data-date]:not([data-date=""])::after { display: block; margin: 5px 0 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+  html[data-ui="v2"] .x-search:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 4px; }
+  html[data-ui="v2"] .x-bar { height: 46px; }
+  html[data-ui="v2"] .x-engines { margin: 0; padding: 0; max-width: 46vw; }
+  html[data-ui="v2"] .x-eng { height: 44px; padding: 0 9px; font-size: 12.5px; }
+  html[data-ui="v2"] .x-eng[aria-pressed="true"]::after { bottom: 5px; }
+
+  /* 常用：搜索栏下一行，横滑；页底的「最近使用」卡在手机上由它代替 */
+  html[data-ui="v2"] .x-fav:not([hidden]) { display: block; margin: 0 -16px; }
+  html[data-ui="v2"] body.editing .x-fav { display: none; }
+  html[data-ui="v2"] .x-fav-row { display: flex; gap: 2px; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px 4px; scrollbar-width: none; scroll-snap-type: x proximity; scroll-padding-inline: 4px; }
+  html[data-ui="v2"] .x-fav-row::-webkit-scrollbar { display: none; }
+  html[data-ui="v2"] .x-fv { flex: none; width: 76px; display: grid; justify-items: center; gap: 6px; padding: 4px 0; border-radius: 14px; color: var(--mn-paper); text-decoration: none; font: 500 11.5px/1.25 var(--mn-ui); scroll-snap-align: start; -webkit-touch-callout: none; }
+  html[data-ui="v2"] .x-fv .x-ic { width: 52px; height: 52px; border-radius: 15px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 10px 20px -12px rgba(0, 0, 0, .95); }
+  html[data-ui="v2"] .x-fv .x-ic:not(.x-fb):not(:has(.x-fb)) { background: linear-gradient(160deg, rgba(64, 76, 102, .85), rgba(30, 38, 56, .92)); }
+  html[data-ui="v2"] .x-fv .x-ic .x-emoji { font-size: 26px; }
+  html[data-ui="v2"] .x-fv > span { max-width: 100%; padding: 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 3px rgba(0, 0, 0, .7); }
+  html[data-ui="v2"] .x-fv:active { transform: scale(.94); transition-duration: var(--mn-press); }
+  html[data-ui="v2"] body:has(.x-fav:not([hidden])) .x-side [data-recent] { display: none; }
+
+  /* 图标墙（设置 → 手机每行「4 图标墙」）：像 iPhone 主屏幕——没有卡片底，统一图标底板，分组是一块很淡的面板 */
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) { gap: 14px; }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) > .x-group:has(> .x-grid) { padding: 12px 8px 10px; border-radius: 20px; background: rgba(12, 17, 28, .42); border: 1px solid rgba(236, 230, 218, .07); }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) > .x-group:has(> .x-grid) > .x-gtitle { margin: 0 6px 10px; font-size: 14px; letter-spacing: .1em; color: var(--mn-mist); }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) > .x-group:has(> .x-grid) > .x-gtitle::after { display: none; }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 4px; }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile { min-height: 0; padding: 4px 0 0; row-gap: 7px; border-radius: 16px; background: none; border: 0; box-shadow: none; }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-ic { width: 56px; height: 56px; border-radius: 15px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 10px 20px -12px rgba(0, 0, 0, .95); }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-ic:not(.x-fb):not(:has(.x-fb)) { background: linear-gradient(160deg, rgba(64, 76, 102, .85), rgba(30, 38, 56, .92)); }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-ic[style*="background"] { filter: saturate(.7) brightness(.9); }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-ic .x-emoji { font-size: 28px; }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-ic.x-fb, html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-ic .x-fb { font-size: 20px; }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-name { font-size: 12px; color: var(--mn-paper); text-shadow: 0 1px 3px rgba(0, 0, 0, .7); }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .dot { top: 0; right: calc(50% - 32px); width: 9px; height: 9px; border: 2px solid #0E1320; box-sizing: content-box; }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile.x-ghost { width: 56px; height: 56px; min-height: 56px; margin-top: 4px; justify-self: center; border-radius: 15px; border: 1.5px dashed rgba(231, 180, 103, .45); background: rgba(14, 20, 33, .3); }
+  html[data-ui="v2"][data-mcols="4"] body:not(.editing) .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile:active { transform: scale(.94); }
+  /* 编辑：虚线框和删除角标跟着图标走（没有卡片底以后，卡片四角离图标太远） */
+  html[data-ui="v2"][data-mcols="4"] body.editing .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile:not(.x-ghost) { outline: none; }
+  html[data-ui="v2"][data-mcols="4"] body.editing .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile:not(.x-ghost) > .x-ic { outline: 1px dashed rgba(231, 180, 103, .6); outline-offset: 2px; }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-ebadge { top: -14px; left: calc(50% - 46px); }
 }
