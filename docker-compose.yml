@@ -2,7 +2,7 @@
 services:
   nocturne:
     # 方式一：使用 GitHub Actions 构建好的镜像（把 sadjdg123 换成你的用户名，全小写）
-    image: ghcr.io/sadjdg123/nocturne:sha-8015b72@sha256:a713b191f1543b6132bc367b1331f09146af2eb5e3732a2d1a02f049e5ad8c5d # V2.2.2；更新见开发交接版本表
+    image: ghcr.io/sadjdg123/nocturne:sha-e9a6265@sha256:a2b975b0ee17a826dc5a48834c1836ff99a9a0941ec9ad3cf198b80bbb17fdc5 # V2.3.0；更新见开发交接版本表
     # 方式二：在 NAS 上从源码构建 —— 注释掉上面的 image，打开下面这行
     # build: .
     container_name: nocturne

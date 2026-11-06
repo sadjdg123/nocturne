@@ -31,6 +31,7 @@ const RELEASES = [
   { name: "V2.2.0", commit: "d0ff57d72158ff5f5452511cff9f04a0dd6a3f67", image: "ghcr.io/sadjdg123/nocturne:sha-d0ff57d" },
   { name: "V2.2.1", commit: "6e81cf35b74af035ef54ca942f8f8497fc91ac97", image: "ghcr.io/sadjdg123/nocturne:sha-6e81cf3" },
   { name: "V2.2.2", commit: "8015b72fd27e6fb48dbefaf8611bd7a8c62c45a3", image: "ghcr.io/sadjdg123/nocturne:sha-8015b72" },
+  { name: "V2.3.0", commit: "e9a626538ff31e38c12f85ae4686d96a05f46880", image: "ghcr.io/sadjdg123/nocturne:sha-e9a6265" },
 ];
 
 async function api(p) {

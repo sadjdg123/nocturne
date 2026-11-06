@@ -27,11 +27,11 @@ test("RC.4 必须以完整提交和发布镜像列入缓存基线", () => {
   assert.equal(rc.commit, "f51662961ba7a86782cb863104917d75fb587553");
   assert.equal(rc.image, "ghcr.io/sadjdg123/nocturne:sha-f516629");
 });
-test("离线 git 内容与十四个远程发布基线逐字节相符", async () => {
+test("离线 git 内容与十五个远程发布基线逐字节相符", async () => {
   assert.deepEqual(await generate(getTree, getBlob), fixture);
-  assert.equal(RELEASES.length, 14);
+  assert.equal(RELEASES.length, 15);
 });
-for (const release of ["RC.1", "RC.2", "RC.3", "RC.4", "RC.5", "V2.0.0", "V2.1.0", "V2.1.1", "V2.1.2", "V2.1.3", "V2.2.0", "V2.2.1", "V2.2.2"]) {
+for (const release of ["RC.1", "RC.2", "RC.3", "RC.4", "RC.5", "V2.0.0", "V2.1.0", "V2.1.1", "V2.1.2", "V2.1.3", "V2.2.0", "V2.2.1", "V2.2.2", "V2.3.0"]) {
   test(release + " 内容变更但固定 URL 未变时缓存回归必须报警", async () => {
     const rel = fixture.releases.find((r) => r.name === release);
     assert.ok(rel);

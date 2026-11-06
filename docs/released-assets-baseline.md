@@ -33,3 +33,7 @@ RC.5 构建成功后登记完整提交 `c5f36addc2d85b8ed24edb605015b7ff0be9070b
 ## V2.2.2 发布登记
 
 发布后登记完整提交 `8015b72fd27e6fb48dbefaf8611bd7a8c62c45a3` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-8015b72`，清单保留全部历史版本。V2.2.2 只给 `index.html` 里的桌面壁纸加 `loading="lazy"`；`index.html` 本身 no-store，29 个静态 URL 与内容和 V2.2.1 相同。
+
+## V2.3.0 发布登记
+
+发布后登记完整提交 `e9a626538ff31e38c12f85ae4686d96a05f46880` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-e9a6265`，清单保留全部历史版本。新增 `bookmarks.js?v=1`；`midnight.css?v=5`、`midnight.js?v=4` 与 `app*.css/js` 的新内容哈希都是新 URL，共 30 个。本次因 GitHub API 限流，清单用本地完整 git 历史（`git ls-tree` 代替树接口，blob 仍按 git hash 校验）生成，既有 14 个版本的条目逐字未变。
