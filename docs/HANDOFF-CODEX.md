@@ -1,6 +1,6 @@
 # 夜曲 Nocturne · 开发交接
 
-V2.2.2 让窄屏不再下载桌面壁纸（`bg-desktop.jpg` 延迟加载）。V2.2.1 把运行环境升级到 Node 24 LTS，并更新 CI 动作版本，运行代码不变。V2.2.0 把首页内联脚本/样式拆成带内容指纹的静态文件（首页压缩后约 2KB），带 `?v=` 的静态文件改为一年 immutable 缓存，并启用首页 CSP；V2.1.3 的同步、备份、媒体与探测修复全部保留。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 24 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
+V2.3.0 是手机体验版：首屏压缩、「常用」一行（本机 nocturne.freq，不同步）、只标出问题的状态点与胶囊「N 个连不上」、「4 图标墙」、输入网址直达、编辑防误触（触屏按住 280ms 才拖、pan-y）、8 秒撤销提示、导入浏览器书签（public/bookmarks.js）。V2.2.2 让窄屏不再下载桌面壁纸（`bg-desktop.jpg` 延迟加载）。V2.2.1 把运行环境升级到 Node 24 LTS，并更新 CI 动作版本，运行代码不变。V2.2.0 把首页内联脚本/样式拆成带内容指纹的静态文件（首页压缩后约 2KB），带 `?v=` 的静态文件改为一年 immutable 缓存，并启用首页 CSP；V2.1.3 的同步、备份、媒体与探测修复全部保留。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 24 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
 
 **边界**：经用户授权，日常修复在 main 维护并使用现有 Actions 发布；不覆盖历史 SHA 镜像标签、不操作 NAS/生产数据。latest/main 是随正式分支更新的浮动镜像标签。jingbo.men 作为本人私人首页；不擅自修改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
 
@@ -89,6 +89,7 @@ API（全部在 `/api` 下；除 health / me / setup / login 外需要登录）�
 | `netmode.js` | 三态网络（自动 / 优先内网 / 优先外网）地址选择 |
 | `cmdrank.js` | 命令面板排序 |
 | `config-shape.js` | 前后端共用的配置集合与身份校验；保留未知扩展字段，拒绝坏候选并保护原缓存 |
+| `bookmarks.js` | V2.3：解析浏览器导出的书签 HTML（Netscape 格式）、按文件夹去重整理、生成项目；纯函数，界面在 app-ui.js 设置 → 数据 |
 | `urlcheck.js` | URL 白名单（前后端共用：只收 http/https） |
 | `fonts/`、壁纸、图标 | 子集化 woff2（`tools/subset-fonts.py`）、默认壁纸、PWA 图标 |
 

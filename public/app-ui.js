@@ -777,7 +777,10 @@
     var sm = ST.summary(cs2), total = sm.total, sl = side.querySelector(".x-sline"), card = side.querySelector(".x-card");
     lastSummary = sm;
     /* 一句话状态（新版头部胶囊）：服务器确认连不上的个数；全部都连不上时卡片上不再挂满红点（x-alldown，新版 CSS 处理） */
-    var nOff = sm.counts.checking ? 0 : sm.counts.off;
+    /* 「显示 → 系统状态」关掉：状态卡、图标上的小点、胶囊里的「N 个连不上」都不显示（检测照常在后台，命令面板仍可刷新） */
+    var showSt = (A.state.settings.show || {}).status !== false;
+    groupsEl.classList.toggle("x-nostatus", !showSt);
+    var nOff = !showSt || sm.counts.checking ? 0 : sm.counts.off;
     nw.querySelector(".x-nst").textContent = nOff ? nOff + " 个连不上" : "";
     nw.setAttribute("data-st", nOff ? "off" : "");
     groupsEl.classList.toggle("x-alldown", sm.tone === "alloff");

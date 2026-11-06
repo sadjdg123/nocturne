@@ -134,6 +134,13 @@ test("常用 row: frequency + recency, device-local, follows the 最近使用 sw
   const nst = doc.querySelector(".x-net .x-nst");
   assert.ok(nst, "pill has the status slot");
   assert.match(nst.textContent, /^(\d+ 个连不上)?$/);
+  /* 关掉「系统状态」：状态卡、图标小点、胶囊里的连不上个数一起不显示 */
+  A.commit((s) => { s.settings.show = Object.assign({}, s.settings.show, { status: false }); }, "settings"); await sleep(20);
+  assert.ok(doc.getElementById("x-groups").classList.contains("x-nostatus"));
+  assert.equal(nst.textContent, "");
+  assert.equal(doc.querySelector(".x-net").getAttribute("data-st"), "");
+  A.commit((s) => { s.settings.show = Object.assign({}, s.settings.show, { status: true }); }, "settings"); await sleep(20);
+  assert.ok(!doc.getElementById("x-groups").classList.contains("x-nostatus"));
 });
 
 test("bookmark import: one commit, one undo, appended groups; edit drag needs a touch hold; undo toast lasts 8s", opt, async (t) => {
