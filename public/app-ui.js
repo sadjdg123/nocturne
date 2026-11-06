@@ -1276,6 +1276,9 @@
   /* ---- 数据 ---- */
   D.innerHTML = '<p class="x-gt">备份</p><div class="x-gl"><button type="button" class="x-row x-rb" data-d="export">导出配置</button>' +
     '<button type="button" class="x-row x-rb" data-d="import">导入配置</button><p class="x-err" data-err role="alert" hidden></p><input type="file" accept="application/json,.json" hidden data-file></div>' +
+    '<p class="x-gt">书签</p><div class="x-gl"><button type="button" class="x-row x-rb" data-d="bm">导入浏览器书签</button>' +
+    '<div class="x-cf x-bm" data-bm hidden></div><input type="file" accept=".html,.htm,text/html" hidden data-bmfile></div>' +
+    '<p class="x-hint">在电脑浏览器里「导出书签」得到一个 .html 文件，选它即可；只追加，不会改动首页已有的内容，导入后可以撤销。</p>' +
     '<p class="x-gt">重置</p><div class="x-gl"><button type="button" class="x-row x-rb is-red" data-d="reset" aria-expanded="false">恢复默认</button>' +
     '<div class="x-cf" data-cf hidden><p>会清空所有分组和设置。恢复前会自动导出一份备份。</p><div class="x-acts"><button type="button" class="x-pb is-red" data-d="confirm">恢复默认</button><button type="button" class="x-pb" data-d="cancel">取消</button></div></div></div>' +
     '<p class="x-foot5">配置只保存在这台设备的浏览器里</p>';
@@ -1321,6 +1324,9 @@
       }, function (e) { showErr("导出失败：" + (e.message || "无法下载文件")); });
     }
     else if (a === "import") file.click();
+    else if (a === "bm") { bmBox.hidden = true; bmFile.value = ""; bmFile.click(); }
+    else if (a === "bm-cancel") { bmBox.hidden = true; bmPlan = null; }
+    else if (a === "bm-go") importBookmarks();
     else if (a === "reset") showCf(cf.hidden);
     else if (a === "cancel") showCf(false);
     else if (a === "confirm") {
@@ -1332,6 +1338,52 @@
   });
   function valid(d) {
     return window.NocturneConfigShape.valid(d, { settingsOptional: true });
+  }
+
+  /* ---- 导入浏览器书签（追加，不替换）：选文件 → 按文件夹预览、勾选 → 一次提交（一步撤销） ---- */
+  var BM = window.NocturneBookmarks, bmBox = D.querySelector("[data-bm]"), bmFile = D.querySelector("[data-bmfile]"), bmPlan = null;
+  bmFile.addEventListener("change", function () {
+    var f = bmFile.files && bmFile.files[0]; if (!f || !BM) return;
+    if (f.size > 20 * 1024 * 1024) { A.toast("文件太大（超过 20MB），不像是书签文件"); return; }
+    f.text().then(function (txt) {
+      var list = BM.parse(txt);
+      if (!list.length) { bmPlan = null; bmBox.hidden = false; bmBox.innerHTML = "<p>这个文件里没有找到网页书签。请在浏览器的书签管理里选「导出书签」，再选导出的 .html 文件。</p>" +
+        '<div class="x-acts"><button type="button" class="x-pb" data-d="bm-cancel">知道了</button></div>'; return; }
+      bmPlan = BM.plan(list, A.state, { max: 300 });
+      drawBm();
+    }, function () { A.toast("读取文件失败"); });
+  });
+  function drawBm() {
+    var p = bmPlan; bmBox.hidden = false;
+    if (!p.count) { bmBox.innerHTML = "<p>找到 " + p.total + " 个书签，都已经在首页上了，不用再导入。</p>" + '<div class="x-acts"><button type="button" class="x-pb" data-d="bm-cancel">知道了</button></div>'; return; }
+    bmBox.innerHTML = "<p>找到 " + p.total + " 个书签" + (p.dup ? "，其中 " + p.dup + " 个首页已经有了（或重复），会跳过" : "") + (p.cut ? "；一次最多导入 300 个，另外 " + p.cut + " 个这次不导入" : "") +
+      "。每个文件夹会成为一个分组，勾选要导入的：</p>" +
+      '<div class="x-bm-list">' + p.folders.map(function (f, n) {
+        return '<label class="x-bm-f"><input type="checkbox" checked data-bmf="' + n + '"><span>' + esc(f.name) + "</span><small>" + f.items.length + " 个</small></label>";
+      }).join("") + "</div>" +
+      '<div class="x-acts"><button type="button" class="x-pb is-amber" data-d="bm-go">导入</button><button type="button" class="x-pb" data-d="bm-cancel">取消</button></div>';
+    syncBm();
+  }
+  function bmPicked() { return bmPlan ? bmPlan.folders.filter(function (f, n) { var c = bmBox.querySelector('[data-bmf="' + n + '"]'); return c && c.checked; }) : []; }
+  function syncBm() {
+    var n = bmPicked().reduce(function (a, f) { return a + f.items.length; }, 0), go = bmBox.querySelector('[data-d="bm-go"]');
+    if (go) { go.textContent = n ? "导入 " + n + " 个" : "导入"; go.disabled = !n; }
+  }
+  bmBox.addEventListener("change", function (e) { if (e.target.matches("[data-bmf]")) syncBm(); });
+  function importBookmarks() {
+    var picked = bmPicked(); if (!picked.length) return;
+    var SPC = A.spaces, n = 0, ng = 0;
+    A.commit(function (st) {
+      picked.forEach(function (f) {
+        /* 同名分组已存在：接在它后面；否则新建一个图标分组（在某个空间里导入 → 新分组整组进这个空间） */
+        var g = st.groups.filter(function (x) { return x.name === f.name && x.style !== "chip"; })[0];
+        if (!g) { g = { id: A.util.uid(), name: f.name, style: "icon", items: [] }; st.groups.push(g); ng++; if (SPC) SPC.adoptGroup(st, g.id); }
+        if (!g.items) g.items = [];
+        f.items.forEach(function (b) { var it = BM.item(b, A.util.uid); g.items.push(it); n++; if (SPC) SPC.keepVisible(st, it.id); });
+      });
+    }, "import-bookmarks");
+    bmBox.hidden = true; bmPlan = null;
+    undoToast("已导入 " + n + " 个书签" + (ng ? "，新建 " + ng + " 个分组" : ""));
   }
   function fillIds(list) {
     var seen = new Set();

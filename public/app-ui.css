@@ -316,3 +316,11 @@ body.x-spm-open .x-toast { z-index: 52; }
   .x-spm-h { border-radius: 22px 22px 0 0; }
 }
 @media (prefers-reduced-motion: reduce) { .x-spm, .x-spm-back { transition: none; } }
+
+/* V2.3 · 设置 → 数据 → 导入浏览器书签：按文件夹勾选 */
+.x-bm-list { display: grid; gap: 2px; margin: 0 0 12px; max-height: 280px; overflow-y: auto; overscroll-behavior: contain; }
+.x-bm-f { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px; color: var(--x-text); font: 400 15px var(--x-ui); cursor: pointer; }
+.x-bm-f input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--x-amber); }
+.x-bm-f span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.x-bm-f small { flex: none; color: var(--x-mist); font-size: 13px; }
+.x-pb:disabled { opacity: .45; cursor: default; }
