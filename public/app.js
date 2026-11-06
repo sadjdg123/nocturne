@@ -218,10 +218,18 @@
     act.textContent = opts.action || "";
     act.onclick = function () { hide(); if (opts.onAction) opts.onAction(); };
     el.classList.add("is-on");
-    function hide() { el.classList.remove("is-on"); }
+    function hide() { el.classList.remove("is-on"); toastHide = null; }
+    /* 带「撤销」等按钮的提示多停一会（8 秒），手指按在提示上时暂停计时，松开后再给 3 秒 */
+    var ms = opts.duration || (opts.action ? 8000 : 4000);
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(hide, opts.duration || 4000);
+    toastHide = hide;
+    toastTimer = setTimeout(hide, ms);
   }
+  var toastHide = null, toastHeld = false;
+  $("x-toast").addEventListener("pointerdown", function () { if (toastHide) { toastHeld = true; clearTimeout(toastTimer); } });
+  ["pointerup", "pointercancel", "pointerleave"].forEach(function (t) {
+    $("x-toast").addEventListener(t, function () { if (toastHeld && toastHide) { clearTimeout(toastTimer); toastTimer = setTimeout(toastHide, 3000); } toastHeld = false; });
+  });
 
   $("x-engines").addEventListener("click", function (e) {
     var b = e.target.closest("[data-eng]");
@@ -230,10 +238,30 @@
     save(); render();
     $("x-q").focus();
   });
+  /* 搜索框里输入的是网址（douban.com、nas.local:5000、192.168.1.10:8096、https://…）：直接打开，不交给搜索引擎。
+   * 没写协议时：IP / localhost / .local / .lan / 带端口 → http，其余 → https。只认常见顶级域名，
+   * 避免把「node.js」「index.html」这类词当成网址；不是网址就返回 ""，照常搜索 */
+  var TLD = /^(com|net|org|cn|io|me|app|dev|co|ai|info|xyz|top|tv|cc|site|online|tech|link|club|shop|store|blog|wiki|edu|gov|mil|int|biz|pro|name|art|fun|live|news|vip|work|ltd|group|cloud|games|page|space|website|one|plus|so|im|gg|fm|ly|to|sh|is|in|us|uk|jp|kr|hk|tw|mo|sg|de|fr|ru|ca|au|nz|nl|it|es|se|ch|eu|asia|moe|men|run|host|mobi|icu)$/i;
+  function typedUrl(q) {
+    q = String(q == null ? "" : q).trim();
+    if (!q || /\s/.test(q) || q.length > 2048) return "";
+    var hasScheme = /^https?:\/\//i.test(q);
+    if (!hasScheme && /^[a-z][\w+.-]*:(?!\d)/i.test(q)) return ""; /* javascript: / mailto: 等其他协议：不是网址 */
+    var host = (hasScheme ? q.replace(/^https?:\/\//i, "") : q).split(/[\/?#]/)[0], hn = host.replace(/:\d{1,5}$/, "").toLowerCase();
+    if (!hn || hn.indexOf("@") >= 0) return "";
+    var ip = /^\d{1,3}(\.\d{1,3}){3}$/.test(hn), local = hn === "localhost" || /\.(local|lan|home\.arpa|internal)$/.test(hn), port = host !== hn;
+    var named = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24}|xn--[a-z0-9-]{2,59})$/.test(hn);
+    if (!hasScheme && !ip && !local && !(named && (port || TLD.test(hn.split(".").pop()) || /^xn--/.test(hn.split(".").pop())))) return "";
+    if (hasScheme && !ip && !local && !named) return "";
+    var u = hasScheme ? q : (ip || local || port ? "http://" : "https://") + q;
+    return U.http(u) ? u : "";
+  }
   $("x-search").addEventListener("submit", function (e) {
     e.preventDefault();
     var q = $("x-q").value.trim();
     if (!q) return;
+    var direct = typedUrl(q);
+    if (direct) { window.open(direct, "_blank", "noopener"); $("x-q").value = ""; return; }
     var eng = state.settings.engines.filter(function (x) { return x.id === state.settings.engine; })[0] || state.settings.engines[0];
     if (eng && !U.engine(eng.url)) { toast("搜索引擎「" + eng.name + "」的网址模板无效（只支持 http/https）"); return; }
     if (eng) window.open(eng.url.replace("%s", encodeURIComponent(q)), "_blank", "noopener");
@@ -267,7 +295,7 @@
     defaults: defaults,
     save: save, commit: commit, undo: undo, render: render,
     on: on, emit: emit, toast: toast,
-    util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U, dict: dict, sel: sel },
+    util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U, dict: dict, sel: sel, typedUrl: typedUrl },
     spaces: null
   };
   App.spaces = spacesApi();

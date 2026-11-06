@@ -56,7 +56,7 @@ body.x-body {
 .x-round svg { width: 20px; height: 20px; }
 
 .x-hero { text-align: center; padding: 12px 0 2px; }
-.x-clock { font: 300 72px/1 "Cormorant Garamond", serif; letter-spacing: .02em; font-variant-numeric: tabular-nums; margin: 0; text-shadow: 0 2px 24px rgba(0, 0, 0, .35); }
+.x-clock { font: 300 72px/1 "Cormorant Garamond", serif; letter-spacing: .02em; font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "lnum" 1, "tnum" 1; margin: 0; text-shadow: 0 2px 24px rgba(0, 0, 0, .35); }
 .x-date { color: var(--x-mist); font-size: 14px; letter-spacing: .12em; margin-top: 8px; }
 .x-greet { font: 400 18px/1.4 var(--x-serif); margin-top: 6px; letter-spacing: .06em; }
 .x-greet b { color: var(--x-amber); font-weight: 500; }
@@ -111,13 +111,15 @@ body.x-body {
   width: min(calc(100% - 32px), 360px); height: var(--x-dock); border-radius: 22px; display: grid; grid-template-columns: repeat(3, 1fr); padding: 6px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
 .x-dock button { border: 0; background: none; color: var(--x-text); font: 500 12px var(--x-ui); display: grid; place-items: center; align-content: center; gap: 3px; border-radius: 16px; cursor: pointer; min-height: 44px; }
 .x-dock button:active { background: rgba(255, 255, 255, .06); }
+/* 经典外观的底栏只有 搜索 / 编辑 / 设置 三格：快速打开、更多是新版专用（.x-dock button 的 display:grid 会盖过上面的 display:none） */
+.x-dock .x-dk-pal, .x-dock .x-dk-more { display: none; }
 .x-dock svg { width: 21px; height: 21px; color: var(--x-amber); }
 
 .x-toast { position: fixed; z-index: 30; left: 50%; bottom: calc(10px + var(--x-dock) + 12px + env(safe-area-inset-bottom));
   transform: translate(-50%, 8px); opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease;
-  width: max-content; max-width: calc(100% - 32px); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; min-height: 44px; border-radius: 22px; font-size: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+  width: max-content; max-width: calc(100% - 32px); display: flex; align-items: center; gap: 12px; padding: 4px 4px 4px 16px; min-height: 48px; border-radius: 24px; font-size: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
 .x-toast.is-on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
-.x-toast button { height: 32px; padding: 0 12px; border-radius: 16px; border: 0; background: rgba(233, 178, 106, .16); color: var(--x-amber); font: 600 13px var(--x-ui); cursor: pointer; flex: none; }
+.x-toast button { height: 40px; min-width: 64px; padding: 0 16px; border-radius: 20px; border: 0; background: rgba(233, 178, 106, .16); color: var(--x-amber); font: 600 13px var(--x-ui); cursor: pointer; flex: none; }
 
 @media (min-width: 768px) {
   body.x-body { padding-bottom: 48px; }
@@ -189,9 +191,9 @@ body.x-dragging .x-tile, body.x-dragging .x-chip { animation: none !important; }
   filter: brightness(1.08); margin: 0 !important; transition: none !important; animation: none !important;
   z-index: 9999 !important; pointer-events: none; outline: none !important; }
 .is-floating .x-ebadge { display: none; }
-/* iOS decides scroll vs drag at touchstart: draggable items must already refuse touch scrolling in edit mode */
+/* 编辑模式：图标上仍可上下滑动滚动页面（pan-y）；按住约 0.28 秒才拖起（Sortable delay），拖起那一刻起 touchmove 一律 preventDefault，不再滚动 */
 body.editing #x-groups [data-id], body.editing .x-tile[data-id], body.editing .x-chip[data-id], body.editing #x-groups a {
-  touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 body.dragging .x-groups *, body.dragging #x-groups * { animation-play-state: paused; }
 .x-group.is-chosen { border-radius: 18px; }
 

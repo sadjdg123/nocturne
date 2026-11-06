@@ -99,9 +99,15 @@
     spt.innerHTML = "<small>当前空间</small><b>" + esc(cs ? cs.name : M.ALL_NAME) + "</b><span>" + st.groups + " 个分组 · " + st.items + " 个项目</span>";
   }
 
-  /* 问候与日期排成一行：把日期抄到问候的 data-date（CSS ::after 显示）；日期开关关掉时不抄 */
+  /* 问候与日期排成一行：把日期抄到问候的 data-date（CSS ::after 显示）；日期开关关掉时不抄。
+   * 手机上看不到右侧的空间标题：在日期后面带上当前空间名（「11月6日 星期五 · 娱乐」），在「全部」时不带 */
   var dateEl = document.getElementById("x-date"), greetEl = document.getElementById("x-greet");
-  function syncDate() { if (greetEl && dateEl) greetEl.setAttribute("data-date", dateEl.hidden ? "" : dateEl.textContent); }
+  function syncDate() {
+    if (!greetEl || !dateEl) return;
+    var t = dateEl.hidden ? "" : dateEl.textContent, cs = SPC && SPC.list().length ? SPC.current() : null;
+    if (cs && mobile()) t = (t ? t + " · " : "") + cs.name;
+    greetEl.setAttribute("data-date", t);
+  }
   if (dateEl) new MutationObserver(syncDate).observe(dateEl, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
 
   /* ------------------------------------------------------------ 切换器：指示条 + 手机并进底栏 */
@@ -191,7 +197,7 @@
   box.className = "mn-setui";
   box.innerHTML = '<p class="x-gt">界面</p><div class="x-gl">' +
     '<div class="x-row"><span>外观</span><div class="x-sg" role="group" aria-label="外观"><button type="button" data-ui-set="v2" aria-pressed="false">新版</button><button type="button" data-ui-set="classic" aria-pressed="false">经典</button></div></div>' +
-    '<div class="x-row mn-v2only"><span>手机每行</span><div class="x-sg" role="group" aria-label="手机每行图标数（本机）"><button type="button" data-mcols="3" aria-pressed="false">3 标准</button><button type="button" data-mcols="4" aria-pressed="false">4 紧凑</button></div></div></div>' +
+    '<div class="x-row mn-v2only"><span>手机每行</span><div class="x-sg" role="group" aria-label="手机每行图标数（本机）"><button type="button" data-mcols="3" aria-pressed="false">3 标准</button><button type="button" data-mcols="4" aria-pressed="false">4 图标墙</button></div></div></div>' +
     '<p class="x-hint">只影响这台设备。新版和经典共用同一份分组、项目、壁纸与设置，随时可以切回。</p>';
   if (setPane) setPane.prepend(box);
   function syncSettings() {
@@ -245,7 +251,7 @@
   }
   var lastMoved = false;
   A.on("render", onRender);
-  function relayout() { placeNav(); placeInd(true); reveal(false); pairGroups(); }
+  function relayout() { placeNav(); placeInd(true); reveal(false); pairGroups(); syncDate(); }
   window.addEventListener("resize", relayout);
   if (window.matchMedia) { var m = window.matchMedia("(max-width: 767px)"); if (m.addEventListener) m.addEventListener("change", relayout); }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { placeInd(true); reveal(false); });
