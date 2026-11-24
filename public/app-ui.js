@@ -431,19 +431,22 @@
   var URLX = 'inputmode="url" autocapitalize="off" spellcheck="false" ';
 
   function build(add) {
-    var gs = A.state.groups;
+    var gs = A.state.groups, canFav = !!A.fetchFavicon;
     sh.innerHTML = '<div class="x-is-h"><button type="button" data-a="cancel">取消</button><h3>' + (add ? "添加项目" : "编辑项目") + '</h3><button type="button" class="x-is-save" data-a="save">保存</button></div>' +
       '<div class="x-confirm" hidden><span>放弃修改？</span><button type="button" class="is-red" data-a="discard">放弃</button><button type="button" data-a="keep">继续编辑</button></div><form novalidate>' +
       field("url", "网址", URLX + 'placeholder="nas.local:5000 或 https://…"') + field("nm", "名称", "", 20) +
       '<div class="x-f"><span class="x-lab">图标</span><div class="x-icrow"><div class="x-prev" aria-hidden="true"></div><div class="x-seg" role="group" aria-label="图标来源">' +
       MODES.map(function (m) { return '<button type="button" data-m="' + m[0] + '" aria-pressed="false">' + m[1] + "</button>"; }).join("") + "</div></div>" +
-      '<div class="x-pane" data-p="auto"><p class="x-note">按名称匹配 selfh.st 图标，找不到时显示首字母。</p></div>' +
+      '<div class="x-pane" data-p="auto"><p class="x-note">按名称匹配 selfh.st 图标，找不到时显示首字母。' + (canFav ? '也可以直接 <button type="button" class="x-linkbtn" data-fav>抓取网站图标</button>。' : "") + "</p></div>" +
       '<div class="x-pane" data-p="lib"><div class="x-qrow" role="group" aria-label="常用图标">' + QUICK.map(function (v) { return btn(v, false); }).join("") + "</div>" +
       '<input name="q" type="search" autocomplete="off" aria-label="搜索图标" placeholder="搜索图标，如 jellyfin"><p class="x-note" data-lmsg hidden></p><div class="x-igrid" data-lres></div></div>' +
       '<div class="x-pane" data-p="emoji"><input name="emoji" type="text" maxlength="8" aria-label="Emoji" placeholder="输入或选一个 Emoji"><div class="x-igrid">' +
       EMO.map(function (e) { return '<button type="button" data-emo="' + e + '" aria-label="' + e + '">' + e + "</button>"; }).join("") + "</div></div>" +
       '<div class="x-pane" data-p="text"><input name="text" type="text" maxlength="2" aria-label="图标文字" placeholder="1–2 个字"></div>' +
-      '<div class="x-pane" data-p="image"><input name="image" type="text" ' + URLX + 'aria-label="图片网址" placeholder="图片网址 https://…"><label class="x-upl">上传图片<input type="file" accept="image/*" hidden></label></div>' +
+      '<div class="x-pane" data-p="image"><input name="image" type="text" ' + URLX + 'aria-label="图片网址" placeholder="图片网址 https://…">' +
+      '<div class="x-uprow"><label class="x-upl">上传图片<input type="file" accept="image/*" hidden></label>' +
+      (canFav ? '<button type="button" class="x-upl x-favbtn" data-fav>抓取网站图标</button>' : "") + '</div>' +
+      '<p class="x-note">支持直接粘贴剪贴板图片（Ctrl+V / ⌘V）作为图标。</p></div>' +
       '<span class="x-lab">背景色</span><div class="x-sw" role="group" aria-label="背景色">' +
       BGS.map(function (b) { return '<button type="button" data-bg="' + b[0] + '" aria-label="' + (b[1] || b[0]) + '" aria-pressed="false"' + (b[1] ? "" : ' style="background:' + b[0] + '"') + "></button>"; }).join("") + "</div></div>" +
       '<div class="x-f"><span class="x-lab">分组</span><div class="x-gch" role="group" aria-label="分组">' +
@@ -452,7 +455,9 @@
       '<details class="x-more"><summary>更多</summary>' + field("lan", "内网地址", URLX + 'placeholder="http://192.168.1.20:8096"') +
       field("wan", "外网地址", URLX + 'placeholder="https://emby.example.com"') + field("desc", "描述", "", 40) +
       field("aliases", "搜索别名", 'autocapitalize="off" spellcheck="false" enterkeyhint="next" maxlength="400" placeholder="如 mp, 影视订阅"') +
-      '<p class="x-note" data-anote>逗号或回车分隔 · 最多 10 个、每个 ≤32 字 · 只用于命令面板搜索</p></details></form>';
+      '<p class="x-note" data-anote>逗号或回车分隔 · 最多 10 个、每个 ≤32 字 · 只用于命令面板搜索</p>' +
+      '<div class="x-f"><label class="x-row x-is-tg"><span>不检测状态</span><input class="x-tg" type="checkbox" role="switch" name="noProbe"></label>' +
+      '<p class="x-note">开启后，NAS 与浏览器都不会检测这个项目的在线状态，也不计入离线提示。</p></div></details></form>';
     F = {}; sh.querySelectorAll("input[name]").forEach(function (i) { F[i.name] = i; });
   }
   function curIcon() {
@@ -476,7 +481,7 @@
   }
   function setGroup(g) { s.gid = g; press("[data-g]", "data-g", g); F.newg.hidden = g !== "__new"; }
   function count() { sh.querySelectorAll("[data-cnt]").forEach(function (c) { var n = c.getAttribute("data-cnt"); c.textContent = Array.from(F[n].value).length + "/" + F[n].maxLength; }); }
-  function snap() { return JSON.stringify([Object.keys(F).filter(function (k) { return k !== "q"; }).map(function (k) { return F[k].value; }), s.mode, s.lib, s.bg, s.gid, s.upload]); }
+  function snap() { return JSON.stringify([Object.keys(F).filter(function (k) { return k !== "q"; }).map(function (k) { return F[k].type === "checkbox" ? !!F[k].checked : F[k].value; }), s.mode, s.lib, s.bg, s.gid, s.upload]); }
   function validate() {
     var any = false, bad = false;
     ["url", "lan", "wan"].forEach(function (k) {
@@ -533,7 +538,27 @@
         .catch(function () { if (!s || tok !== s.qn) return; box.innerHTML = ""; msg.hidden = false; msg.textContent = "图标库暂时连不上，换 Emoji 或文字试试"; });
     }, 400);
   }
-  function upload(file) {
+  function fetchFavicon(trigger) {
+    if (!s || !A.fetchFavicon || s.favBusy) return;
+    var raw = F.url.value.trim() || F.wan.value.trim() || F.lan.value.trim(), u = raw ? parse(raw) : null;
+    if (!u) { A.toast("请先填写有效的网站地址"); F.url.focus(); return; }
+    var target = norm(raw), st = s, btns = [].slice.call(sh.querySelectorAll("[data-fav]"));
+    s.favBusy = true;
+    btns.forEach(function (b) { b.disabled = true; b.setAttribute("data-orig", b.textContent); b.textContent = "抓取中…"; });
+    A.fetchFavicon(target).then(function (url) {
+      if (s !== st) return;
+      s.upload = url; F.image.value = ""; F.image.placeholder = "已抓取网站图标 · 或输入网址替换";
+      setMode("image");
+      A.toast("已抓取网站图标");
+    }, function (e) {
+      if (s !== st) return;
+      A.toast(e && e.message ? "抓取失败：" + e.message : "未能抓取到网站图标", { duration: 6000 });
+    }).then(function () {
+      if (s === st) s.favBusy = false;
+      btns.forEach(function (b) { if (b.isConnected) { b.disabled = false; b.textContent = b.getAttribute("data-orig") || "抓取网站图标"; } });
+    });
+  }
+  function upload(file, fromPaste) {
     if (!file) return;
     var r = new FileReader();
     r.onload = function () {
@@ -545,7 +570,12 @@
         var opaque = true;
         try { var px = cx.getImageData(0, 0, 128, 128).data; for (var i = 3; i < px.length; i += 4) if (px[i] < 255) { opaque = false; break; } } catch (x) { opaque = false; }
         var type = opaque ? "image/jpeg" : "image/png", st = s;
-        function done(v) { if (s !== st) return; s.upload = v; F.image.value = ""; F.image.placeholder = "已上传图片 · 或输入网址替换"; preview(true); }
+        function done(v) {
+          if (s !== st) return;
+          s.upload = v; F.image.value = ""; F.image.placeholder = fromPaste ? "已粘贴剪贴板图片 · 或输入网址替换" : "已上传图片 · 或输入网址替换";
+          setMode("image");
+          if (fromPaste) A.toast("已粘贴剪贴板图片");
+        }
         var dataUrl = opaque ? c.toDataURL(type, 0.9) : c.toDataURL(type);
         /* 接了 NAS 后端：图标存成文件（api/icons/<id>），配置里只记地址；失败就先用 data URL，服务器同步时会再转存 */
         if (!A.uploadIcon || !c.toBlob) return done(dataUrl);
@@ -569,18 +599,19 @@
     var gs = A.state.groups, g = gs.filter(function (x) { return x.id === o.gid; })[0], item = g && o.id ? g.items.filter(function (x) { return x.id === o.id; })[0] : null;
     if (o.id && !item) return;
     build(!item);
-    s = { id: item ? item.id : null, gid0: g ? g.id : null, mode: "auto", lib: "", bg: "", upload: "", qn: 0, touched: false, urlApplied: "" };
+    s = { id: item ? item.id : null, gid0: g ? g.id : null, mode: "auto", lib: "", bg: "", upload: "", qn: 0, touched: false, urlApplied: "", favBusy: false };
     setGroup(g ? g.id : gs[0] ? gs[0].id : "__new");
     if (item) {
       var ic = item.icon || {}, v = ic.value || "";
       F.url.value = item.wan || item.lan || ""; F.nm.value = item.title || ""; F.lan.value = item.lan || ""; F.wan.value = item.wan || ""; F.desc.value = item.desc || "";
       s.urlApplied = norm(F.url.value);
       F.aliases.value = Array.isArray(item.aliases) ? item.aliases.filter(function (x) { return typeof x === "string"; }).join(", ") : "";
+      if (F.noProbe) F.noProbe.checked = item.noProbe === true;
       s.copied = { el: item.wan ? F.wan : F.lan, v: F.url.value }; s.bg = ic.bg || "";
       if (ic.type === "iconify" && v) { if (v !== "selfhst:" + slug(item.title || "")) { s.mode = "lib"; s.lib = v; } }
       else if (ic.type === "image" && v) { s.mode = "image"; if (/^(data:|api\/icons\/)/.test(v)) { s.upload = v; F.image.placeholder = "已上传图片 · 或输入网址替换"; } else F.image.value = v; }
       else if ((ic.type === "emoji" || ic.type === "text") && v) { s.mode = ic.type; F[ic.type].value = v; }
-      if ((item.lan && item.wan) || F.aliases.value) sh.querySelector(".x-more").open = true;
+      if ((item.lan && item.wan) || F.aliases.value || item.noProbe === true) sh.querySelector(".x-more").open = true;
     }
     press("[data-bg]", "data-bg", s.bg); press("[data-ic]", "data-ic", s.lib);
     setMode(s.mode); count(); validate(); s.init = snap();
@@ -605,8 +636,9 @@
     if (s.mode === "image" && F.image.value.trim() && !U.image(F.image.value.trim())) { A.toast("图片网址无效：只支持 http:// 或 https:// 开头的地址"); return; }
     var lan = F.lan.value.trim() ? norm(F.lan.value) : "", wan = F.wan.value.trim() ? norm(F.wan.value) : "";
     var title = F.nm.value.trim() || s.hint || "未命名", id = s.id, gid0 = s.gid0, gid = s.gid, ng = F.newg.value.trim() || "新分组";
-    var data = { title: title, desc: F.desc.value.trim(), lan: lan, wan: wan, icon: curIcon() }, aliases = aliasList();
+    var data = { title: title, desc: F.desc.value.trim(), lan: lan, wan: wan, icon: curIcon() }, aliases = aliasList(), noProbe = !!(F.noProbe && F.noProbe.checked);
     if (aliases.length) data.aliases = aliases; /* 没填别名的项目不加这个字段，保持原样 */
+    if (noProbe) data.noProbe = true;
     var SPC = A.spaces, pinned = false;
     A.commit(function (st) {
       var tg = gid === "__new" ? null : st.groups.filter(function (x) { return x.id === gid; })[0];
@@ -618,6 +650,7 @@
       if (i < 0) { data.id = id; tg.items.push(data); keep(id); return; }
       var it = Object.assign(og.items[i], data);
       if (!aliases.length) delete it.aliases;
+      if (!noProbe) delete it.noProbe;
       if (og !== tg) { og.items.splice(i, 1); tg.items.push(it); keep(id); }
     }, id ? "edit-item" : "add-item");
     close();
@@ -631,7 +664,8 @@
     if ((b = t.closest("[data-a]"))) {
       var a = b.getAttribute("data-a");
       if (a === "cancel") tryClose(); else if (a === "save") save(); else if (a === "discard") close(); else confirmBox(false);
-    } else if ((b = t.closest("[data-m]"))) setMode(b.getAttribute("data-m"));
+    } else if ((b = t.closest("[data-fav]"))) fetchFavicon(b);
+    else if ((b = t.closest("[data-m]"))) setMode(b.getAttribute("data-m"));
     else if ((b = t.closest("[data-ic]"))) { s.lib = b.getAttribute("data-ic"); press("[data-ic]", "data-ic", s.lib); preview(true); }
     else if ((b = t.closest("[data-emo]"))) { F.emoji.value = b.getAttribute("data-emo"); preview(true); }
     else if ((b = t.closest("[data-bg]"))) { s.bg = s.bg === b.getAttribute("data-bg") ? "" : b.getAttribute("data-bg"); press("[data-bg]", "data-bg", s.bg); preview(true); }
@@ -667,9 +701,18 @@
   A.on("add-item", function (d) { d.handled = true; openSheet({ gid: d.gid }); });
   A.on("edit-item", function (d) { d.handled = true; openSheet({ gid: d.gid, id: d.id }); });
   document.addEventListener("paste", function (e) {
+    var cd = e.clipboardData || window.clipboardData;
+    if (open && s && cd) {
+      /* 编辑弹窗打开时：剪贴板里有图片则直接粘贴为图标（文本粘贴照常进输入框） */
+      var imgFile = null, items = cd.items || [], files = cd.files || [];
+      for (var i = 0; i < items.length; i++) if (items[i].type && items[i].type.indexOf("image/") === 0 && items[i].getAsFile) { imgFile = items[i].getAsFile(); if (imgFile) break; }
+      if (!imgFile) for (var j = 0; j < files.length; j++) if (files[j].type && files[j].type.indexOf("image/") === 0) { imgFile = files[j]; break; }
+      if (imgFile) { e.preventDefault(); upload(imgFile, true); }
+      return;
+    }
     var t = e.target;
     if (open || (t && t.closest && t.closest("input, textarea, select, [contenteditable]"))) return;
-    var tx = ((e.clipboardData || window.clipboardData).getData("text") || "").trim();
+    var tx = (cd ? cd.getData("text") : "").trim();
     if (!tx || /\s/.test(tx) || !(hasScheme(tx) || /^[\w-]+(\.[\w-]+)*(\.[a-z]{2,}|:\d{2,5})(:\d{2,5})?([\/?#]\S*)?$/i.test(tx)) || !parse(tx)) return;
     e.preventDefault();
     var g = A.spaces ? A.spaces.defaultGroup() : A.state.groups.filter(function (x) { return x.style !== "chip"; })[0] || A.state.groups[0];
@@ -728,7 +771,7 @@
   document.querySelector(".x-head").insertBefore(nw, document.getElementById("btn-menu"));
   var side = document.createElement("aside");
   side.className = "x-side"; side.setAttribute("aria-label", "状态与最近");
-  side.innerHTML = '<section class="x-card x-glass"><h2>系统状态</h2><div class="x-stat"><svg class="x-ring" viewBox="0 0 40 40" aria-hidden="true">' +
+  side.innerHTML = '<section class="x-card x-glass"><div class="x-card-h"><h2>系统状态</h2><button type="button" class="x-rechk" data-recheck title="立即检测状态" aria-label="立即检测状态">↻</button></div><div class="x-stat"><svg class="x-ring" viewBox="0 0 40 40" aria-hidden="true">' +
     '<circle class="bg" cx="20" cy="20" r="17"/><circle class="fg" cx="20" cy="20" r="17"/></svg><p class="x-cnt"></p></div><p class="x-sline"></p><p class="x-snote" hidden></p></section>' +
     '<section class="x-card x-glass" data-recent hidden><h2>最近使用</h2><div class="x-recent"></div></section>';
   groupsEl.after(side);
@@ -753,27 +796,29 @@
   }
   /* 状态检测永远覆盖全部项目（与空间无关）；这里的「在线 x / y」只统计当前空间看得见的图标项目 */
   function inScope() { var sc = A.spaces ? A.spaces.scope() : null; return function (id) { return !sc || sc.has(String(id)); }; }
+  var lastOffItems = [];
   function apply() {
-    var m = all(), ids = [], on = 0, pend = 0, off = [], auth = 0, ok = inScope(), cs = A.spaces && A.spaces.current();
+    var m = all(), ids = [], on = 0, pend = 0, off = [], offItems = [], auth = 0, ok = inScope(), cs = A.spaces && A.spaces.current();
     side.querySelector(".x-card h2").textContent = cs ? "系统状态 · " + cs.name : "系统状态";
     /* 可信标注（status.js）：服务器测到的才说在线 / 离线 / ms / 检测时间；浏览器探测只说「可能在线 / 无法确认」 */
     groupsEl.querySelectorAll(".x-tile[data-id], .x-chip[data-id]").forEach(function (el) {
       var e = m[el.getAttribute("data-id")]; if (!e) return;
       el.setAttribute("href", A.url(e.item));
       var d = el.querySelector(":scope > .dot"); if (!d) return;
-      var c = stat.get(e.item.id) || ST.classify(null), t = ST.text(c);
+      var c = e.item.noProbe === true ? ST.classify({ source: "none", reason: "muted" }) : (stat.get(e.item.id) || ST.classify(null)), t = ST.text(c);
       d.className = "dot " + c.s; d.title = t;
       el.setAttribute("data-s", c.s);
       var sx = el.querySelector(".x-st"); if (sx) { sx.textContent = ST.short(c); sx.setAttribute("data-s", c.s); }
       var hx = el.querySelector(".x-host"), hu = A.url(e.item); if (hx) { try { hx.textContent = hu !== "#" ? new URL(hu).host : "没有地址"; } catch (er) { hx.textContent = ""; } }
-      el.title = [e.item.title, e.item.desc, t].filter(Boolean).join(" · ");
+      el.title = [e.item.title, e.item.desc, c.s === "muted" ? "" : t].filter(Boolean).join(" · ");
     });
     var cs2 = [];
     Object.keys(m).forEach(function (id) {
       if (!m[id].icon || !ok(id)) return;
-      var c = stat.get(id) || ST.classify(null); cs2.push(c);
-      if (c.s === "off") off.push(m[id].item.title);
+      var c = m[id].item.noProbe === true ? ST.classify({ source: "none", reason: "muted" }) : (stat.get(id) || ST.classify(null)); cs2.push(c);
+      if (c.s === "off") { off.push(m[id].item.title); offItems.push(m[id].item); }
     });
+    lastOffItems = offItems;
     var sm = ST.summary(cs2), total = sm.total, sl = side.querySelector(".x-sline"), card = side.querySelector(".x-card");
     lastSummary = sm;
     /* 一句话状态（新版头部胶囊）：服务器确认连不上的个数；全部都连不上时卡片上不再挂满红点（x-alldown，新版 CSS 处理） */
@@ -852,12 +897,18 @@
   function check(reset) {
     var g = ++gen, m = all(), list = Object.keys(m).filter(function (id) { return m[id].icon; }).map(function (id) { return m[id].item; });
     lastCheck = Date.now();
-    if (reset) list.forEach(function (i) { stat.set(i.id, ST.classify(null)); });
+    if (reset) list.forEach(function (i) { stat.set(i.id, i.noProbe === true ? ST.classify({ source: "none", reason: "muted" }) : ST.classify(null)); });
     apply();
     var q = list.slice(), active = 0, left = q.length;
     function run(it) {
       var u = A.url(it);
       active++;
+      if (it.noProbe === true) {
+        stat.set(it.id, ST.classify({ source: "none", reason: "muted" }));
+        active--; left--; apply();
+        if (left) next(); else finish();
+        return;
+      }
       /* 浏览器探测（no-cors）：只知道有没有网络错误 → {source:"browser", reachable}；不计时（测到的不是服务的响应时间） */
       function local() {
         if (u === "#") return Promise.resolve({ source: "none", reason: "noaddr" });
@@ -879,7 +930,7 @@
   }
   function finish() {
     var m = all(), ok = inScope(), cs = [];
-    Object.keys(m).forEach(function (id) { if (!m[id].icon || !ok(id)) return; cs.push(stat.get(id) || ST.classify(null)); });
+    Object.keys(m).forEach(function (id) { if (!m[id].icon || !ok(id)) return; cs.push(m[id].item.noProbe === true ? ST.classify({ source: "none", reason: "muted" }) : (stat.get(id) || ST.classify(null))); });
     var sm = ST.summary(cs), n = sm.counts;
     live.textContent = "";
     setTimeout(function () { live.textContent = ST.spoken(sm); }, 50);
@@ -889,26 +940,68 @@
   }
   /** 某个项目当前的可信状态（compact 行、读屏、测试用） */
   A.statusOf = function (id) { return stat.get(String(id)) || null; };
-  var doneWaiters = [];
+  var doneWaiters = [], manualBusy = false;
   function recheck() { if (Date.now() - lastCheck > 60000) check(false); }
   /* cb({on, off})：这一轮检测真正结束后回调（命令面板「重新检测状态」据此报告结果） */
   A.recheck = function (reset, cb) { if (typeof cb === "function") doneWaiters.push(cb); check(!!reset); };
+  function runManualRecheck() {
+    if (manualBusy) return;
+    var R = window.NocturneRank, spin = side.querySelector("[data-recheck]");
+    if (!A.triggerRecheck) {
+      A.toast("正在重新检测…", { duration: 6000 });
+      A.recheck(true, function (d) { A.toast(R && R.statusReport ? R.statusReport(false, d) : "检测完成"); });
+      return;
+    }
+    manualBusy = true;
+    if (spin) { spin.disabled = true; spin.classList.add("is-spin"); }
+    A.toast("正在通知 NAS 检测状态…", { duration: 10000 });
+    A.triggerRecheck().then(function (res) {
+      A.recheck(false, function (d) {
+        if (res && res.cached && res.cooldownSec) {
+          A.toast("刚刚检测过，请 " + res.cooldownSec + " 秒后再试（" + d.on + " 个在线，" + d.off + " 个离线）");
+        } else {
+          A.toast("检测完成：" + d.on + " 个在线，" + d.off + " 个离线（NAS 刚刚检测）");
+        }
+      });
+    }, function (e) {
+      A.toast("立即检测失败：" + (e && e.message ? e.message : "网络错误"));
+    }).then(function () {
+      manualBusy = false;
+      if (spin) { spin.disabled = false; spin.classList.remove("is-spin"); }
+    });
+  }
+  A.probeNow = runManualRecheck;
+  side.addEventListener("click", function (e) {
+    if (e.target.closest("[data-recheck]")) runManualRecheck();
+  });
 
   /* ---- events ---- */
-  /* ---- 网络模式菜单：一次点按即可纠正，不做任何自动探测 ---- */
+  /* ---- 网络模式与离线摘要菜单：一次点按即可纠正网络、查看连不上的服务或立即重测 ---- */
   var netm = document.createElement("div"), netOpen = false, netT = null;
-  netm.className = "x-netm"; netm.hidden = true; netm.setAttribute("role", "menu"); netm.setAttribute("aria-label", "网络模式");
+  netm.className = "x-netm"; netm.hidden = true; netm.setAttribute("role", "menu"); netm.setAttribute("aria-label", "网络模式与状态");
   body.appendChild(netm);
   function drawNetMenu() {
-    var p = pref(), auto = NM.decide(location.hostname);
+    var p = pref(), auto = NM.decide(location.hostname), showSt = (A.state.settings.show || {}).status !== false;
     var opts = [
       ["auto", "自动", "按本页访问地址判断 · 当前优先" + NAMES[auto]],
       ["lan", "优先内网", "没有内网地址时用外网"],
       ["wan", "优先外网", "没有外网地址时用内网"]
     ];
-    netm.innerHTML = opts.map(function (o) {
+    var html = opts.map(function (o) {
       return '<button type="button" role="menuitemradio" aria-checked="' + (o[0] === p) + '" data-net="' + o[0] + '"><b aria-hidden="true">' + (o[0] === p ? "✓" : "") + "</b><span>" + o[1] + "<small>" + esc(o[2]) + "</small></span></button>";
     }).join("") + "<p>只影响这台设备</p>";
+    if (showSt) {
+      if (lastOffItems.length) {
+        html += '<div class="x-netm-sep" role="separator"></div><div class="x-netm-sec">连不上的服务 · ' + lastOffItems.length + '</div><div class="x-netm-off">' +
+          lastOffItems.map(function (i) {
+            var u = A.url(i);
+            return '<a href="' + esc(u) + '"' + (u === "#" ? "" : ' target="_blank" rel="noopener"') + ' data-rid="' + esc(i.id) + '" role="menuitem"><i aria-hidden="true"></i><span>' + esc(i.title) + "</span></a>";
+          }).join("") + "</div>";
+      }
+      html += '<div class="x-netm-sep" role="separator"></div><button type="button" role="menuitem" class="x-netm-act" data-recheck><b aria-hidden="true">↻</b><span>立即检测状态<small>' +
+        (A.triggerRecheck ? "让 NAS 立刻执行一轮检测" : "在这个浏览器里重新检测") + "</small></span></button>";
+    }
+    netm.innerHTML = html;
   }
   function placeNetMenu() {
     var r = nw.getBoundingClientRect(), vw = document.documentElement.clientWidth;
@@ -931,6 +1024,10 @@
   A.net.openMenu = openNet;
   nw.addEventListener("click", function () { if (netOpen) closeNet(true); else openNet(); });
   netm.addEventListener("click", function (e) {
+    var rc = e.target.closest("[data-recheck]");
+    if (rc) { closeNet(true); runManualRecheck(); return; }
+    var lk = e.target.closest("a[data-rid]");
+    if (lk) { closeNet(false); return; }
     var b = e.target.closest("[data-net]"); if (!b) return;
     closeNet(true); A.net.set(b.getAttribute("data-net"));
   });
@@ -945,7 +1042,7 @@
   }, true);
   document.addEventListener("keydown", function (e) {
     if (!netOpen) return;
-    var bs = [].slice.call(netm.querySelectorAll("button")), i = bs.indexOf(document.activeElement);
+    var bs = [].slice.call(netm.querySelectorAll("button, a[data-rid]")), i = bs.indexOf(document.activeElement);
     if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeNet(true); }
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopImmediatePropagation(); bs[(i + (e.key === "ArrowDown" ? 1 : bs.length - 1)) % bs.length].focus(); }
     else if (e.key === "Tab") closeNet(false);
@@ -954,7 +1051,7 @@
   window.addEventListener("scroll", function () { if (netOpen) closeNet(false); }, { passive: true });
   function track(e) {
     if (e.defaultPrevented || body.classList.contains("editing") || (e.type === "auxclick" && e.button !== 1)) return;
-    var a = e.target.closest && e.target.closest("#x-groups [data-id], .x-side [data-rid], .x-fav [data-rid]"); if (!a || a.tagName !== "A") return;
+    var a = e.target.closest && e.target.closest("#x-groups [data-id], .x-side [data-rid], .x-fav [data-rid], .x-netm [data-rid]"); if (!a || a.tagName !== "A") return;
     remember(a.getAttribute("data-id") || a.getAttribute("data-rid"));
   }
   /** 记入「最近使用」（本机）：点图标 / 最近使用 / 离线芯片，或命令面板打开了一个不在当前空间里的项目 */
@@ -971,7 +1068,7 @@
   /* 没有地址 / 地址无效的项目不可点击：不再打开一个空白的新标签页 */
   document.addEventListener("click", function (e) {
     if (body.classList.contains("editing")) return;
-    var a = e.target.closest && e.target.closest("#x-groups a[data-id], .x-side a[data-rid], .x-fav a[data-rid]");
+    var a = e.target.closest && e.target.closest("#x-groups a[data-id], .x-side a[data-rid], .x-fav a[data-rid], .x-netm a[data-rid]");
     if (!a || a.getAttribute("href") !== "#") return;
     e.preventDefault();
     var r = all()[a.getAttribute("data-id") || a.getAttribute("data-rid")], i = r && r.item;
@@ -1225,26 +1322,27 @@
   }
 
   /* ---- 搜索 ---- */
-  S.innerHTML = '<p class="x-gt">搜索引擎</p><div class="x-gl" data-elist></div><p class="x-hint">点按一行设为默认；默认引擎不能关闭或删除。</p>' +
+  S.innerHTML = '<p class="x-gt">搜索引擎</p><div class="x-gl" data-elist></div><p class="x-hint">点按一行设为默认；在搜索框按 Tab 切换引擎，或输入触发词加空格直接搜索（如 gh 关键词）。</p>' +
     '<div class="x-gl x-addf" style="margin-top:12px"><button type="button" class="x-row x-rb is-amber" data-s="add" aria-expanded="false">添加搜索引擎</button>' +
     '<div data-form hidden><label class="x-row"><span>名称</span><input type="text" data-f="name" placeholder="可选" maxlength="24"></label>' +
     '<label class="x-row"><span>网址模板</span><input type="url" data-f="url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://example.com/search?q=%s"></label>' +
-    '<p class="x-hint">用 %s 代表搜索词</p><div class="x-acts"><button type="button" class="x-pb" data-s="cancel">取消</button><button type="button" class="x-pb is-amber" data-s="save" disabled>添加</button></div></div></div>';
+    '<label class="x-row"><span>触发词</span><input type="text" data-f="kw" autocapitalize="off" spellcheck="false" placeholder="可选，如 db" maxlength="8"></label>' +
+    '<p class="x-hint">用 %s 代表搜索词；触发词限 1–8 位字母或数字</p><div class="x-acts"><button type="button" class="x-pb" data-s="cancel">取消</button><button type="button" class="x-pb is-amber" data-s="save" disabled>添加</button></div></div></div>';
   var list = S.querySelector("[data-elist]"), form = S.querySelector("[data-form]"), addBtn = S.querySelector('[data-s="add"]');
-  var fName = S.querySelector('[data-f="name"]'), fUrl = S.querySelector('[data-f="url"]'), fSave = S.querySelector('[data-s="save"]');
+  var fName = S.querySelector('[data-f="name"]'), fUrl = S.querySelector('[data-f="url"]'), fKw = S.querySelector('[data-f="kw"]'), fSave = S.querySelector('[data-s="save"]');
   function okUrl(u) { return A.util.url.engine(u); }
   function drawEngines() {
     var st = A.state.settings;
     list.innerHTML = (st.engines || []).map(function (e) {
-      var def = e.id === st.engine;
-      return '<div class="x-row x-eg" data-eid="' + esc(e.id) + '"' + (def ? " data-def" : "") + '><button type="button" class="x-rb x-en" aria-pressed="' + def + '"><span class="x-ck" aria-hidden="true">✓</span><span>' + esc(e.name) + "</span></button>" +
+      var def = e.id === st.engine, kw = A.util.enginePrefix ? A.util.enginePrefix(e) : "";
+      return '<div class="x-row x-eg" data-eid="' + esc(e.id) + '"' + (def ? " data-def" : "") + '><button type="button" class="x-rb x-en" aria-pressed="' + def + '"><span class="x-ck" aria-hidden="true">✓</span><span class="x-en-n">' + esc(e.name) + '</span>' + (kw ? '<kbd class="x-eg-kw" aria-hidden="true">' + esc(kw) + "</kbd>" : "") + "</button>" +
         '<input class="x-tg" type="checkbox" role="switch" aria-label="启用 ' + esc(e.name) + '"' + (e.on || def ? " checked" : "") + (def ? " disabled" : "") + ">" +
         '<button type="button" class="x-del" data-del' + (def ? " hidden" : "") + ">删除</button></div>";
     }).join("");
   }
   function showForm(on) {
     form.hidden = !on; addBtn.setAttribute("aria-expanded", on);
-    if (on) fUrl.focus(); else { fName.value = fUrl.value = ""; fSave.disabled = true; }
+    if (on) fUrl.focus(); else { fName.value = fUrl.value = fKw.value = ""; fSave.disabled = true; }
   }
   S.addEventListener("click", function (e) {
     var t = e.target, s = t.closest("[data-s]");
@@ -1254,7 +1352,11 @@
       if (a === "cancel") return showForm(false);
       var url = fUrl.value.trim(); if (!okUrl(url)) return;
       var name = fName.value.trim(); try { name = name || new URL(url.replace("%s", "q")).hostname.replace(/^www\./, ""); } catch (err) { name = name || "搜索"; }
-      A.commit(function (st) { st.settings.engines.push({ id: A.util.uid(), name: name, url: url, on: true }); }, "add-engine");
+      var kw = fKw.value.trim().toLowerCase();
+      if (kw && !/^[a-z0-9]{1,8}$/.test(kw)) { A.toast("触发词只能包含 1–8 位英文字母或数字"); return; }
+      var item = { id: A.util.uid(), name: name, url: url, on: true };
+      if (kw) item.kw = kw;
+      A.commit(function (st) { st.settings.engines.push(item); }, "add-engine");
       showForm(false); A.toast("已添加「" + name + "」"); return;
     }
     var row = t.closest("[data-eid]"); if (!row || t.matches(".x-tg")) return;
@@ -1542,16 +1644,19 @@
   function actions() {
     var editing = body.classList.contains("editing"), N = A.net, pm = N ? N.mode() : "wan", eff = N ? N.effective() : "wan";
     var nm = function (k) { return pm === k ? "当前模式" : ""; };
-    return [
+    var list = [
       { k: "net:auto", t: "自动网络", d: (nm("auto") ? "当前模式 · " : "") + "按本页访问地址判断 · 会优先" + (window.NocturneNet && N ? N.names[NocturneNet.decide(location.hostname)] : "外网"), g: "⇄", kw: "自动 网络 auto network 内网 外网 lan wan" },
       { k: "net:lan", t: "优先内网", d: nm("lan") || "优先用内网地址打开", g: "⌂", kw: "内网 lan 局域网 network 网络 切换" },
       { k: "net:wan", t: "优先外网", d: nm("wan") || "优先用外网地址打开", g: "◍", kw: "外网 wan 公网 network 网络 切换" },
-      (function () { var sa = statusText(); return { k: "recheck", t: sa.t, d: sa.d, g: "↻", kw: "刷新状态 重新检测 状态 刷新 在线 离线 status refresh recheck" }; })(),
+      (function () { var sa = statusText(); return { k: "recheck", t: sa.t, d: sa.d, g: "↻", kw: "刷新状态 重新检测 状态 刷新 在线 离线 status refresh recheck" }; })()
+    ];
+    if (A.triggerRecheck) list.push({ k: "probe-now", t: "立即检测状态", d: "让 NAS 立刻执行一轮新的服务检测", g: "⟳", kw: "立即检测 状态 探测 刷新 probe now recheck" });
+    return list.concat([
       { k: "edit", t: editing ? "退出编辑" : "进入编辑", d: MOD + "E", g: "✎", kw: "编辑 edit 排序 拖动" },
       { k: "settings", t: "打开设置", d: MOD + ",", g: "⚙", kw: "设置 settings 壁纸 外观 preferences" },
       { k: "add", t: "添加项目", d: "新建一个服务或链接", g: "+", kw: "添加 新建 add new item" },
       { k: "undo", t: "撤销上一步", d: "删除、移动、改名等都能撤销（刷新页面前有效）", g: "↶", kw: "撤销 恢复 撤回 undo 误删 找回" }
-    ].concat(spaceActions()).map(function (a) { a.cur = eff; return a; });
+    ]).concat(spaceActions()).map(function (a) { a.cur = eff; return a; });
   }
   /* 空间相关的内置动作：「切换到空间：X」（含「全部」）与「管理空间」。只出现在操作里（排在服务 / 分组结果之后），不挤掉搜索结果 */
   function spaceActions() {
@@ -1698,6 +1803,7 @@
     else if (r.type === "search") go(r.e.url.replace("%s", encodeURIComponent(r.q)), newTab);
     else if (r.type === "url") go(r.url, newTab);
     else if (r.type === "group") {
+      if (A.groups) A.groups.setCollapsed(r.g.id, false);
       var sec = groupsEl.querySelector('.x-group[data-gid="' + A.util.sel(r.g.id) + '"]');
       if (!sec && A.spaces && A.spaces.selected() !== A.spaces.ALL) { /* 分组不在当前空间：先回到「全部」再定位 */
         A.spaces.select(A.spaces.ALL); A.toast("这个分组不在当前空间，已切换到「全部」");
@@ -1721,6 +1827,7 @@
         A.toast(got === was ? "已经在「" + (sp2 ? sp2.name : "全部") + "」" : "已切换到「" + (sp2 ? sp2.name : "全部") + "」");
       } else if (k === "spaces") { if (A.spaces) A.spaces.manage(); }
       else if (k === "recheck") recheck();
+      else if (k === "probe-now") { if (A.probeNow) A.probeNow(); else recheck(); }
       else if (k === "edit") {
         if (body.classList.contains("editing")) { var dn = document.querySelector('.x-ebar [data-e="done"]'); if (dn) dn.click(); }
         else A.emit("edit", { handled: false });
@@ -1752,7 +1859,7 @@
 
   /* ---- open / close ---- */
   var isOpen = false, prev = null;
-  function overlayOpen() { return !!document.querySelector(".x-set.is-on, .x-is.is-on, .x-spm.is-on, .x-sheet.is-on, .x-menu.is-on, .x-netm.is-on, .nc-auth:not([hidden])") || document.documentElement.classList.contains("nc-locked"); }
+  function overlayOpen() { return !!document.querySelector(".x-set.is-on, .x-is.is-on, .x-spm.is-on, .x-sheet.is-on, .x-menu.is-on, .x-netm.is-on, .x-ctx.is-on, .nc-auth:not([hidden])") || document.documentElement.classList.contains("nc-locked"); }
   function open(prefill) {
     if (isOpen) { inp.select(); return; }
     isOpen = true; prev = document.activeElement;
@@ -1798,6 +1905,114 @@
     else if (e.metaKey || e.ctrlKey) { e.stopImmediatePropagation(); }
   }, true);
   A.on("render", function () { if (isOpen) build(); });
+})();
+
+/* V2.4 · 桌面非编辑态卡片右键菜单（内网/外网打开、复制网址、编辑项目；按住 Shift 右键保留浏览器原菜单） */
+(function () {
+  "use strict";
+  var A = window.App; if (!A) return;
+  var esc = A.util.esc, body = document.body, groupsEl = document.getElementById("x-groups");
+  function fine() { return !window.matchMedia || window.matchMedia("(hover: hover) and (pointer: fine)").matches; }
+  var menu = document.createElement("div"), isOpen = false, closeT = null, cur = null, prevFocus = null, eat = 0;
+  menu.className = "x-ctx x-glass"; menu.hidden = true; menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "项目操作");
+  body.appendChild(menu);
+
+  function find(gid, id) {
+    var g = (A.state.groups || []).filter(function (x) { return x.id === gid; })[0];
+    var it = g && (g.items || []).filter(function (x) { return x.id === id; })[0];
+    return it ? { g: g, item: it } : null;
+  }
+  function copyText(txt) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(txt).then(function () { return true; }, function () { return fallbackCopy(txt); });
+    }
+    return Promise.resolve(fallbackCopy(txt));
+  }
+  function fallbackCopy(txt) {
+    var ta = document.createElement("textarea");
+    ta.value = txt; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:-9999px;opacity:0;";
+    body.appendChild(ta); ta.select();
+    var ok = false; try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    ta.remove(); return ok;
+  }
+  function place(x, y) {
+    var vw = document.documentElement.clientWidth || window.innerWidth, vh = document.documentElement.clientHeight || window.innerHeight;
+    var w = menu.offsetWidth || 220, h = menu.offsetHeight || 180;
+    menu.style.left = Math.max(8, Math.min(x, vw - w - 8)) + "px";
+    menu.style.top = Math.max(8, Math.min(y, vh - h - 8)) + "px";
+  }
+  function close(refocus) {
+    if (!isOpen) return;
+    isOpen = false; cur = null; menu.classList.remove("is-on");
+    closeT = setTimeout(function () { if (!isOpen) menu.hidden = true; }, 160);
+    if (refocus && prevFocus && prevFocus.focus && document.contains(prevFocus)) prevFocus.focus({ preventScroll: true });
+  }
+  function openAt(gid, id, x, y, trigger) {
+    var f = find(gid, id); if (!f) return;
+    clearTimeout(closeT);
+    cur = { gid: gid, id: id, item: f.item }; prevFocus = trigger || document.activeElement;
+    var lan = A.urlOf ? A.urlOf(f.item, "lan") : "", wan = A.urlOf ? A.urlOf(f.item, "wan") : "", mainUrl = A.url ? A.url(f.item) : (wan || lan || "#");
+    var eff = A.net ? A.net.effective() : "wan";
+    var rows = [];
+    if (lan && wan) {
+      rows.push('<button type="button" role="menuitem" data-ctx="lan"><b aria-hidden="true">⌂</b><span>用内网地址打开' + (eff === "lan" ? "<small>当前推荐</small>" : "") + "</span></button>");
+      rows.push('<button type="button" role="menuitem" data-ctx="wan"><b aria-hidden="true">◍</b><span>用外网地址打开' + (eff === "wan" ? "<small>当前推荐</small>" : "") + "</span></button>");
+    } else if (mainUrl && mainUrl !== "#") {
+      rows.push('<button type="button" role="menuitem" data-ctx="open"><b aria-hidden="true">↗</b><span>在新标签页打开</span></button>');
+    }
+    if (mainUrl && mainUrl !== "#") rows.push('<button type="button" role="menuitem" data-ctx="copy"><b aria-hidden="true">⧉</b><span>复制网址</span></button>');
+    rows.push('<div class="x-ctx-sep" role="separator"></div>');
+    rows.push('<button type="button" role="menuitem" data-ctx="edit"><b aria-hidden="true">✎</b><span>编辑项目</span></button>');
+    menu.innerHTML = '<p class="x-ctx-t">' + esc(f.item.title || "未命名") + "</p>" + rows.join("");
+    menu.hidden = false; isOpen = true;
+    place(x, y);
+    requestAnimationFrame(function () { menu.classList.add("is-on"); });
+    var b = menu.querySelector("button"); if (b) b.focus({ preventScroll: true });
+  }
+  A.contextMenu = { close: close };
+
+  groupsEl.addEventListener("contextmenu", function (e) {
+    if (body.classList.contains("editing") || e.shiftKey || !fine() || document.documentElement.classList.contains("nc-locked")) return;
+    var el = e.target.closest && e.target.closest(".x-tile[data-id], .x-chip[data-id]");
+    if (!el) return;
+    e.preventDefault();
+    openAt(el.getAttribute("data-gid"), el.getAttribute("data-id"), e.clientX, e.clientY, el);
+  });
+  menu.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-ctx]"); if (!b || !cur) return;
+    var act = b.getAttribute("data-ctx"), item = cur.item, gid = cur.gid, id = cur.id;
+    close(act !== "edit");
+    if (act === "lan" || act === "wan" || act === "open") {
+      var u = act === "open" ? A.url(item) : A.urlOf(item, act);
+      if (u && u !== "#") { if (A.trackRecent) A.trackRecent(id); window.open(u, "_blank", "noopener"); }
+    } else if (act === "copy") {
+      var cu = A.url(item);
+      if (!cu || cu === "#") { A.toast("这个项目还没有网址"); return; }
+      copyText(cu).then(function (ok) { A.toast(ok ? "已复制网址" : "无法复制，请手动复制"); });
+    } else if (act === "edit") {
+      A.emit("edit-item", { gid: gid, id: id, handled: false });
+    }
+  });
+  document.addEventListener("pointerdown", function (e) {
+    if (isOpen && !menu.contains(e.target)) { close(false); eat = Date.now(); }
+  }, true);
+  document.addEventListener("click", function (e) {
+    if (eat && Date.now() - eat < 500 && !menu.contains(e.target)) { e.preventDefault(); e.stopPropagation(); }
+    eat = 0;
+  }, true);
+  document.addEventListener("keydown", function (e) {
+    if (!isOpen) return;
+    var bs = [].slice.call(menu.querySelectorAll("button")), i = bs.indexOf(document.activeElement);
+    if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); close(true); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopImmediatePropagation(); bs[(i + (e.key === "ArrowDown" ? 1 : bs.length - 1)) % bs.length].focus(); }
+    else if (e.key === "Home") { e.preventDefault(); e.stopImmediatePropagation(); if (bs[0]) bs[0].focus(); }
+    else if (e.key === "End") { e.preventDefault(); e.stopImmediatePropagation(); if (bs.length) bs[bs.length - 1].focus(); }
+    else if (e.key === "Tab") close(false);
+  }, true);
+  window.addEventListener("scroll", function () { if (isOpen) close(false); }, { passive: true });
+  window.addEventListener("resize", function () { if (isOpen) close(false); });
+  A.on("editmode", function () { close(false); });
+  A.on("space", function () { close(false); });
 })();
 
 /* V2.0 阶段 2 · 空间切换器（桌面：搜索栏下方的轻量导航；手机：底部快捷栏上方的拇指区横滑条）+ 管理空间。只用 App 接口。

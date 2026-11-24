@@ -1,6 +1,6 @@
 # 夜曲 Nocturne · 开发交接
 
-V2.3.0 是手机体验版：首屏压缩、「常用」一行（本机 nocturne.freq，不同步）、只标出问题的状态点与胶囊「N 个连不上」、「4 图标墙」、输入网址直达、编辑防误触（触屏按住 280ms 才拖、pan-y）、8 秒撤销提示、导入浏览器书签（public/bookmarks.js）。V2.2.2 让窄屏不再下载桌面壁纸（`bg-desktop.jpg` 延迟加载）。V2.2.1 把运行环境升级到 Node 24 LTS，并更新 CI 动作版本，运行代码不变。V2.2.0 把首页内联脚本/样式拆成带内容指纹的静态文件（首页压缩后约 2KB），带 `?v=` 的静态文件改为一年 immutable 缓存，并启用首页 CSP；V2.1.3 的同步、备份、媒体与探测修复全部保留。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 24 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
+V2.4.0 是日常效率与图标/状态打磨版：后端受 `vetTarget` 防 SSRF 保护的一键抓取网站图标（`POST /api/icons/fetch`，支持 PNG/JPEG/WebP 与 ICO 含 DIB 转 PNG）、编辑弹窗直接粘贴剪贴板图片；桌面非编辑态卡片右键菜单、搜索框 Tab 快切引擎与短触发词（`g`/`bi`/`b`/`gh` 及自定义 `kw`）、`⌘K` 零依赖中文拼音首字母搜索（`public/pinyin.js`）；单项目「不检测状态」（`item.noProbe`）、头部胶囊离线清单与主动触发 NAS 即时重测（`POST /api/status/recheck`，带冷却防抖）；分组本机折叠（`localStorage["nocturne.collapsed"]`，不同步）。V2.3.0 是手机体验版：首屏压缩、「常用」一行（本机 nocturne.freq，不同步）、只标出问题的状态点与胶囊「N 个连不上」、「4 图标墙」、输入网址直达、编辑防误触（触屏按住 280ms 才拖、pan-y）、8 秒撤销提示、导入浏览器书签（public/bookmarks.js）。V2.2.2 让窄屏不再下载桌面壁纸（`bg-desktop.jpg` 延迟加载）。V2.2.1 把运行环境升级到 Node 24 LTS，并更新 CI 动作版本，运行代码不变。V2.2.0 把首页内联脚本/样式拆成带内容指纹的静态文件（首页压缩后约 2KB），带 `?v=` 的静态文件改为一年 immutable 缓存，并启用首页 CSP；V2.1.3 的同步、备份、媒体与探测修复全部保留。保留 Midnight 布局、公网 Secure Cookie 策略、认证事务及正常数据格式。main 是正式维护入口，v2 保留既有开发历史。Node 24 内置模块后端（server.js + auth-store.js），原生 public/ 前端，没有运行依赖或构建步骤。
 
 **边界**：经用户授权，日常修复在 main 维护并使用现有 Actions 发布；不覆盖历史 SHA 镜像标签、不操作 NAS/生产数据。latest/main 是随正式分支更新的浮动镜像标签。jingbo.men 作为本人私人首页；不擅自修改 Cloudflare、Sun-Panel 或线上路由。新功能先讨论，重大高风险修改单独确认；普通修复连续完成。
 
@@ -8,7 +8,7 @@ V2.3.0 是手机体验版：首屏压缩、「常用」一行（本机 nocturne.
 
 ### 0.1 版本 / 镜像 / digest
 
-正式版发布结果见 [V2.3.0 发布记录](v2.3.0-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
+正式版发布结果见 [V2.3.0 发布记录](v2.3.0-report.md)（V2.4.0 变更见 [V2.4.0 发布记录](v2.4.0-report.md)，合并发布后登记固定镜像）。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
@@ -56,8 +56,8 @@ V2.3.0 是手机体验版：首屏压缩、「常用」一行（本机 nocturne.
 | configs | 快照环 `backup/<用户>/`（`addBackup` / `listBackups` / `snapshotDue`：30 分钟或 20 个版本）；`readConfig`（mtime 缓存）；`canonical` + `dataHash`（键排序 JSON 的 sha256）；`writeConfig`（`hist` 最近 20 个版本指纹，V2 写的条目 `g:2`；`ops` 最近 50 个 opId；顶层 `writer:{app,v,gen:2}`） |
 | 回滚写保护 | `writeGuard` / `guardWriteFailed` / `guardFormatOk` / `guardMatches` / `lastV2FromBackups` / `guardRecover` / `guardHeal` / `guardNotice`；`preV2Snapshot`（首次 V2 启动、检测到 V1.1 数据时写 `pre-v2-snapshot-<时间>/` + `MANIFEST.json`） |
 | 校验 | `aliasesError`、`spacesError`、`reconcileSpaces`（按客户端 `caps` 决定是否接受 / 保留 `spaces`）、`newUnsafeUrls`（URL 白名单，旧值豁免规则见 README） |
-| wallpapers / icons | 壁纸 `wallpapers/<用户>.<ext>`（≤15MB，嗅探格式）；上传图标 `icons/<用户>/<id>.<ext>`（≤512KB、≤500 个 / 50MB，引用消失 24h 后清理）；旧 data URL 启动 / 同步时迁移成文件（`migrateAll`） |
-| status | 服务状态探测 `runProbes`（`STATUS_INTERVAL`，`vetTarget` 防 SSRF：私网 / 元数据地址规则、`PROBE_PRIVATE_ONLY`、`PROBE_ALLOW`、每账户 / 总量上限）；docker.sock（可选，只读）容器状态 |
+| wallpapers / icons | 壁纸 `wallpapers/<用户>.<ext>`（≤15MB，嗅探格式）；上传图标 `icons/<用户>/<id>.<ext>`（≤512KB、≤500 个 / 50MB，引用消失 24h 后清理）；旧 data URL 启动 / 同步时迁移成文件（`migrateAll`）；V2.4 新增 `POST /api/icons/fetch` 安全抓站 Favicon（`vetTarget` + 重定向复检 + ICO 转 PNG） |
+| status | 服务状态探测 `runProbes`（`STATUS_INTERVAL`，`vetTarget` 防 SSRF：私网 / 元数据地址规则、`PROBE_PRIVATE_ONLY`、`PROBE_ALLOW`、每账户 / 总量上限、支持单项目 `noProbe: true`）；`POST /api/status/recheck` 带冷却即时重测；docker.sock（可选，只读）容器状态 |
 | static | `serveStatic`（字体与 `?v=` 引用 immutable，其余 1 天重新校验）/ `serveIndex`（注入 `<script type="application/json" id="nocturne-boot">`：用户、版本、`recovered` 等，由首帧启动脚本读成 `window.NOCTURNE`；`pageCsp` 按内联脚本内容 sha256 生成 CSP；gzip；缓存刷新见 `test/cache-bust.test.js`、`test/csp.test.js`） |
 | icon proxy | Iconify 上游代理 + `data/cache/` 磁盘缓存（大小 / 数量 / TTL 上限，6 小时清扫） |
 | API | `api()` 里按路径分支（见下表） |
@@ -71,8 +71,8 @@ API（全部在 `/api` 下；除 health / me / setup / login 外需要登录）�
 | `GET /me`、`POST /setup`、`POST /login`、`POST /logout` | 账户状态 / 首个管理员 / 登录（限速、已知设备）/ 退出 |
 | `GET/PUT /config` | 读写配置。PUT 必须带 `baseVersion`；`opId` 去重；冲突 409；`force` + `expectVersion`（用本机版覆盖）；`restore`；响应可带 `guardWarning`。`?backup=<id>` 取一份快照，`?prev=1` 最新快照 |
 | `GET /config/backups`、`POST /config/stash` | 快照环列表 / 冲突时存本机版本 |
-| `/wallpaper`、`/icons[/<id>]` | 壁纸、上传图标 |
-| `GET /status`、`GET /docker` | 服务状态 / 容器状态 |
+| `/wallpaper`、`/icons[/<id>]`、`POST /icons/fetch` | 壁纸、上传图标、受 SSRF 保护的一键抓取站点 Favicon |
+| `GET /status`、`POST /status/recheck`、`GET /docker` | 服务状态 / 主动触发即时检测（带冷却防抖） / 容器状态 |
 | `/icon/*` | 图标代理 |
 | `POST /password`、`/users[/<name>]` | 改密码 / 用户管理（管理员） |
 
@@ -81,14 +81,15 @@ API（全部在 `/api` 下；除 health / me / setup / login 外需要登录）�
 | 文件 | 作用 |
 |------|------|
 | `index.html` | 页面骨架 + 首帧前的两段内联脚本（`html[data-ui]`、后端启动数据）；纯静态模式（直接打开文件）也能用。不要再加内联脚本 / 样式 / `on*=` 事件属性 |
-| `app.js` / `app-ui.js` | 核心 `window.App`（状态、渲染、`toast`、撤销）/ 编辑、拖动、添加、状态、设置、命令面板、空间（原内联脚本，顺序与 IIFE 边界不变） |
+| `app.js` / `app-ui.js` | 核心 `window.App`（状态、渲染、`toast`、撤销、搜索 Tab/触发词、本机分组折叠）/ 编辑、拖动、添加、桌面右键菜单、状态、设置、命令面板、空间（原内联脚本，顺序与 IIFE 边界不变） |
 | `app.css` / `app-ui.css` | 原内联样式：基础样式在 `midnight.css` 之前、面板样式在之后（保持层叠顺序）。这四个文件的 `?v=` = 内容 sha256 前 10 位（`test/csp.test.js`） |
-| `nocturne.js` | NAS 模式同步层：登录界面、拉 / 推配置（防抖 800ms、opId、409 冲突面板、离线 dirty）、设置 → 账户（用户管理、连接诊断、「恢复较早的版本」）、找回提示、管理员旁路写入失败提示（RC.3） |
+| `nocturne.js` | NAS 模式同步层：登录界面、拉 / 推配置（防抖 800ms、opId、409 冲突面板、离线 dirty）、Favicon 抓取与即时重测接口、设置 → 账户（用户管理、连接诊断、「恢复较早的版本」）、找回提示、管理员旁路写入失败提示（RC.3） |
 | `spaces.js` | 空间模型（前后端共用）：`data.spaces=[{id,name,groupIds,itemIds?,excludeItemIds?,theme?,density?}]`，只存引用不复制项目；`check` / `prune` / `view` / `reorder` |
 | `midnight.js` / `midnight.css` | V2 新外观（本机设置，可切回经典） |
-| `status.js` | 状态的「可信」标注（只说测到的） |
+| `status.js` | 状态的「可信」标注（只说测到的，支持单项目 `muted` 静音） |
 | `netmode.js` | 三态网络（自动 / 优先内网 / 优先外网）地址选择 |
-| `cmdrank.js` | 命令面板排序 |
+| `pinyin.js` | V2.4：零依赖轻量中文拼音首字母（基于标准 `Intl.Collator("zh-CN")` + 常见多音字补丁） |
+| `cmdrank.js` | 命令面板排序（接入 `pinyin.js` 支持中文拼音首字母与高亮） |
 | `config-shape.js` | 前后端共用的配置集合与身份校验；保留未知扩展字段，拒绝坏候选并保护原缓存 |
 | `bookmarks.js` | V2.3：解析浏览器导出的书签 HTML（Netscape 格式）、按文件夹去重整理、生成项目；纯函数，界面在 app-ui.js 设置 → 数据 |
 | `urlcheck.js` | URL 白名单（前后端共用：只收 http/https） |

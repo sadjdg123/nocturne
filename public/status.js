@@ -36,6 +36,7 @@
   function classify(r, now) {
     if (!r) return { s: "checking", label: "检测中", detail: "", ms: null, at: "", certain: false, source: null };
     if (r.source === "server") {
+      if (r.status === "muted") return { s: "muted", label: "不检测", detail: "已关闭状态检测", ms: null, at: "", certain: false, source: "none" };
       var when = at(r.checkedAt, now), ms = msOk(r.ms) ? Math.round(r.ms) : null;
       var tail = (ms != null ? ms + " ms" : "") + (when ? (ms != null ? " · " : "") + "检测于 " + when : "");
       if (r.status === "blocked") return { s: "na", label: "未检测", detail: "服务器不探测这个地址", ms: null, at: "", certain: false, source: "server" };
@@ -47,6 +48,7 @@
     if (r.source === "browser") return r.reachable
       ? { s: "maybe", label: "可能在线", detail: "浏览器探测，无法确认真实状态", ms: null, at: "", certain: false, source: "browser" }
       : { s: "unknown", label: "无法确认", detail: "浏览器探测失败，可能离线，也可能被浏览器拦截", ms: null, at: "", certain: false, source: "browser" };
+    if (r.reason === "muted") return { s: "muted", label: "不检测", detail: "已关闭状态检测", ms: null, at: "", certain: false, source: "none" };
     var why = { noaddr: "没有地址", reserved: "示例地址，不检测", offlan: "内网地址，当前不在内网", policy: "服务器不探测这个地址" }[r.reason] || "";
     if (r.reason === "offlan") return { s: "unknown", label: "无法确认", detail: why, ms: null, at: "", certain: false, source: "none" };
     return { s: "na", label: "未检测", detail: why, ms: null, at: "", certain: false, source: "none" };
@@ -54,18 +56,18 @@
   /** 完整的一句话（tooltip / 读屏）："在线 · 23 ms · 检测于 21:46" / "可能在线 · 浏览器探测，无法确认真实状态" */
   function text(c) { return c.label + (c.detail ? " · " + c.detail : ""); }
   /** 紧凑行右侧的短标注："23 ms" / "在线" / "离线" / "可能在线" / "无法确认" / "未检测" */
-  function short(c) { return c.s === "on" && c.ms != null ? c.ms + " ms" : c.s === "auth" ? "需登录" : c.label; }
+  function short(c) { return c.s === "muted" ? "" : c.s === "on" && c.ms != null ? c.ms + " ms" : c.s === "auth" ? "需登录" : c.label; }
   /**
    * 汇总（状态卡 / 读屏 / 命令面板报告）：list = classify() 的结果数组。
-   * total 只算能下结论或可能下结论的（不含「未检测」）。headline / line 是界面文字。
+   * total 只算能下结论或可能下结论的（不含「未检测」和单项目「不检测」）。headline / line 是界面文字。
    */
   function summary(list) {
-    var n = { on: 0, auth: 0, off: 0, maybe: 0, unknown: 0, na: 0, checking: 0 };
+    var n = { on: 0, auth: 0, off: 0, maybe: 0, unknown: 0, na: 0, muted: 0, checking: 0 };
     (list || []).forEach(function (c) { if (c && Object.prototype.hasOwnProperty.call(n, c.s)) n[c.s]++; });
     var certain = n.on + n.auth + n.off, total = certain + n.maybe + n.unknown + n.checking;
     var out = { counts: n, total: total, online: n.on + n.auth, certain: certain, mode: certain ? (n.maybe || n.unknown ? "mixed" : "server") : (n.maybe || n.unknown ? "browser" : "none") };
     if (n.checking) { out.line = "检测中…"; out.tone = ""; }
-    else if (!total) { out.line = n.na ? "这些服务都没有可检测的地址" : "还没有图标服务"; out.tone = ""; }
+    else if (!total) { out.line = n.na ? "这些服务都没有可检测的地址" : n.muted ? "这些服务已关闭状态检测" : "还没有图标服务"; out.tone = ""; }
     else if (out.mode === "browser") { out.line = "浏览器无法确认真实状态：" + n.maybe + " 个可能在线" + (n.unknown ? "，" + n.unknown + " 个无法确认" : ""); out.tone = "maybe"; }
     else if (n.off && n.off === certain && !n.maybe) { out.line = "全部离线——可能是地址还没填，或当前网络到不了这些服务"; out.tone = "alloff"; }
     else if (n.off) { out.line = "离线 " + n.off + " 个"; out.tone = "off"; }

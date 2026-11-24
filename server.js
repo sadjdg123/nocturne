@@ -1166,8 +1166,9 @@ async function migrateAll() {
 /* ------------------------------------------------------------------- status */
 
 const RESERVED = /(^|\.)(example\.(com|net|org)|example|test|invalid)$/i;
-/** 与前端一致：优先内网地址，回退 url / 外网地址 */
+/** 与前端一致：优先内网地址，回退 url / 外网地址；单项关闭检测（noProbe:true）时返回 null */
 function probeTarget(item) {
+  if (item && item.noProbe === true) return null;
   for (const u of [item.lan, item.url, item.wan]) {
     if (!u || typeof u !== "string") continue;
     try {
@@ -1409,10 +1410,296 @@ async function runProbes(onlyNew) {
 let soonTimer = null;
 function probeSoon() { clearTimeout(soonTimer); soonTimer = setTimeout(() => runProbes(true), 800); }
 
+const RECHECK_COOLDOWN = process.env.RECHECK_COOLDOWN_MS != null ? Math.max(0, +process.env.RECHECK_COOLDOWN_MS || 0) : 10000;
+let lastManualRecheck = 0;
+const userRechecks = new Map();
+/** 普通账户仅立即重测自己配置里符合 PROBE_ALLOW 的地址（不触碰管理员地址）；管理员执行全量 runProbes(false) */
+async function triggerManualRecheck(name) {
+  const admin = isAdminName(name), now = Date.now(), key = name.toLowerCase();
+  const prevAt = admin ? lastManualRecheck : (userRechecks.get(key) || 0);
+  if (RECHECK_COOLDOWN > 0 && now - prevAt < RECHECK_COOLDOWN && !probing) {
+    return { ok: true, cached: true, cooldownSec: Math.max(1, Math.ceil((RECHECK_COOLDOWN - (now - prevAt)) / 1000)), status: statusFor(name) };
+  }
+  if (admin) {
+    lastManualRecheck = now;
+    await runProbes(false);
+    return { ok: true, cached: false, status: statusFor(name) };
+  }
+  userRechecks.set(key, now);
+  if (!PROBE_ALLOW.length) return { ok: true, cached: true, status: statusFor(name) };
+  let doc; try { assertAuthStorage(); doc = readConfig(name); } catch (e) { if (e.storage) throw e; return { ok: true, cached: true, status: statusFor(name) }; }
+  const mine = new Set();
+  for (const it of itemsOf(doc)) {
+    const t = probeTarget(it);
+    if (!t || t.reserved || mine.has(t.url)) continue;
+    if (mine.size >= PROBE_MAX_PER_USER) break;
+    mine.add(t.url);
+  }
+  const queue = [...mine];
+  const worker = async () => { while (queue.length) { const u = queue.shift(); results.set(u, await probe(u, true)); } };
+  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker));
+  return { ok: true, cached: false, status: statusFor(name) };
+}
+
+/* ----------------------------------------------------------- favicon fetch */
+
+const FAVICON_CONCURRENT = 4;
+let faviconInflight = 0;
+const faviconWaiters = [];
+const faviconRate = new Map(); // lname -> [timestamps]
+function faviconSlot() {
+  if (faviconInflight < FAVICON_CONCURRENT) { faviconInflight++; return Promise.resolve(); }
+  return new Promise((r) => faviconWaiters.push(r));
+}
+function faviconSlotDone() { const next = faviconWaiters.shift(); if (next) next(); else faviconInflight--; }
+function checkFaviconRate(name) {
+  const k = name.toLowerCase(), now = Date.now(), list = (faviconRate.get(k) || []).filter((t) => now - t < 60000);
+  if (list.length >= 20) return false;
+  list.push(now); faviconRate.set(k, list);
+  return true;
+}
+
+const CRC32_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) c = CRC32_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function pngChunk(type, data) {
+  const t = Buffer.from(type, "ascii"), len = Buffer.alloc(4), crc = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  crc.writeUInt32BE(crc32(Buffer.concat([t, data])), 0);
+  return Buffer.concat([len, t, data, crc]);
+}
+function encodeRgbaPng(w, h, rgba) {
+  const raw = Buffer.alloc((w * 4 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 4 + 1)] = 0;
+    rgba.copy(raw, y * (w * 4 + 1) + 1, y * w * 4, (y + 1) * w * 4);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6; // 8-bit RGBA
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+/** 从 .ico 提取最高清的内嵌 PNG，或把标准 DIB 位图（32/24/8/4/1 位）转为标准 PNG；非 ICO 或无法解码返回 null */
+function icoToPng(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 22 || buf.readUInt16LE(0) !== 0 || buf.readUInt16LE(2) !== 1) return null;
+  const count = Math.min(buf.readUInt16LE(4), 32), entries = [];
+  for (let i = 0; i < count; i++) {
+    const off = 6 + i * 16;
+    if (off + 16 > buf.length) break;
+    const w = buf[off] || 256, h = buf[off + 1] || 256, colors = buf[off + 2];
+    const bpp = buf.readUInt16LE(off + 6), size = buf.readUInt32LE(off + 8), imgOff = buf.readUInt32LE(off + 12);
+    if (!size || imgOff < 6 + count * 16 || imgOff + size > buf.length) continue;
+    const slice = buf.subarray(imgOff, imgOff + size);
+    const isPng = sniffImage(slice) === "png";
+    entries.push({ w, h, colors, bpp, slice, isPng });
+  }
+  entries.sort((a, b) => (b.isPng - a.isPng) || (b.w * b.h - a.w * a.h) || (b.bpp - a.bpp));
+  for (const e of entries) {
+    if (e.isPng) return Buffer.from(e.slice);
+    const d = e.slice;
+    if (d.length < 40 || d.readUInt32LE(0) !== 40) continue;
+    const bw = d.readInt32LE(4), bh = d.readInt32LE(8), planes = d.readUInt16LE(12), bpp = d.readUInt16LE(14), comp = d.readUInt32LE(16), clrUsed = d.readUInt32LE(32);
+    if (planes !== 1 || comp !== 0 || ![1, 4, 8, 24, 32].includes(bpp)) continue;
+    const w = bw > 0 ? bw : e.w, h = bh ? Math.floor(Math.abs(bh) / 2) : e.h;
+    if (w < 1 || h < 1 || w > 256 || h > 256) continue;
+    const palCount = bpp <= 8 ? (clrUsed || (1 << bpp)) : 0, palOff = 40, pixOff = palOff + palCount * 4;
+    const rowStride = Math.ceil((w * bpp) / 32) * 4, maskStride = Math.ceil(w / 32) * 4, maskOff = pixOff + rowStride * h;
+    if (pixOff + rowStride * h > d.length) continue;
+    const hasMask = maskOff + maskStride * h <= d.length;
+    const rgba = Buffer.alloc(w * h * 4), topDown = bh < 0;
+    let anyAlpha = false;
+    for (let y = 0; y < h; y++) {
+      const sy = topDown ? y : (h - 1 - y), rOff = pixOff + sy * rowStride, mOff = maskOff + sy * maskStride;
+      for (let x = 0; x < w; x++) {
+        const di = (y * w + x) * 4;
+        let r = 0, g = 0, b = 0, a = 255;
+        if (bpp === 32) {
+          b = d[rOff + x * 4]; g = d[rOff + x * 4 + 1]; r = d[rOff + x * 4 + 2]; a = d[rOff + x * 4 + 3];
+          if (a) anyAlpha = true;
+        } else if (bpp === 24) {
+          b = d[rOff + x * 3]; g = d[rOff + x * 3 + 1]; r = d[rOff + x * 3 + 2];
+        } else {
+          let idx = 0;
+          if (bpp === 8) idx = d[rOff + x];
+          else if (bpp === 4) idx = (d[rOff + (x >> 1)] >> (x & 1 ? 0 : 4)) & 0x0f;
+          else idx = (d[rOff + (x >> 3)] >> (7 - (x & 7))) & 1;
+          if (idx < palCount) { b = d[palOff + idx * 4]; g = d[palOff + idx * 4 + 1]; r = d[palOff + idx * 4 + 2]; }
+        }
+        rgba[di] = r; rgba[di + 1] = g; rgba[di + 2] = b; rgba[di + 3] = a;
+        if (hasMask && bpp !== 32) {
+          const masked = (d[mOff + (x >> 3)] >> (7 - (x & 7))) & 1;
+          if (masked) rgba[di + 3] = 0;
+        }
+      }
+    }
+    if (bpp === 32 && !anyAlpha && hasMask) {
+      for (let y = 0; y < h; y++) {
+        const sy = topDown ? y : (h - 1 - y), mOff = maskOff + sy * maskStride;
+        for (let x = 0; x < w; x++) rgba[(y * w + x) * 4 + 3] = ((d[mOff + (x >> 3)] >> (7 - (x & 7))) & 1) ? 0 : 255;
+      }
+    }
+    return encodeRgbaPng(w, h, rgba);
+  }
+  return null;
+}
+
+/** 从 HTML <link> 标签提取候选网站图标 URL（优先高清 apple-touch-icon / PNG，跳过 SVG） */
+function parseFaviconLinks(html, baseUrl) {
+  const text = String(html || "").slice(0, 128 * 1024), cands = [], seen = new Set();
+  const attr = (tag, name) => {
+    const m = new RegExp("\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i").exec(tag);
+    return m ? (m[1] ?? m[2] ?? m[3] ?? "").trim() : "";
+  };
+  let m; const re = /<link\b[^>]*>/gi;
+  while ((m = re.exec(text))) {
+    const tag = m[0], rel = attr(tag, "rel").toLowerCase().split(/\s+/);
+    const isApple = rel.includes("apple-touch-icon") || rel.includes("apple-touch-icon-precomposed");
+    const isIcon = rel.includes("icon");
+    if (!isApple && !isIcon) continue;
+    const href = attr(tag, "href"), type = attr(tag, "type").toLowerCase(), sizes = attr(tag, "sizes").toLowerCase();
+    if (!href || /svg/i.test(type)) continue;
+    let url = "";
+    if (/^data:image\/(png|jpeg|jpg|webp|x-icon|vnd\.microsoft\.icon);base64,/i.test(href)) {
+      url = href;
+    } else {
+      try {
+        const u = new URL(href, baseUrl);
+        if (!/^https?:$/.test(u.protocol) || /\.svg(\?|$)/i.test(u.pathname)) continue;
+        url = u.href;
+      } catch (e) { continue; }
+    }
+    if (seen.has(url)) continue;
+    seen.add(url);
+    let score = isApple ? 300 : 200;
+    const sm = /(\d+)x(\d+)/.exec(sizes);
+    if (sm) score += Math.min(256, +sm[1]);
+    if (/\.png(\?|$)|image\/png/i.test(url + " " + type)) score += 40;
+    else if (/\.webp(\?|$)|image\/webp/i.test(url + " " + type)) score += 35;
+    else if (/\.jpe?g(\?|$)|image\/jpeg/i.test(url + " " + type)) score += 25;
+    cands.push({ url, score });
+  }
+  cands.sort((a, b) => b.score - a.score);
+  const out = cands.map((c) => c.url);
+  try {
+    const origin = new URL(baseUrl).origin;
+    for (const f of ["/apple-touch-icon.png", "/favicon.png", "/favicon.ico"]) {
+      const u = origin + f;
+      if (!seen.has(u)) { seen.add(u); out.push(u); }
+    }
+  } catch (e) { /* ignore */ }
+  return out;
+}
+
+/** 复用 vetTarget + 固定解析 IP + 重定向逐跳复检的安全 HTTP GET（防 SSRF / DNS rebinding / 内存炸弹） */
+async function safeFetchBytes(rawUrl, opts = {}) {
+  const restricted = !!opts.restricted, maxBytes = opts.maxBytes || MAX_ICON, timeoutMs = opts.timeoutMs || 6000, maxRedirects = opts.maxRedirects ?? 3;
+  let cur = rawUrl;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    let u; try { u = new URL(cur); } catch (e) { throw Object.assign(new Error("网址格式不正确"), { status: 400 }); }
+    if (!/^https?:$/.test(u.protocol)) throw Object.assign(new Error("只支持 http/https 网址"), { status: 400 });
+    const v = await vetTarget(u);
+    if (v.blocked) throw Object.assign(new Error("安全策略不允许访问这个地址"), { status: 403 });
+    if (v.error) throw Object.assign(new Error("无法连接到目标站点（" + v.error + "）"), { status: 502 });
+    if (restricted && !v.userAllowed) throw Object.assign(new Error("普通账户不允许由服务器抓取这个地址的图标"), { status: 403 });
+    const res = await new Promise((resolve, reject) => {
+      const mod = u.protocol === "https:" ? https : http;
+      let done = false, req = null;
+      const fail = (err) => { if (done) return; done = true; clearTimeout(timer); reject(err); };
+      const ok = (val) => { if (done) return; done = true; clearTimeout(timer); resolve(val); };
+      const timer = setTimeout(() => { if (req) req.destroy(new Error("timeout")); fail(Object.assign(new Error("抓取超时"), { status: 504 })); }, timeoutMs);
+      req = mod.request(u, {
+        method: "GET",
+        rejectUnauthorized: PROBE_TLS_STRICT,
+        lookup: (h, o, cb) => process.nextTick(() => (o && o.all ? cb(null, v.addrs.map((a) => ({ address: a.address, family: a.family }))) : cb(null, v.addrs[0].address, v.addrs[0].family))),
+        headers: { "User-Agent": "Nocturne-Favicon/" + VERSION, Accept: "image/png,image/webp,image/jpeg,image/x-icon,text/html;q=0.8,*/*;q=0.5", "Accept-Encoding": "gzip, deflate, identity", Connection: "close" },
+      }, (r) => {
+        const sc = r.statusCode || 0;
+        if ([301, 302, 303, 307, 308].includes(sc) && r.headers.location) {
+          r.destroy();
+          return ok({ redirect: r.headers.location });
+        }
+        const chunks = []; let size = 0, truncated = false;
+        r.on("data", (c) => {
+          if (size + c.length > maxBytes) {
+            if (opts.allowTruncate) { chunks.push(c.subarray(0, Math.max(0, maxBytes - size))); size = maxBytes; truncated = true; r.destroy(); return; }
+            r.destroy(); return fail(Object.assign(new Error("图标文件过大（上限 512KB）"), { status: 413 }));
+          }
+          chunks.push(c); size += c.length;
+        });
+        r.on("close", () => { if (truncated) ok({ status: sc, contentType: String(r.headers["content-type"] || ""), encoding: String(r.headers["content-encoding"] || "").toLowerCase(), url: u.href, body: Buffer.concat(chunks) }); });
+        r.on("end", () => ok({ status: sc, contentType: String(r.headers["content-type"] || ""), encoding: String(r.headers["content-encoding"] || "").toLowerCase(), url: u.href, body: Buffer.concat(chunks) }));
+        r.on("error", (e) => { if (!truncated) fail(Object.assign(new Error(e.code || e.message), { status: 502 })); });
+      });
+      req.on("error", (e) => fail(Object.assign(new Error("无法连接到目标站点（" + (e.code || e.message) + "）"), { status: 502 })));
+      req.end();
+    });
+    if (res.redirect) {
+      if (hop === maxRedirects) throw Object.assign(new Error("目标站点重定向次数过多"), { status: 502 });
+      try { cur = new URL(res.redirect, u).href; } catch (e) { throw Object.assign(new Error("无效的重定向地址"), { status: 502 }); }
+      continue;
+    }
+    let body = res.body;
+    if (res.encoding === "gzip") { try { body = zlib.gunzipSync(body, { maxOutputLength: maxBytes }); } catch (e) { /* keep raw or fail downstream */ } }
+    else if (res.encoding === "deflate") { try { body = zlib.inflateSync(body, { maxOutputLength: maxBytes }); } catch (e) { /* keep raw */ } }
+    return { status: res.status, contentType: res.contentType, url: res.url, body };
+  }
+  throw Object.assign(new Error("目标站点重定向次数过多"), { status: 502 });
+}
+
+function decodeRasterIcon(buf) {
+  if (!Buffer.isBuffer(buf) || !buf.length || buf.length > MAX_ICON) return null;
+  const ext = sniffImage(buf);
+  if (ext) return { buf, ext };
+  const png = icoToPng(buf);
+  if (png && png.length <= MAX_ICON && sniffImage(png) === "png") return { buf: png, ext: "png" };
+  return null;
+}
+
+async function fetchSiteFavicon(rawUrl, restricted) {
+  const first = await safeFetchBytes(rawUrl, { restricted, maxBytes: MAX_ICON, timeoutMs: 6000, allowTruncate: true });
+  if (first.status >= 200 && first.status < 300) {
+    const direct = decodeRasterIcon(first.body);
+    if (direct) return direct;
+  }
+  const html = first.status >= 200 && first.status < 400 && /html|xhtml|^$/i.test(first.contentType) ? first.body.toString("utf8") : "";
+  const candidates = parseFaviconLinks(html, first.url || rawUrl).slice(0, 6);
+  let lastErr = null;
+  for (const cand of candidates) {
+    if (cand.startsWith("data:")) {
+      const dm = /^data:image\/(?:png|jpeg|jpg|webp|x-icon|vnd\.microsoft\.icon);base64,([A-Za-z0-9+/=\s]+)$/i.exec(cand);
+      if (dm) {
+        const dec = decodeRasterIcon(Buffer.from(dm[1], "base64"));
+        if (dec) return dec;
+      }
+      continue;
+    }
+    try {
+      const r = await safeFetchBytes(cand, { restricted, maxBytes: MAX_ICON, timeoutMs: 5000, maxRedirects: 3 });
+      if (r.status >= 200 && r.status < 300) {
+        const dec = decodeRasterIcon(r.body);
+        if (dec) return dec;
+      }
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr && lastErr.status === 403 ? lastErr : Object.assign(new Error("没有找到可用的网站图标（仅支持 PNG / JPEG / WebP / ICO）"), { status: 404 });
+}
+
 /** 每个项目的检测状态 {itemId: {...}}。项目 id 由用户配置决定（可能叫 __proto__ / constructor），所以用无原型对象，避免改掉原型或漏项。 */
 function statusFor(name) {
   const admin = isAdminName(name), out = Object.create(null), byName = new Map(docker.containers.map((c) => [c.name.toLowerCase(), c]));
   for (const it of itemsOf(readConfig(name))) {
+    if (it.noProbe === true) { out[it.id] = { up: false, ms: null, checkedAt: null, via: "none", status: "muted" }; continue; }
     const t = probeTarget(it);
     let r = null;
     if (t && t.reserved) r = { up: false, ms: null, checkedAt: null, via: "http", error: "reserved domain" };
@@ -1943,6 +2230,21 @@ async function api(req, res, url) {
     return json(res, 405, { error: "Method Not Allowed" });
   }
 
+  // 一键抓取目标站点 Favicon 并存成当前账户图标文件（严格走 vetTarget 防 SSRF；普通账户遵守 PROBE_ALLOW）
+  if (p === "/icons/fetch") {
+    if (m !== "POST") return json(res, 405, { error: "Method Not Allowed" });
+    const b = await readBody(req), target = String(b && b.url || "").trim();
+    if (!URLCHECK.http(target)) return json(res, 400, { error: "请先填写有效的 http(s) 网址" });
+    if (!checkFaviconRate(me.name)) return json(res, 429, { error: "抓取过于频繁，请稍后再试" });
+    await faviconSlot();
+    let fetched;
+    try { fetched = await fetchSiteFavicon(target, !isAdminName(me.name)); }
+    finally { faviconSlotDone(); }
+    const nid = newIconId();
+    const ext = await withUserLock(me.name, async () => { assertAlive(me, req); await checkIconQuota(me.name, { count: 1, bytes: fetched.buf.length }, nid); return storeIcon(me.name, nid, fetched.buf); });
+    return json(res, 200, { ok: true, id: nid, type: WP_TYPES[ext], size: fetched.buf.length, url: "api/icons/" + nid });
+  }
+
   // 上传的图标：POST /api/icons（服务器生成 id）或 PUT /api/icons/<id>；GET / DELETE /api/icons/<id>
   if (p === "/icons" || p.startsWith("/icons/")) {
     const id = p === "/icons" ? "" : safeDecode(p.slice("/icons/".length));
@@ -1970,6 +2272,11 @@ async function api(req, res, url) {
   }
 
   if (p === "/status" && m === "GET") return json(res, 200, statusFor(me.name));
+  if (p === "/status/recheck") {
+    if (m !== "POST") return json(res, 405, { error: "Method Not Allowed" });
+    await readBody(req); // 要求 application/json，防跨站表单 CSRF
+    return json(res, 200, await triggerManualRecheck(me.name));
+  }
 
   if (p === "/docker" && m === "GET") {
     // 容器清单只给管理员（普通账户不能枚举 NAS 上的全部容器）；前端拿到 403 就不显示「关联容器」
@@ -2117,5 +2424,5 @@ function main() {
 if (require.main === module) { try { main(); } catch (e) { if (!e.storage) throw e; console.error(stamp(), "启动已停止：关键持久化数据异常；原文件保留"); process.exitCode = 2; } }
 else module.exports = { // 供 test/ 下的单元测试使用；作为程序运行时不导出
   cookieNames, cookieHostname, secureCookieHosts, normIp, parseCidrList, parseProbeAllow, probeAllowed, vetTarget, canonicalSearch, validPass, PASS_MIN, clientInfo, forwardedProto, legacyKey,
-  atomicWrite,
+  atomicWrite, parseFaviconLinks, icoToPng,
 };
