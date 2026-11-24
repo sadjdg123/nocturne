@@ -37,3 +37,7 @@ RC.5 构建成功后登记完整提交 `c5f36addc2d85b8ed24edb605015b7ff0be9070b
 ## V2.3.0 发布登记
 
 发布后登记完整提交 `e9a626538ff31e38c12f85ae4686d96a05f46880` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-e9a6265`，清单保留全部历史版本。新增 `bookmarks.js?v=1`；`midnight.css?v=5`、`midnight.js?v=4` 与 `app*.css/js` 的新内容哈希都是新 URL，共 30 个。本次因 GitHub API 限流，清单用本地完整 git 历史（`git ls-tree` 代替树接口，blob 仍按 git hash 校验）生成，既有 14 个版本的条目逐字未变。
+
+## V2.4.0 发布登记
+
+发布后登记完整提交 `f13c8154c7d10a41ec0e3e7614a7a67ebd696a66` 与新镜像 `ghcr.io/sadjdg123/nocturne:sha-f13c815`，清单保留全部历史版本。新增 `pinyin.js?v=1`；`midnight.css?v=6`、`cmdrank.js?v=4`、`status.js?v=2`、`nocturne.js?v=2026112401` 与 `app*.css/js` 的新内容哈希都是新 URL，共 31 个。清单通过已鉴权 GitHub Trees API 生成并与离线本地 git 历史逐字节一致，既有 15 个版本的条目逐字未变。

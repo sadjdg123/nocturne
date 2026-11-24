@@ -2389,6 +2389,200 @@
           "sha256": "c6b4e27e4e0d4b710d3f84476896667083439916a20400e1d671f01133c6b30a"
         }
       }
+    },
+    {
+      "name": "V2.4.0",
+      "commit": "f13c8154c7d10a41ec0e3e7614a7a67ebd696a66",
+      "image": "ghcr.io/sadjdg123/nocturne:sha-f13c815",
+      "indexBlob": "8ee5a5139d049219d03babc8a60e3cdcf8ba00ad",
+      "assets": {
+        "Sortable.min.js": {
+          "path": "Sortable.min.js",
+          "v": "",
+          "blob": "95423a64911d06109c228d8cc8f9c69d23beebee",
+          "sha256": "6d0a831fc19b4bae851797ad3393157e861afb7862459c11226359b27e2c4337"
+        },
+        "app-ui.css?v=5be215a96c": {
+          "path": "app-ui.css",
+          "v": "5be215a96c",
+          "blob": "f28d7371f479666f9305ae37b803b8a0cab9617a",
+          "sha256": "5be215a96c3c93bf3205412b1fefc7478600b41a4b0ba2ecee696c92c1580a57"
+        },
+        "app-ui.js?v=b24bd32f85": {
+          "path": "app-ui.js",
+          "v": "b24bd32f85",
+          "blob": "722308bf92348c282a245e25fed770183446620b",
+          "sha256": "b24bd32f8531d032cc346868fb2ecf62cc57c636365412efc2f601bb2bf2f167"
+        },
+        "app.css?v=18c4fc6683": {
+          "path": "app.css",
+          "v": "18c4fc6683",
+          "blob": "607b5357982cd6cd85fa390d4a13ff33e1140a6b",
+          "sha256": "18c4fc6683e6e1a0df65dfe934a54efb3b08b3acb1ea1b81076668d84a0b8cf1"
+        },
+        "app.js?v=201af92c17": {
+          "path": "app.js",
+          "v": "201af92c17",
+          "blob": "69419a9c5fb6fd53fed81cd7455b7f81a34632d6",
+          "sha256": "201af92c1708c9f60d38de5a2e10b6f27500f9547b4c995249a281ecb0f7afc1"
+        },
+        "apple-touch-icon.png": {
+          "path": "apple-touch-icon.png",
+          "v": "",
+          "blob": "ee72dfe83aee032005e3edc08f62449fe4a71bd0",
+          "sha256": "d535ac81e6b114cbf158bd9371e98adbb21f69c559ffe41a1954e129f4e699e7"
+        },
+        "bg-desktop.jpg": {
+          "path": "bg-desktop.jpg",
+          "v": "",
+          "blob": "8c1bfa08ed6fd37221ac4fc8d1c54b55ffeb82b4",
+          "sha256": "4889eb353498e61c53f60d2e3ae18a918e908cf4ce95853cbe50e768156390da"
+        },
+        "bg-mobile.jpg": {
+          "path": "bg-mobile.jpg",
+          "v": "",
+          "blob": "a4fe1a69268a5dd33c170fcd03c824e7c9980f69",
+          "sha256": "fea3b0a773980092bee567c9f8ee9f06a0622ef6df76d263fb3930f224e9a4fd"
+        },
+        "bookmarks.js?v=1": {
+          "path": "bookmarks.js",
+          "v": "1",
+          "blob": "f0da594ad7da0289304f7501a4ad1933648328bf",
+          "sha256": "7fa5c6d5fd63b6a29d6a41f3bfad0f0b64c7c224b440290f180e9a7c001a53a7"
+        },
+        "cmdrank.js?v=4": {
+          "path": "cmdrank.js",
+          "v": "4",
+          "blob": "f0e05a6bbfb7bbc58529a0936f62948f580772f2",
+          "sha256": "ddbf3080bf4db4c5ec3f381de95f1ee873d9afa38dbcf416f0c1dc65dcbc7cf7"
+        },
+        "config-shape.js?v=2026101803": {
+          "path": "config-shape.js",
+          "v": "2026101803",
+          "blob": "676ef45d8997219cf33b74b67e4f096b203ff326",
+          "sha256": "7d62988a5c2551ac3de80ca4ebaf7953b2c9795d0a02a723043a9388c3baeaf0"
+        },
+        "favicon.svg": {
+          "path": "favicon.svg",
+          "v": "",
+          "blob": "197937edc8ae56179d569c41f75c064e55137a53",
+          "sha256": "a789b39e09ba3f316866538cd2fc5027fc40153b5fa991fdf3e3214c93d92b48"
+        },
+        "fonts/cormorantgaramond-300-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin-ext.woff2",
+          "v": "",
+          "blob": "22f15b749a0e59d4d3a0157d4c3dff41cc167b4a",
+          "sha256": "7e86fb56e35ccb1ecc5d71110d9097ef9132bce69b6a296528f05f25aa1657d2"
+        },
+        "fonts/cormorantgaramond-300-latin.woff2": {
+          "path": "fonts/cormorantgaramond-300-latin.woff2",
+          "v": "",
+          "blob": "3f9e20f3e4a830499d856612122fcb8c72913bdd",
+          "sha256": "8973d65ce70fb03cee5788acbcc36bc9e74bda2227bbef99f26c826514cc79f7"
+        },
+        "fonts/cormorantgaramond-400italic-latin-ext.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin-ext.woff2",
+          "v": "",
+          "blob": "17d37725c8ab840f55af9b53c8464e44652c8ba0",
+          "sha256": "96ec6109d044a8f2b279937499923fc0435db3e6bd91ce4cb1fd806d566378b9"
+        },
+        "fonts/cormorantgaramond-400italic-latin.woff2": {
+          "path": "fonts/cormorantgaramond-400italic-latin.woff2",
+          "v": "",
+          "blob": "d9272649681c0d1843e3b5403b7834e9c6add271",
+          "sha256": "e48e58027030df56869b795ca6f19b7012158275f7ad7cde1900b4a0b68d02e2"
+        },
+        "fonts/fonts.css": {
+          "path": "fonts/fonts.css",
+          "v": "",
+          "blob": "74c1b13c2228d56b0e47282f10961ea0ae45d64f",
+          "sha256": "e73dffe393c02cb64dadbbf2d862ba553706d3866b6f1352faf838a9b58310a0"
+        },
+        "fonts/notoserifsc-400-greet.woff2": {
+          "path": "fonts/notoserifsc-400-greet.woff2",
+          "v": "",
+          "blob": "490bdeec8238190dbd2d081b61006d702d6b4193",
+          "sha256": "e6b758cd97da8039bce727e8cca93760f5fcd00a0c59639f22b20e87f855432e"
+        },
+        "fonts/notoserifsc-500-core.woff2": {
+          "path": "fonts/notoserifsc-500-core.woff2",
+          "v": "",
+          "blob": "633e35c7a71855818c436eaabc97200402a4a6a5",
+          "sha256": "9c94d7e462423e97385e2ae0c53dedda406ce3208900df6b19cfaebe8d08aa62"
+        },
+        "fonts/notoserifsc-500-ext.woff2": {
+          "path": "fonts/notoserifsc-500-ext.woff2",
+          "v": "",
+          "blob": "8a527cc64094700cbd2b12b9e07ca56a2eb94b59",
+          "sha256": "d9a1914da3804f427a6c266ee474b383c3fc4e2b7a3e8daf790c41f7e4db53fd"
+        },
+        "icon-192.png": {
+          "path": "icon-192.png",
+          "v": "",
+          "blob": "001e941588875891a81de64a5894af1c7691886a",
+          "sha256": "03c745a53dc9e8cb0df2a5c6543f7d559eb86d20a8033ba50460952f2ad9dfdf"
+        },
+        "icon-512.png": {
+          "path": "icon-512.png",
+          "v": "",
+          "blob": "71295a919a7b86a0a9e8906fa8dc46963a6dd55a",
+          "sha256": "9d731b2119d331bb3b1cf2a6f0c407318b4d21fb3258b4adb0e1226aedc20aaf"
+        },
+        "midnight.css?v=6": {
+          "path": "midnight.css",
+          "v": "6",
+          "blob": "1da8b211b4d58c637230f25318379efbd899853d",
+          "sha256": "c9f69dfb318bb2863c94ab335d755bb6a10cb36e92d3fc25277f9b25cd78d955"
+        },
+        "midnight.js?v=4": {
+          "path": "midnight.js",
+          "v": "4",
+          "blob": "3ca69370f6a651a093098ecb62eb8710a3cfe84f",
+          "sha256": "71eb4271debde21fe87bc09b28adc5365fba1d29dd937c1505ae9ef46b877138"
+        },
+        "netmode.js?v=1": {
+          "path": "netmode.js",
+          "v": "1",
+          "blob": "8796f9d9b7eca5fd7d47ca08f6bbf48ed2f453d7",
+          "sha256": "58abecc45d8ad185a54939d9a5ba018899675cb3bca6012817fc8020ff438ee0"
+        },
+        "nocturne.js?v=2026112401": {
+          "path": "nocturne.js",
+          "v": "2026112401",
+          "blob": "5d8d5cab7a0cb9ed51a8203cc957a6ec00602b29",
+          "sha256": "f7866c58cb616b8255ecf8d4384f0f4f375587beb73cb1500fc90eb419dae928"
+        },
+        "pinyin.js?v=1": {
+          "path": "pinyin.js",
+          "v": "1",
+          "blob": "cb1c1d0855256256deeee0ab734b88594eaa9a6f",
+          "sha256": "526de132f2c0ce59712b224d332561198c67b9b81fd649c1b5c0d428354ada07"
+        },
+        "site.webmanifest": {
+          "path": "site.webmanifest",
+          "v": "",
+          "blob": "554ca79a331ae7b4d301365de32304b41379f36b",
+          "sha256": "0b7a209907d11c035eb3ade44fd6d2f38b124b8be925ff05e46af82d0103df52"
+        },
+        "spaces.js?v=3": {
+          "path": "spaces.js",
+          "v": "3",
+          "blob": "061943e47dbd996ac14f351cf1fd3c5c2324c4e0",
+          "sha256": "eec74cf67859d385b5bb1e43df484f6e1ec062b66fd339f529fbdf6831f87c18"
+        },
+        "status.js?v=2": {
+          "path": "status.js",
+          "v": "2",
+          "blob": "93187f26731c487a8a8dafcd4597d7bce0d721cb",
+          "sha256": "3490954d5772e853be142cf7875ec35d50f627a01dd10011100c3c8bc29ea04e"
+        },
+        "urlcheck.js?v=3": {
+          "path": "urlcheck.js",
+          "v": "3",
+          "blob": "3881cfd472158cbf41d63389188cb4c224470533",
+          "sha256": "c6b4e27e4e0d4b710d3f84476896667083439916a20400e1d671f01133c6b30a"
+        }
+      }
     }
   ]
 }

@@ -8,11 +8,12 @@ V2.4.0 是日常效率与图标/状态打磨版：后端受 `vetTarget` 防 SSRF
 
 ### 0.1 版本 / 镜像 / digest
 
-正式版发布结果见 [V2.3.0 发布记录](v2.3.0-report.md)（V2.4.0 变更见 [V2.4.0 发布记录](v2.4.0-report.md)，合并发布后登记固定镜像）。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
+正式版发布结果见 [V2.4.0 发布记录](v2.4.0-report.md)。生产使用以下固定镜像；latest/main 跟随正式 main 的最近一次成功构建：
 
 | 版本 | 远端提交 | 镜像（`标签@digest`） | CI |
 |------|---------|-----------------------|----|
-| **[V2.3.0（当前正式版）](v2.3.0-report.md)** | `main@e9a626538ff31e38c12f85ae4686d96a05f46880` | `ghcr.io/sadjdg123/nocturne:sha-e9a6265@sha256:a2b975b0ee17a826dc5a48834c1836ff99a9a0941ec9ad3cf198b80bbb17fdc5` | [42270087352](https://github.com/sadjdg123/nocturne/actions/runs/42270087352)（758/758，双架构） |
+| **[V2.4.0（当前正式版）](v2.4.0-report.md)** | `main@f13c8154c7d10a41ec0e3e7614a7a67ebd696a66` | `ghcr.io/sadjdg123/nocturne:sha-f13c815@sha256:166f8df8fdfe6bc9f4d895b9cefaf6d371f664a514e443ba2d354833976954cd` | [45468532843](https://github.com/sadjdg123/nocturne/actions/runs/45468532843)（766/766，双架构） |
+| **[V2.3.0（上一正式版）](v2.3.0-report.md)** | `main@e9a626538ff31e38c12f85ae4686d96a05f46880` | `ghcr.io/sadjdg123/nocturne:sha-e9a6265@sha256:a2b975b0ee17a826dc5a48834c1836ff99a9a0941ec9ad3cf198b80bbb17fdc5` | [42270087352](https://github.com/sadjdg123/nocturne/actions/runs/42270087352)（758/758，双架构） |
 | **[V2.2.2（上一正式版）](v2.2.2-report.md)** | `main@8015b72fd27e6fb48dbefaf8611bd7a8c62c45a3` | `ghcr.io/sadjdg123/nocturne:sha-8015b72@sha256:a713b191f1543b6132bc367b1331f09146af2eb5e3732a2d1a02f049e5ad8c5d` | [42264318902](https://github.com/sadjdg123/nocturne/actions/runs/42264318902)（750/750，双架构） |
 | **[V2.2.1（上一正式版）](v2.2.1-report.md)** | `main@6e81cf35b74af035ef54ca942f8f8497fc91ac97` | `ghcr.io/sadjdg123/nocturne:sha-6e81cf3@sha256:8971215f644b2b827508061c0aa74ae0f2e0df8354e02c5bbb144c99cf537e24` | [42260299008](https://github.com/sadjdg123/nocturne/actions/runs/42260299008)（748/748，双架构） |
 | **[V2.2.0（上一正式版）](v2.2.0-report.md)** | `main@d0ff57d72158ff5f5452511cff9f04a0dd6a3f67` | `ghcr.io/sadjdg123/nocturne:sha-d0ff57d@sha256:4e7e17972635aa60a71c81871bfe5a15ca8f1129aeda05d2bf36eee22569120e` | [39410720272](https://github.com/sadjdg123/nocturne/actions/runs/39410720272)（746/746，双架构） |
