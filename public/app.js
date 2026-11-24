@@ -170,18 +170,22 @@
     var engines = (st.engines || []).filter(function (e) { return e.on; });
     if (!engines.some(function (e) { return e.id === st.engine; }) && engines[0]) st.engine = engines[0].id;
     $("x-engines").innerHTML = engines.map(function (e) {
-      return '<button type="button" class="x-eng" data-eng="' + esc(e.id) + '" aria-pressed="' + (e.id === st.engine) + '">' + esc(e.name) + "</button>";
+      var kw = enginePrefix(e);
+      return '<button type="button" class="x-eng" data-eng="' + esc(e.id) + '" aria-pressed="' + (e.id === st.engine) + '"' + (kw ? ' title="' + esc(e.name) + '（输入 ' + esc(kw) + ' 空格触发）"' : "") + ">" + esc(e.name) + "</button>";
     }).join("");
+    syncSearchPrefix();
     $("x-groups").style.setProperty("--cols", Math.max(2, Math.min(6, +st.cols || 4)));
     /* V2.0 阶段 2：只渲染当前空间（本机选择）看得见的分组 / 项目；顺序永远是全局顺序。「全部」= 全部分组、全部项目（与 V1.1 相同） */
     var sid = curSpace(), view = SP ? SP.view(state, sid) : state.groups.map(function (g) { return { group: g, items: g.items || [], whole: true }; });
+    var editing = document.body.classList.contains("editing");
     document.body.classList.toggle("has-spaces", !!(SP && SP.list(state).length));
     document.body.setAttribute("data-space", sid);
     $("x-groups").setAttribute("data-space", sid);
     $("x-groups").innerHTML = view.map(function (e) {
       var g = e.group, items = e.items.map(function (i) { return itemHTML(g, i); }).join("");
-      return '<section class="x-group" data-gid="' + esc(g.id) + '"' + (e.whole ? "" : ' data-part="1"') + ' aria-label="' + esc(g.name) + '">' +
-        '<h2 class="x-gtitle"><span class="x-gname">' + esc(g.name) + '</span><span class="x-gcnt" aria-hidden="true">' + e.items.length + " 项</span>" + (e.whole ? (e.hidden ? '<small class="x-gpart">本空间隐藏 ' + e.hidden + " 项</small>" : "") : '<small class="x-gpart">单独添加的项目</small>') + "</h2>" +
+      var col = !editing && isCollapsed(g.id);
+      return '<section class="x-group' + (col ? " is-collapsed" : "") + '" data-gid="' + esc(g.id) + '"' + (e.whole ? "" : ' data-part="1"') + ' aria-label="' + esc(g.name) + '">' +
+        '<h2 class="x-gtitle"' + (editing ? "" : ' data-gcol="1" role="button" tabindex="0" aria-expanded="' + (!col) + '"') + '><span class="x-gname">' + esc(g.name) + '</span><span class="x-gcnt" aria-hidden="true">' + e.items.length + " 项</span>" + (e.whole ? (e.hidden ? '<small class="x-gpart">本空间隐藏 ' + e.hidden + " 项</small>" : "") : '<small class="x-gpart">单独添加的项目</small>') + '<span class="x-gchev" aria-hidden="true">▾</span></h2>' +
         '<div class="' + (g.style === "chip" ? "x-chips" : "x-grid") + '" data-gid="' + esc(g.id) + '">' + items + "</div></section>";
     }).join("") || emptyHTML(sid);
     tick();
@@ -231,6 +235,43 @@
     $("x-toast").addEventListener(t, function () { if (toastHeld && toastHide) { clearTimeout(toastTimer); toastTimer = setTimeout(toastHide, 3000); } toastHeld = false; });
   });
 
+  /* V2.4 · 搜索引擎短触发词（如「gh 关键词」搜 GitHub、「b 关键词」搜百度）+ 搜索框 Tab 快切引擎 */
+  var DEF_KW = { google: "g", bing: "bi", baidu: "b", github: "gh" };
+  function enginePrefix(e) {
+    if (!e || typeof e !== "object") return "";
+    if (typeof e.kw === "string" && /^[a-z0-9]{1,8}$/i.test(e.kw.trim())) return e.kw.trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(DEF_KW, e.id) ? DEF_KW[e.id] : "";
+  }
+  function parseSearch(raw, engines) {
+    var m = /^([a-z0-9]{1,8})\s+([\s\S]*)$/i.exec(String(raw == null ? "" : raw).trimStart());
+    if (!m) return null;
+    var kw = m[1].toLowerCase(), q = m[2].trim();
+    var list = (engines || []).filter(function (e) { return e && e.on; });
+    for (var i = 0; i < list.length; i++) {
+      if (enginePrefix(list[i]) === kw) return { engine: list[i], query: q, prefix: kw };
+    }
+    return null;
+  }
+  function syncSearchPrefix() {
+    var qEl = $("x-q"), box = $("x-engines");
+    if (!qEl || !box) return;
+    var pref = parseSearch(qEl.value, state.settings.engines);
+    var pid = pref ? pref.engine.id : "";
+    box.querySelectorAll("[data-eng]").forEach(function (b) { b.classList.toggle("is-pref", !!pid && b.getAttribute("data-eng") === pid); });
+  }
+  $("x-q").addEventListener("input", syncSearchPrefix);
+  $("x-q").addEventListener("keydown", function (e) {
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.keyCode === 229) return;
+    var engines = (state.settings.engines || []).filter(function (x) { return x.on; });
+    if (engines.length < 2) return;
+    e.preventDefault();
+    var idx = engines.findIndex(function (x) { return x.id === state.settings.engine; });
+    var next = engines[(idx < 0 ? 0 : idx + (e.shiftKey ? engines.length - 1 : 1)) % engines.length];
+    state.settings.engine = next.id;
+    save(); render();
+    $("x-q").focus();
+  });
+
   $("x-engines").addEventListener("click", function (e) {
     var b = e.target.closest("[data-eng]");
     if (!b) return;
@@ -261,12 +302,61 @@
     var q = $("x-q").value.trim();
     if (!q) return;
     var direct = typedUrl(q);
-    if (direct) { window.open(direct, "_blank", "noopener"); $("x-q").value = ""; return; }
-    var eng = state.settings.engines.filter(function (x) { return x.id === state.settings.engine; })[0] || state.settings.engines[0];
+    if (direct) { window.open(direct, "_blank", "noopener"); $("x-q").value = ""; syncSearchPrefix(); return; }
+    var pref = parseSearch(q, state.settings.engines);
+    var eng = (pref && pref.query) ? pref.engine : (state.settings.engines.filter(function (x) { return x.id === state.settings.engine; })[0] || state.settings.engines[0]);
+    var term = (pref && pref.query) ? pref.query : q;
     if (eng && !U.engine(eng.url)) { toast("搜索引擎「" + eng.name + "」的网址模板无效（只支持 http/https）"); return; }
-    if (eng) window.open(eng.url.replace("%s", encodeURIComponent(q)), "_blank", "noopener");
-    $("x-q").value = "";
+    if (eng) window.open(eng.url.replace("%s", encodeURIComponent(term)), "_blank", "noopener");
+    $("x-q").value = ""; syncSearchPrefix();
   });
+
+  /* V2.4 · 分组折叠（本机 localStorage「nocturne.collapsed」，不同步、不触发版本更新） */
+  var COL_KEY = "nocturne.collapsed", colMem = null;
+  function readCollapsed() {
+    var raw = colMem;
+    try { raw = localStorage.getItem(COL_KEY); } catch (e) { /* storage blocked */ }
+    try {
+      var arr = JSON.parse(raw || "[]");
+      return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch (e) { return new Set(); }
+  }
+  function writeCollapsed(set) {
+    var raw = JSON.stringify(Array.from(set));
+    colMem = raw;
+    try { localStorage.setItem(COL_KEY, raw); } catch (e) { /* storage blocked */ }
+  }
+  function isCollapsed(gid) { return readCollapsed().has(String(gid)); }
+  function setCollapsed(gid, on) {
+    gid = String(gid);
+    var set = readCollapsed();
+    if (on) set.add(gid); else set.delete(gid);
+    writeCollapsed(set);
+    var sec = $("x-groups").querySelector('.x-group[data-gid="' + sel(gid) + '"]');
+    if (sec && !document.body.classList.contains("editing")) {
+      sec.classList.toggle("is-collapsed", !!on);
+      var h = sec.querySelector(".x-gtitle[data-gcol]");
+      if (h) h.setAttribute("aria-expanded", String(!on));
+    }
+    return !!on;
+  }
+  function toggleCollapse(gid) { return setCollapsed(gid, !isCollapsed(gid)); }
+  $("x-groups").addEventListener("click", function (e) {
+    if (document.body.classList.contains("editing")) return;
+    var h = e.target.closest && e.target.closest(".x-gtitle[data-gcol]");
+    if (!h) return;
+    var sec = h.closest(".x-group[data-gid]");
+    if (sec) toggleCollapse(sec.getAttribute("data-gid"));
+  });
+  $("x-groups").addEventListener("keydown", function (e) {
+    if (document.body.classList.contains("editing") || (e.key !== "Enter" && e.key !== " ")) return;
+    var h = e.target.closest && e.target.closest(".x-gtitle[data-gcol]");
+    if (!h) return;
+    e.preventDefault();
+    var sec = h.closest(".x-group[data-gid]");
+    if (sec) toggleCollapse(sec.getAttribute("data-gid"));
+  });
+
   function emitOrSoon(evt) {
     var d = { handled: false };
     emit(evt, d);
@@ -295,7 +385,8 @@
     defaults: defaults,
     save: save, commit: commit, undo: undo, render: render,
     on: on, emit: emit, toast: toast,
-    util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U, dict: dict, sel: sel, typedUrl: typedUrl },
+    groups: { isCollapsed: isCollapsed, setCollapsed: setCollapsed, toggleCollapse: toggleCollapse },
+    util: { esc: esc, uid: uid, iconHTML: iconHTML, _fail: iconFail, url: U, dict: dict, sel: sel, typedUrl: typedUrl, enginePrefix: enginePrefix, parseSearch: parseSearch },
     spaces: null
   };
   App.spaces = spacesApi();

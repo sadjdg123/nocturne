@@ -68,6 +68,10 @@
       });
     });
   };
+  /** 一键抓取目标站点 Favicon 并存成 NAS 图标文件（成功返回 "api/icons/<id>"） */
+  A.fetchFavicon = function (url) {
+    return api("POST", "icons/fetch", { url: url }).then(function (d) { return d.url; }, function (e) { if (e.status === 401) expired(); throw e; });
+  };
   /** 导出时把 NAS 上的图标内嵌成 data URL（导入到别的实例 / 纯静态页也能显示）；壁纸文件太大，不内嵌 */
   A.exportState = async function (state) {
     var s = structuredClone(state === undefined ? A.state : state), jobs = [];
@@ -143,8 +147,10 @@
   var statusMap = null, statusWaiters = [];
   function statusReady() { return statusMap ? Promise.resolve(statusMap) : new Promise(function (r) { statusWaiters.push(r); }); }
   A.statusFor = function (it, local) {
+    if (it && it.noProbe === true) return Promise.resolve({ source: "none", reason: "muted" });
     return statusReady().then(function (m) {
       var r = m && Object.prototype.hasOwnProperty.call(m, it.id) ? m[it.id] : null; // 项目 id 可能叫 constructor / __proto__：只认自有属性
+      if (r && r.status === "muted") return { source: "none", reason: "muted" };
       /* 服务器真的探测过：原样交给 status.js 判定（只有这里的 ms / checkedAt 会显示出来） */
       if (r) return { source: "server", up: !!r.up, status: r.status || (r.up ? "up" : "down"), ms: typeof r.ms === "number" ? r.ms : null, checkedAt: r.checkedAt || null, code: r.code || null, auth: !!r.auth, ok: !!r.up, blocked: r.status === "blocked" };
       return local(); // 服务器还没检测过（刚添加的项目）：先用浏览器探测
@@ -170,6 +176,15 @@
       statusMap = m || {};
       var w = statusWaiters; statusWaiters = []; w.forEach(function (f) { f(statusMap); });
       return statusMap;
+    }, function (e) { if (e.status === 401) expired(); throw e; });
+  };
+  /** 主动触发 NAS 执行一轮新的状态检测（带服务端冷却防抖）。resolve 为 { ok, cached, cooldownSec?, status } */
+  A.triggerRecheck = function () {
+    if (!N.user) return Promise.reject(new Error("未登录"));
+    return api("POST", "status/recheck", {}).then(function (d) {
+      statusMap = (d && d.status) || {};
+      var w = statusWaiters; statusWaiters = []; w.forEach(function (f) { f(statusMap); });
+      return d;
     }, function (e) { if (e.status === 401) expired(); throw e; });
   };
 

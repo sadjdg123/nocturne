@@ -13,9 +13,12 @@
   else root.NocturneRank = api;
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
+  var PY = (typeof module === "object" && module.exports)
+    ? (function () { try { return require("./pinyin.js"); } catch (e) { return null; } })()
+    : (typeof self !== "undefined" ? self.NocturnePinyin : null);
   function norm(s) { return String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim(); }
   function tight(s) { return norm(s).replace(/ /g, ""); }
-  /** 子串 / 子序列匹配：{s:分数, hits:[字符下标]} 或 null。下标按 Array.from(text) 计（中文、emoji 安全） */
+  /** 子串 / 子序列匹配（含中文拼音首字母回退）：{s:分数, hits:[字符下标]} 或 null。下标按 Array.from(text) 计（中文、emoji 安全） */
   function match(text, q) {
     var chars = Array.from(String(text == null ? "" : text)), t = chars.map(function (c) { return c.toLowerCase(); }), qq = Array.from(norm(q));
     if (!qq.length) return { s: 0, hits: [] };
@@ -34,8 +37,10 @@
     for (k = 0; k < t.length && jj < qs.length; k++) {
       if (t[k] === qs[jj]) { if (last > -1) gaps += k - last - 1; hits.push(k); last = k; jj++; }
     }
-    if (jj < qs.length || !qs.length) return null;
-    return { s: Math.max(1, 60 - gaps * 3 - hits[0]), hits: hits, sub: false };
+    if (jj === qs.length && qs.length) return { s: Math.max(1, 60 - gaps * 3 - hits[0]), hits: hits, sub: false };
+    var py = PY && PY.match ? PY.match(text, q) : null;
+    if (py) return { s: py.s, hits: py.hits, sub: py.sub, prefix: py.prefix, exact: py.exact, pinyin: true };
+    return null;
   }
   /**
    * 给一个项目打分。urls：要参与匹配的地址（当前推荐地址、内网、外网）。
@@ -53,15 +58,19 @@
     var best = null;
     al.forEach(function (a) {
       var na = norm(a), ta = tight(a);
-      if (na === nq || ta === tq) { if (!best || best.b < 1) best = { b: 1, a: a }; }
-      else if ((na.indexOf(nq) === 0 || (ta && tq && ta.indexOf(tq) === 0)) && !best) best = { b: 0, a: a };
+      if (na === nq || ta === tq) { if (!best || best.b < 2) best = { b: 2, a: a }; }
+      else if ((na.indexOf(nq) === 0 || (ta && tq && ta.indexOf(tq) === 0)) && (!best || best.b < 1)) best = { b: 1, a: a };
+      else if (!best && PY && PY.match) {
+        var pm = PY.match(a, nq);
+        if (pm && pm.prefix) best = { b: 0, a: a };
+      }
     });
     if (best) return { tier: 3, b: best.b, s: 500, hits: mt ? mt.hits : [], alias: best.a };
-    if (mt) return { tier: 2, b: mt.sub ? 1 : 0, s: mt.s, hits: mt.hits };
+    if (mt) return { tier: 2, b: mt.pinyin ? (mt.prefix ? 1 : 0) : (mt.sub ? 2 : 0), s: mt.s, hits: mt.hits };
     var md = match(item.desc, nq), mu = null;
     (urls || []).forEach(function (u) { var m = u ? match(u, nq) : null; if (m && (!mu || m.s > mu.s)) mu = m; });
     var am = null;
-    al.forEach(function (a) { var m = match(a, nq); if (m && m.sub && (!am || m.s > am.s)) am = { s: m.s, a: a }; }); // 别名中间包含：也算低一档的命中
+    al.forEach(function (a) { var m = match(a, nq); if (m && m.sub && (!am || m.s > am.s)) am = { s: m.s, a: a }; }); // 别名中间包含 / 拼音首字母：也算低一档的命中
     var s = Math.max(md ? md.s * 1.5 : 0, mu ? mu.s : 0, am ? am.s : 0);
     if (s > 0) return { tier: 1, b: 0, s: s, hits: [], alias: am && (!md || am.s >= md.s * 1.5) && (!mu || am.s >= mu.s) ? am.a : undefined };
     return null;

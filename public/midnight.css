@@ -743,4 +743,11 @@ html[data-ui="v2"] .x-offl ul { max-height: 136px; overflow-y: auto; overscroll-
   html[data-ui="v2"][data-mcols="4"] body.editing .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile:not(.x-ghost) { outline: none; }
   html[data-ui="v2"][data-mcols="4"] body.editing .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile:not(.x-ghost) > .x-ic { outline: 1px dashed rgba(231, 180, 103, .6); outline-offset: 2px; }
   html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) .x-tile > .x-ebadge { top: -14px; left: calc(50% - 46px); }
+  html[data-ui="v2"][data-mcols="4"] .x-groups:not([data-density="poster"]):not([data-density="compact"]) > .x-group.is-collapsed:has(> .x-grid) > .x-gtitle { margin-bottom: 0; }
 }
+
+/* ============================================================ V2.4 · 折叠分组与桌面右键菜单的 Midnight 细节 */
+html[data-ui="v2"] .x-groups[data-density="compact"] .x-group.is-collapsed:has(> .x-grid) > .x-gtitle { border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+html[data-ui="v2"] .x-group.is-collapsed > .x-gtitle { margin-bottom: 0; }
+html[data-ui="v2"] .x-gtitle .x-gchev { align-self: center; color: var(--mn-mist); }
+html[data-ui="v2"] .x-ctx { background: rgba(15, 20, 31, .92); border-color: var(--mn-line); }

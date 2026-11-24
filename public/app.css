@@ -357,4 +357,39 @@ body.editing .x-dock { display: none; }
 .x-sr { position: absolute; top: 0; left: 0; width: max-content; max-width: 90vw; height: auto; padding: 0; margin: 0; overflow: visible;
   clip: rect(0 0 0 0); clip-path: inset(50%); border: 0; font-size: 12px; line-height: 1.4; pointer-events: none; z-index: -1; }
 @media (prefers-reduced-motion: no-preference) { .x-tile > .dot.checking { animation: x-pulse 1.2s ease-in-out infinite; } }
-@media (prefers-reduced-motion: reduce) { .x-ring .fg, .x-rt { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .x-ring .fg, .x-rt, .x-gchev, .x-rechk { transition: none; animation: none; } }
+
+/* V2.4 · 分组折叠、抓取图标、单项目不检测、头部离线列表与即时重测 */
+.x-eng.is-pref { color: var(--x-amber); }
+.x-gtitle[data-gcol] { cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
+.x-gtitle[data-gcol]:focus-visible { outline: 2px solid var(--x-amber); outline-offset: 4px; border-radius: 8px; }
+.x-gchev { order: 3; flex: none; margin-left: auto; font: 400 13px/1 var(--x-ui); color: var(--x-mist); opacity: .52; transition: transform .2s ease, opacity .2s ease; }
+.x-gtitle[data-gcol]:hover .x-gchev { opacity: .95; }
+.x-group.is-collapsed > .x-gtitle { margin-bottom: 0; }
+.x-group.is-collapsed > .x-gtitle .x-gchev { transform: rotate(-90deg); opacity: .88; }
+.x-group.is-collapsed > .x-grid, .x-group.is-collapsed > .x-chips { display: none; }
+body.editing .x-gchev { display: none; }
+.x-uprow { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
+.x-favbtn { border: 1px solid var(--x-line); color: var(--x-text); }
+.x-favbtn:hover:not(:disabled) { border-color: rgba(233, 178, 106, .45); color: var(--x-amber); }
+.x-favbtn:disabled { opacity: .5; cursor: default; }
+.x-linkbtn { border: 0; padding: 0; background: none; color: var(--x-amber); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.x-linkbtn:disabled { opacity: .5; cursor: default; }
+.x-is-tg { padding: 0 2px; min-height: 44px; font-size: 15px; }
+.x-tile > .dot.muted { display: none; }
+.x-card-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; }
+.x-card-h h2 { margin: 0; }
+.x-rechk { flex: none; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 50%; background: none; color: var(--x-mist);
+  font: 400 16px/1 var(--x-ui); cursor: pointer; display: grid; place-items: center; transition: color .2s ease, background .2s ease, border-color .2s ease; }
+.x-rechk:hover { color: var(--x-text); background: rgba(255, 255, 255, .07); border-color: var(--x-line); }
+.x-rechk:disabled { opacity: .45; cursor: default; }
+@keyframes x-spin { to { transform: rotate(360deg); } }
+.x-rechk.is-spin { animation: x-spin .9s linear infinite; }
+.x-netm { max-height: calc(100dvh - 80px); overflow-y: auto; overscroll-behavior: contain; }
+.x-netm-sep { height: 1px; margin: 6px 6px; background: var(--x-line); }
+.x-netm-sec { padding: 4px 12px; font: 500 11.5px/1.4 var(--x-ui); color: #E8806E; letter-spacing: .06em; }
+.x-netm-off { display: grid; gap: 2px; max-height: 156px; overflow-y: auto; overscroll-behavior: contain; }
+.x-netm-off a { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 4px 12px; border-radius: 10px; color: #EBC9C2; text-decoration: none; font: 400 14px/1.3 var(--x-ui); }
+.x-netm-off a:hover, .x-netm-off a:focus-visible { background: rgba(226, 109, 90, .14); outline: none; }
+.x-netm-off i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: #E26D5A; }
+.x-netm-off span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
